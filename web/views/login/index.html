@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title langtag="title-login"></title>
+
+    <!-- Mainly scripts -->
+    <!-- Latest compiled and minified CSS -->
+    <link href="{{.web_base_url}}/static/css/fontawesome.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/solid.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/bootstrap.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/style.css?v={{.version}}" rel="stylesheet">
+
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="{{.web_base_url}}/static/js/jquery-3.4.1.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/bootstrap.min.js?v={{.version}}"></script>
+    <!-- Latest compiled and minified Locales -->
+    <script src="{{.web_base_url}}/static/js/language.js?v={{.version}}" type="text/javascript"></script>
+
+</head>
+
+<body class="gray-bg">
+<div class="row">
+    <nav class="navbar navbar-static-top" role="navigation" style="margin: 16px 40px;display:flex;justify-content:flex-end;">
+        <span class="btn-group dropdown">
+                <button id="languagemenu" class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown"
+                        aria-haspopup="true" aria-expanded="false"><i
+                            class="fa fa-globe-asia fa-lg"></i><span></span></button>
+                <ul class="dropdown-menu"></ul>
+            </span>
+    </nav>
+</div>
+<div class="loginColumns animated fadeInDown px-5">
+    <div class="row justify-content-center" style="min-height:calc(100vh - 100px);display:flex;flex-direction:column;justify-content:center;align-items:center;">
+
+        <div class="col-md-6 mt-4" style="max-width:480px;">
+            <div class="ibox-content" style="padding:40px 40px 30px;">
+                <h2 class="text-center font-bold" style="color:#676a6c;margin:0 0 28px;white-space:nowrap;font-size:28px;" langtag="application"></h2>
+                <form class="m-t" onsubmit="return false">
+                    <div class="form-group">
+                        <input name="username" class="form-control input-lg" placeholder="username" required=""
+                               langtag="word-username" style="height:48px;font-size:16px;">
+                    </div>
+                    <div class="form-group">
+                        <input name="password" type="password" class="form-control input-lg" placeholder="password" required=""
+                               langtag="word-password" style="height:48px;font-size:16px;">
+                    </div>
+                    {{if eq true .captcha_open}}
+                        <div class="form-group">
+                            {{create_captcha}}
+                            <input name="captcha" class="form-control" placeholder="captcha" required=""
+                                   langtag="word-captcha">
+                        </div>
+                    {{end}}
+                    <button onclick="login()" class="btn btn-primary block full-width m-b"
+                            langtag="word-login" style="height:48px;font-size:17px;"></button>
+                    {{if eq true .register_allow}}
+                        <p class="text-muted text-center"><small langtag="info-noaccount"></small></p>
+                        <a class="btn btn-sm btn-white btn-block" href="{{.web_base_url}}/login/register"
+                           langtag="word-register"></a>
+                    {{end}}
+                </form>
+            </div>
+        </div>
+
+        <div class="col-md-12 mt-5 text-center">
+            <h3 langtag="info-tagline"></h3>
+            <div style="max-width:480px;margin:24px auto 0;text-align:left;">
+                <h4 style="color:#1ab394;font-weight:600;margin-bottom:6px;">隧道</h4>
+                <ul style="font-size:14px;line-height:1.9;margin-bottom:16px;">
+                    <li>TLS 全程加密</li>
+                    <li>HTTP / SOCKS5 代理：带账号密码，安全出网</li>
+                    <li>TCP / UDP 隧道：SSH、远程桌面、任意端口，公网直达内网设备</li>
+                </ul>
+                <h4 style="color:#1ab394;font-weight:600;margin-bottom:6px;">管理</h4>
+                <ul style="font-size:14px;line-height:1.9;margin-bottom:16px;">
+                    <li>实时展示在线状态、隧道数、流量与带宽统计</li>
+                    <li>软路由与服务器，无公网也能远程管控，服务端与客户端一键互通</li>
+                </ul>
+                <h4 style="color:#1ab394;font-weight:600;margin-bottom:6px;">部署</h4>
+                <ul style="font-size:14px;line-height:1.9;">
+                    <li>添加客户端 → 复制部署命令 → 自动建立隧道，三步接入</li>
+                    <li>OpenWrt / Linux / Windows 一键安装，注册为系统服务静默运行</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <hr/>
+    <div class="footer" style="position: unset;">
+        <div class="text-center text-muted">© 2026 <span langtag="application"></span> · 无公网设备静默管理平台</div>
+    </div>
+</div>
+
+</body>
+</html>
+
+
+<script type="text/javascript">
+    window.nps = {"web_base_url": {{.web_base_url}}, "version": "{{.version}}" }
+
+    // Login Page Flipbox control
+    function login() {
+        $.ajax({
+            type: "POST",
+            url: "{{.web_base_url}}/login/verify",
+            data: $("form").serializeArray(),
+            success: function (res) {
+                if (res.status) {
+                    window.location.href = "{{.web_base_url}}/index/index"
+                } else {
+                    alert(res.msg)
+                }
+            }
+        })
+        return false
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.26.38"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.26.38",
+			"CompanyName": "NPS",
+			"FileDescription": "NPS 客户端",
+			"LegalCopyright": "Copyright © 2026 NPS",
+			"ProductName": "NPS Client",
+			"Comments": "NPS 客户端"
+		}
+	}
+}
