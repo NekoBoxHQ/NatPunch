@@ -1,0 +1,241 @@
+package file
+
+import (
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"ehang.io/nps/lib/rate"
+	"github.com/pkg/errors"
+)
+
+type Flow struct {
+	ExportFlow int64
+	InletFlow  int64
+	FlowLimit  int64
+	sync.RWMutex
+}
+
+func (s *Flow) Add(in, out int64) {
+	s.Lock()
+	defer s.Unlock()
+	s.InletFlow += int64(in)
+	s.ExportFlow += int64(out)
+}
+
+type Config struct {
+	U        string
+	P        string
+	Compress bool
+	Crypt    bool
+}
+
+type Client struct {
+	Cnf             *Config
+	Id              int        //id
+	VerifyKey       string     //verify key
+	Addr            string     // client egress address as seen by server (RemoteAddr)
+	LocalAddr       string     // client private/LAN addresses reported by npc
+	Remark          string     //remark
+	Status          bool       //is allow connect
+	IsConnect       bool       //is the client connect
+	RateLimit       int        //rate /kb
+	Flow            *Flow      //flow setting
+	Rate            *rate.Rate //rate limit
+	NoStore         bool       //no store to file
+	NoDisplay       bool       //no display on web
+	MaxConn         int        //the max connection num of client allow
+	NowConn         int32      //the connection num of now
+	WebUserName     string     //the username of web login
+	WebPassword     string     //the password of web login
+	ConfigConnAllow bool       //is allow connected by config file
+	MaxTunnelNum    int
+	Version         string
+	BlackIpList     []string
+	CreateTime      string
+	LastOnlineTime  string
+	IpWhite         bool     // 是否启用ip白名单
+	IpWhitePass     string   // ip授权密码
+	IpWhiteList     []string // ip白名单
+	ExpireTime      string   // 到期时间,留空表示永不过期,格式 2006-01-02 15:04:05
+	sync.RWMutex
+}
+
+func NewClient(vKey string, noStore bool, noDisplay bool) *Client {
+	return &Client{
+		Cnf:       new(Config),
+		Id:        0,
+		VerifyKey: vKey,
+		Addr:      "",
+		LocalAddr: "",
+		Remark:    "",
+		Status:    true,
+		IsConnect: false,
+		RateLimit: 0,
+		Flow:      new(Flow),
+		Rate:      nil,
+		NoStore:   noStore,
+		RWMutex:   sync.RWMutex{},
+		NoDisplay: noDisplay,
+	}
+}
+
+func (s *Client) CutConn() {
+	atomic.AddInt32(&s.NowConn, 1)
+}
+
+func (s *Client) AddConn() {
+	atomic.AddInt32(&s.NowConn, -1)
+}
+
+func (s *Client) GetConn() bool {
+	if s.MaxConn == 0 || int(s.NowConn) < s.MaxConn {
+		s.CutConn()
+		return true
+	}
+	return false
+}
+
+func (s *Client) HasTunnel(t *Tunnel) (exist bool) {
+	GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
+		v := value.(*Tunnel)
+		if v.Client.Id == s.Id && v.Port == t.Port && t.Port != 0 {
+			exist = true
+			return false
+		}
+		return true
+	})
+	return
+}
+
+func (s *Client) GetTunnelNum() (num int) {
+	GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
+		v := value.(*Tunnel)
+		if v.Client.Id == s.Id {
+			num++
+		}
+		return true
+	})
+
+	GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
+		v := value.(*Host)
+		if v.Client.Id == s.Id {
+			num++
+		}
+		return true
+	})
+	return
+}
+
+func (s *Client) HasHost(h *Host) bool {
+	var has bool
+	GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
+		v := value.(*Host)
+		if v.Client.Id == s.Id && v.Host == h.Host && h.Location == v.Location {
+			has = true
+			return false
+		}
+		return true
+	})
+	return has
+}
+
+type Tunnel struct {
+	Id           int
+	Port         int
+	ServerIp     string
+	Mode         string
+	Status       bool
+	RunStatus    bool
+	Client       *Client
+	Ports        string
+	Flow         *Flow
+	Password     string
+	Remark       string
+	TargetAddr   string
+	NoStore      bool
+	LocalPath    string
+	StripPre     string
+	ProtoVersion string
+	Target       *Target
+	MultiAccount *MultiAccount
+	Health
+	sync.RWMutex
+}
+
+type Health struct {
+	HealthCheckTimeout  int
+	HealthMaxFail       int
+	HealthCheckInterval int
+	HealthNextTime      time.Time
+	HealthMap           map[string]int
+	HttpHealthUrl       string
+	HealthRemoveArr     []string
+	HealthCheckType     string
+	HealthCheckTarget   string
+	sync.RWMutex
+}
+
+type Host struct {
+	Id           int
+	Host         string //host
+	HeaderChange string //header change
+	HostChange   string //host change
+	Location     string //url router
+	Remark       string //remark
+	Scheme       string //http https all
+	CertFilePath string
+	KeyFilePath  string
+	NoStore      bool
+	IsClose      bool
+	AutoHttps    bool // 自动https
+	Flow         *Flow
+	Client       *Client
+	Target       *Target //目标
+	Health       `json:"-"`
+	sync.RWMutex
+}
+
+type Target struct {
+	nowIndex   int
+	TargetStr  string
+	TargetArr  []string
+	LocalProxy bool
+	sync.RWMutex
+}
+
+type MultiAccount struct {
+	AccountMap map[string]string // multi account and pwd
+}
+
+func (s *Target) GetRandomTarget() (string, error) {
+	s.Lock()
+	if s.TargetArr == nil {
+		arr := strings.Split(s.TargetStr, "\n")
+		s.TargetArr = make([]string, 0, len(arr))
+		for _, v := range arr {
+			v = strings.TrimRight(v, "\r")
+			if v != "" {
+				s.TargetArr = append(s.TargetArr, v)
+			}
+		}
+	}
+	if len(s.TargetArr) == 0 {
+		s.Unlock()
+		return "", errors.New("all inward-bending targets are offline")
+	}
+	if s.nowIndex >= len(s.TargetArr)-1 {
+		s.nowIndex = -1
+	}
+	s.nowIndex++
+	addr := s.TargetArr[s.nowIndex]
+	s.Unlock()
+	return addr, nil
+}
+
+type Glob struct {
+	BlackIpList []string
+	ServerUrl   string
+	sync.RWMutex
+}
