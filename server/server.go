@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	stdnet "net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -517,6 +518,10 @@ func GetDashboardData() map[string]interface{} {
 		}
 		conn.Close()
 	}
+	// 如果是内网 IP（NAT 环境），调外部 API 取公网 IP
+	if isPrivateIP(localV4) {
+		localV4 = getPublicIPFromAPI()
+	}
 	// 获取本机 IPv6（全局单播）
 	if addrs, err := stdnet.InterfaceAddrs(); err == nil {
 		for _, addr := range addrs {
@@ -593,4 +598,57 @@ func flowSession(m time.Duration) {
 			}
 		}
 	})
+}
+
+// isPrivateIP 判断是否为内网 IP
+func isPrivateIP(ip string) bool {
+	if ip == "" {
+		return true
+	}
+	return strings.HasPrefix(ip, "10.") ||
+		strings.HasPrefix(ip, "172.16.") ||
+		strings.HasPrefix(ip, "172.17.") ||
+		strings.HasPrefix(ip, "172.18.") ||
+		strings.HasPrefix(ip, "172.19.") ||
+		strings.HasPrefix(ip, "172.2") ||
+		strings.HasPrefix(ip, "172.30.") ||
+		strings.HasPrefix(ip, "172.31.") ||
+		strings.HasPrefix(ip, "192.168.") ||
+		strings.HasPrefix(ip, "127.")
+}
+
+// getPublicIPFromAPI 调外部 API 获取公网 IP
+func getPublicIPFromAPI() string {
+	urls := []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+		"http://ip.3322.net",
+		"https://myip.ipip.net",
+	}
+	client := http.Client{Timeout: 5 * time.Second}
+	for _, u := range urls {
+		if resp, err := client.Get(u); err == nil {
+			buf := make([]byte, 128)
+			n, _ := resp.Body.Read(buf)
+			resp.Body.Close()
+			if n > 0 {
+				raw := strings.TrimSpace(string(buf[:n]))
+				// 提取 IP（处理 "当前 IP：x.x.x.x" 这种格式）
+				ip := ""
+				for _, f := range strings.Fields(raw) {
+					if strings.Count(f, ".") == 3 {
+						ip = strings.TrimRight(f, "():，。 ")
+						break
+					}
+				}
+				if ip == "" {
+					ip = raw
+				}
+				if !isPrivateIP(ip) && ip != "" {
+					return ip
+				}
+			}
+		}
+	}
+	return ""
 }
