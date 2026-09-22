@@ -1,6 +1,5 @@
 #!/bin/sh
 # 卸载 NatPunch 客户端（不影响同机服务端）
-# 用法: sh uninstall-client.sh
 SERVER_BIN="/opt/natpunch/natpunch"
 SERVER_INIT="/etc/init.d/natpunch-server"
 SERVER_SYSTEMD="/etc/systemd/system/natpunch-server.service"
@@ -18,13 +17,7 @@ SERVER_PRESENT=0
 [ -f "$SERVER_BIN" ] && SERVER_PRESENT=1
 [ -f "$SERVER_INIT" ] && SERVER_PRESENT=1
 [ -f "$SERVER_SYSTEMD" ] && SERVER_PRESENT=1
-if [ "$SERVER_PRESENT" = "1" ]; then
-    log "检测到服务端存在，将以'不影响服务端'模式卸载客户端"
-else
-    log "未检测到服务端，按独立客户端卸载"
-fi
-# ---------- 1. 精确识别客户端进程 ----------
-log "查找客户端进程 ..."
+# 1. 精确识别并结束客户端进程
 CLIENT_PIDS=""
 if [ -d /proc ]; then
     for d in /proc/[0-9]*; do
@@ -37,9 +30,7 @@ if [ -d /proc ]; then
         esac
         cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
         case "$cmd" in
-            *" -vkey="*)
-                CLIENT_PIDS="$CLIENT_PIDS $p"
-                ;;
+            *" -vkey="*) CLIENT_PIDS="$CLIENT_PIDS $p" ;;
         esac
     done
 else
@@ -60,23 +51,19 @@ if [ -f /opt/natpunch/natpunch.pid ]; then
     esac
 fi
 if [ -n "$CLIENT_PIDS" ]; then
-    log "结束客户端进程:$CLIENT_PIDS"
     kill $CLIENT_PIDS 2>/dev/null
     sleep 1
     for p in $CLIENT_PIDS; do
         [ -d "/proc/$p" ] && kill -9 "$p" 2>/dev/null
     done
     sleep 1
-else
-    log "未发现运行中的客户端进程"
 fi
-# ---------- 2. 停止/删除客户端自启 ----------
-if [ -f "$CLIENT_INIT" ]; then
-    log "移除客户端 init 脚本: $CLIENT_INIT"
+# 2. 停止/删除客户端自启
+[ -f "$CLIENT_INIT" ] && {
     "$CLIENT_INIT" stop 2>/dev/null || true
     "$CLIENT_INIT" disable 2>/dev/null || true
     rm -f "$CLIENT_INIT"
-fi
+}
 rm -f /etc/rc.d/*natpunch 2>/dev/null
 for f in /etc/rc.d/S??natpunch /etc/rc.d/K??natpunch /etc/rc*.d/S??natpunch /etc/rc*.d/K??natpunch; do
     [ -e "$f" ] || continue
@@ -88,7 +75,6 @@ for f in /etc/rc.d/S??natpunch /etc/rc.d/K??natpunch /etc/rc*.d/S??natpunch /etc
 done
 if command -v systemctl >/dev/null 2>&1; then
     if [ -f "$CLIENT_SYSTEMD_1" ] || [ -f "$CLIENT_SYSTEMD_2" ]; then
-        log "移除客户端 systemd unit"
         systemctl stop natpunch 2>/dev/null || true
         systemctl disable natpunch 2>/dev/null || true
         rm -f "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"
@@ -114,7 +100,7 @@ if [ -f "$HOME/Library/LaunchAgents/com.natpunch.client.plist" ]; then
     launchctl unload "$HOME/Library/LaunchAgents/com.natpunch.client.plist" 2>/dev/null || true
     rm -f "$HOME/Library/LaunchAgents/com.natpunch.client.plist"
 fi
-# ---------- 3. 清理 rc.local ----------
+# 3. 清理 rc.local
 if [ -f /etc/rc.local ]; then
     cp -f /etc/rc.local /etc/rc.local.natpunch-client.bak 2>/dev/null || true
     if sed --version >/dev/null 2>&1; then
@@ -130,8 +116,7 @@ if [ -f /etc/rc.local ]; then
         fi
     fi
 fi
-# ---------- 4. 删除客户端配置 ----------
-log "删除客户端配置 ..."
+# 4. 删除客户端配置
 rm -f "$CLIENT_CONF_1" "$CLIENT_CONF_2" "$CLIENT_CONF_3"
 if [ -d /etc/natpunch ]; then
     if [ ! -f /etc/natpunch/natpunch ] && [ ! -f /etc/natpunch/conf/natpunch.conf ]; then
@@ -147,17 +132,13 @@ if [ -d /usr/local/etc/natpunch ]; then
         warn "/usr/local/etc/natpunch 目录含服务端文件，跳过删除"
     fi
 fi
-# ---------- 5. 删除客户端二进制 ----------
-if [ "$SERVER_PRESENT" = "1" ]; then
-    log "服务端存在，保留 $CLIENT_BIN_1 $CLIENT_BIN_2"
-else
-    log "未检测到服务端，删除客户端二进制"
+# 5. 删除客户端二进制
+if [ "$SERVER_PRESENT" = "0" ]; then
     rm -f "$CLIENT_BIN_1" "$CLIENT_BIN_2"
 fi
-# ---------- 6. 清理日志 ----------
+# 6. 清理日志
 rm -f /tmp/natpunch.log /var/log/natpunch.log /tmp/natpunch 2>/dev/null || true
-# ---------- 7. 复查 ----------
-log "复查残留客户端进程 ..."
+# 7. 复查
 REMAIN=0
 if [ -d /proc ]; then
     for d in /proc/[0-9]*; do
@@ -170,7 +151,7 @@ if [ -d /proc ]; then
         esac
         cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
         case "$cmd" in
-            *" -vkey="*) REMAIN=1; echo "  残留 PID $p: $cmd" ;;
+            *" -vkey="*) REMAIN=1; echo "残留 PID $p: $cmd" ;;
         esac
     done
 fi
@@ -179,5 +160,4 @@ if [ "$REMAIN" = "1" ]; then
     exit 1
 fi
 log "客户端已卸载完成"
-[ "$SERVER_PRESENT" = "1" ] && log "服务端未被触碰（$SERVER_BIN 仍在运行）"
 exit 0
