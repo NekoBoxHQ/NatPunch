@@ -2,7 +2,7 @@
 # NatPunch 客户端一键安装（加固版）
 # 用法: sh install.sh --openwrt VKEY SERVER [PORT] [TLS_FLAG]
 set -u
-REPO="lima-droid/NatPunch"
+REPO="internetdroid/NatPunch"
 FALLBACK_VER="v26.9.3"
 VKEY="${2:-}"
 SERVER="${3:-}"

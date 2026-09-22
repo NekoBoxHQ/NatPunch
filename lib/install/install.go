@@ -176,7 +176,7 @@ func UpdateNpsNew() {
 }
 
 func fetchLatestVersion() (string, error) {
-	resp, err := http.Get("https://api.github.com/repos/lima-droid/nps/releases/latest")
+	resp, err := http.Get("https://api.github.com/repos/internetdroid/nps/releases/latest")
 	if err != nil {
 		return "", err
 	}
@@ -263,7 +263,7 @@ func downloadLatest2(bin string, path string) (string, error) {
 // downloadAndUnpack fetches the latest release package for the current OS/arch.
 // Releases ship as .tar.gz (see build.assets.sh / release.yml).
 func downloadAndUnpack(bin, unpackPath string) (string, error) {
-	data, err := http.Get("https://api.github.com/repos/lima-droid/nps/releases/latest")
+	data, err := http.Get("https://api.github.com/repos/internetdroid/nps/releases/latest")
 	if err != nil {
 		return "", err
 	}
@@ -285,7 +285,7 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	ver := rl.TagName
 	fmt.Println("the latest version is", ver)
 	filename := runtime.GOOS + "_" + runtime.GOARCH + "_" + bin + ".tar.gz"
-	downloadUrl := fmt.Sprintf("https://github.com/lima-droid/nps/releases/download/%s/%s", ver, filename)
+	downloadUrl := fmt.Sprintf("https://github.com/internetdroid/nps/releases/download/%s/%s", ver, filename)
 	fmt.Println("download package from ", downloadUrl)
 	resp, err := http.Get(downloadUrl)
 	if err != nil {
