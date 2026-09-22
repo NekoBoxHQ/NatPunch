@@ -1,0 +1,83 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            type: server
+          - goos: linux
+            goarch: arm64
+            type: server
+          - goos: linux
+            goarch: amd64
+            type: client
+          - goos: linux
+            goarch: arm64
+            type: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        env:
+          CGO_ENABLED: 0
+          GOPROXY: https://goproxy.cn,direct
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mkdir -p out
+          if [ "${{ matrix.type }}" = "server" ]; then
+            go build -ldflags "-s -w -extldflags -static -X ehang.io/nps/lib/version.VERSION=$TAG" \
+              -o out/natpunch ./cmd/nps/nps.go
+            mkdir -p pkg
+            cp out/natpunch pkg/natpunch
+            cp -r conf pkg/conf
+            cp -r web pkg/web
+            cd pkg
+            tar -czf ../natpunch_${{ matrix.goos }}_${{ matrix.goarch }}_server.tar.gz .
+          else
+            go build -ldflags "-s -w -extldflags -static" \
+              -o out/natpunch ./cmd/npc/npc.go
+            tar -czf natpunch_${{ matrix.goos }}_${{ matrix.goarch }}_client.tar.gz -C out natpunch
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: natpunch_${{ matrix.goos }}_${{ matrix.goarch }}_${{ matrix.type }}
+          path: |
+            *.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect tarballs
+        run: |
+          mkdir -p dist
+          find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
+          ls -la dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
