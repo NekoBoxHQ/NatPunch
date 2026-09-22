@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	stdnet "net"
+	"context"
 	"net/http"
 	"os"
 	"strconv"
@@ -512,9 +513,10 @@ func GetDashboardData() map[string]interface{} {
 	data["flowStoreInterval"] = beego.AppConfig.String("flow_store_interval")
 	// 获取公网 IPv4（UDP dial 出口地址法）
 	localV4, localV6 := "", ""
-	if conn, err := stdnet.Dial("udp", "8.8.8.8:80"); err == nil {
-		if udpAddr, ok := conn.LocalAddr().(*stdnet.UDPAddr); ok {
-			localV4 = udpAddr.IP.String()
+	// 强制 IPv4 dial
+	if conn, err := stdnet.Dial("tcp4", "8.8.8.8:80"); err == nil {
+		if tcpAddr, ok := conn.LocalAddr().(*stdnet.TCPAddr); ok {
+			localV4 = tcpAddr.IP.String()
 		}
 		conn.Close()
 	}
@@ -617,15 +619,22 @@ func isPrivateIP(ip string) bool {
 		strings.HasPrefix(ip, "127.")
 }
 
-// getPublicIPFromAPI 调外部 API 获取公网 IP
+// getPublicIPFromAPI 调外部 API 获取公网 IPv4
 func getPublicIPFromAPI() string {
 	urls := []string{
 		"https://api.ipify.org",
 		"https://ifconfig.me/ip",
+		"http://ipv4.icanhazip.com",
 		"http://ip.3322.net",
-		"https://myip.ipip.net",
 	}
-	client := http.Client{Timeout: 5 * time.Second}
+	// 强制 IPv4 连接
+	dialer := &stdnet.Dialer{Timeout: 5 * time.Second}
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (stdnet.Conn, error) {
+			return dialer.DialContext(ctx, "tcp4", addr)
+		},
+	}
+	client := http.Client{Timeout: 5 * time.Second, Transport: tr}
 	for _, u := range urls {
 		if resp, err := client.Get(u); err == nil {
 			buf := make([]byte, 128)
@@ -633,18 +642,16 @@ func getPublicIPFromAPI() string {
 			resp.Body.Close()
 			if n > 0 {
 				raw := strings.TrimSpace(string(buf[:n]))
-				// 提取 IP（处理 "当前 IP：x.x.x.x" 这种格式）
+				// 提取 IPv4
 				ip := ""
 				for _, f := range strings.Fields(raw) {
-					if strings.Count(f, ".") == 3 {
-						ip = strings.TrimRight(f, "():，。 ")
+					f = strings.TrimRight(f, "():，。 ")
+					if parsed := stdnet.ParseIP(f); parsed != nil && parsed.To4() != nil {
+						ip = f
 						break
 					}
 				}
-				if ip == "" {
-					ip = raw
-				}
-				if !isPrivateIP(ip) && ip != "" {
+				if ip != "" && !isPrivateIP(ip) {
 					return ip
 				}
 			}
