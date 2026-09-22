@@ -48,11 +48,11 @@ jobs:
             cp -r conf pkg/conf
             cp -r web pkg/web
             cd pkg
-            tar -czf ../natpunch_${{ matrix.goos }}_${{ matrix.goarch }}_server.tar.gz .
+            tar -czf ../linux_${{ matrix.goarch }}_server.tar.gz .
           else
             go build -ldflags "-s -w -extldflags -static" \
               -o out/natpunch ./cmd/npc/npc.go
-            tar -czf natpunch_${{ matrix.goos }}_${{ matrix.goarch }}_client.tar.gz -C out natpunch
+            tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch
           fi
 
       - name: Upload artifact
