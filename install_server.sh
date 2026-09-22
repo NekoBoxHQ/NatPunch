@@ -534,7 +534,7 @@ do_install() {
         echo ""
         echo "=================================================="
         echo "  ✅ 安装完成"
-        echo "  面板地址: http://$IP:$NEW_PORT"
+        if [ "$NEW_HTTPS" = "true" ]; then echo "  面板地址: https://$NEW_DOMAIN:$NEW_PORT"; else echo "  面板地址: http://$IP:$NEW_PORT"; fi
         echo "  用户名:   $NEW_USER"
         echo "  密码:     $NEW_PASS"
         echo "=================================================="
@@ -547,7 +547,8 @@ do_start() {
     release_lock
     if [ $RC -eq 0 ]; then
         IP=$(get_ip); PORT=$(get_web_port)
-        echo ""; echo "  面板地址: http://$IP:$PORT"
+        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
+        echo ""; echo "  面板地址: $SCHEME://$IP:$PORT"
     fi
 }
 
@@ -558,7 +559,8 @@ do_restart() {
     release_lock
     if [ $RC -eq 0 ]; then
         IP=$(get_ip); PORT=$(get_web_port)
-        echo ""; echo "  面板地址: http://$IP:$PORT"
+        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
+        echo ""; echo "  面板地址: $SCHEME://$IP:$PORT"
     fi
 }
 do_status()  { status; }
@@ -601,7 +603,8 @@ do_passwd() {
         echo "  端口:   $IN_PORT"
         echo "  用户名: $IN_USER"
         echo "  密码:   $IN_PASS"
-        echo "  面板:   http://$IP:$IN_PORT"
+        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
+        echo "  面板:   $SCHEME://$IP:$IN_PORT"
         echo "=================================================="
     fi
 }
