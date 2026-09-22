@@ -15,7 +15,6 @@ import (
 	"ehang.io/nps/lib/version"
 	"ehang.io/nps/server"
 	"github.com/astaxie/beego"
-	"net"
 	"os"
 )
 
@@ -88,11 +87,6 @@ func (s *BaseController) display(tpl ...string) {
 	}
 	ip := s.Ctx.Request.Host
 	s.Data["ip"] = common.GetIpByAddr(ip)
-
-	// 优先取本机公网 IP（非内网段）
-	if localIP := getPublicIP(); localIP != "" {
-		s.Data["ip"] = localIP
-	}
 
 	global := file.GetDb().GetGlobal()
 	if global != nil && global.ServerUrl != "" && global.ServerUrl != ip {
@@ -266,31 +260,3 @@ func (s *BaseController) CheckUserAuth() {
 }
 
 // getPublicIP 返回本机第一个公网 IPv4，找不到返回空串
-func getPublicIP() string {
-    addrs, err := net.InterfaceAddrs()
-    if err != nil {
-        return ""
-    }
-    for _, addr := range addrs {
-        if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-            if ipnet.IP.To4() != nil {
-                ip := ipnet.IP.String()
-                // 排除内网段
-                if strings.HasPrefix(ip, "10.") ||
-                    strings.HasPrefix(ip, "172.16.") ||
-                    strings.HasPrefix(ip, "172.17.") ||
-                    strings.HasPrefix(ip, "172.18.") ||
-                    strings.HasPrefix(ip, "172.19.") ||
-                    strings.HasPrefix(ip, "172.2") ||
-                    strings.HasPrefix(ip, "172.30.") ||
-                    strings.HasPrefix(ip, "172.31.") ||
-                    strings.HasPrefix(ip, "192.168.") ||
-                    strings.HasPrefix(ip, "127.") {
-                    continue
-                }
-                return ip
-            }
-        }
-    }
-    return ""
-}
