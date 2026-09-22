@@ -36,16 +36,16 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/
 
 ### 卸载客户端
 
-OpenWrt：
-
-```shell
-uclient-fetch -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
-```
-
 Linux：
 
 ```shell
 wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
+```
+
+OpenWrt：
+
+```shell
+uclient-fetch -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
 ```
 
 ---
