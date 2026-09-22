@@ -1,96 +1,170 @@
 #!/bin/sh
-# NatPunch 客户端一键安装
-# 用法: sh install.sh --openwrt VKEY SERVER [PORT]
-
+# NatPunch 客户端一键安装（加固版）
+# 用法: sh install.sh --openwrt VKEY SERVER [PORT] [TLS_FLAG]
+set -u
 REPO="lima-droid/NatPunch"
+FALLBACK_VER="v26.9.3"
+VKEY="${2:-}"
+SERVER="${3:-}"
 PORT="${4:-8025}"
 TLS_FLAG="${5:-}"
-VKEY="$2"
-SERVER="$3"
+CONF="/etc/natpunch.conf"
+BIN="/usr/bin/natpunch"
+TMP_DIR="/tmp/natpunch_install.$$"
+LOG="/tmp/natpunch.log"
+log()  { echo "==> $*"; }
+die()  { echo "错误: $*" >&2; cleanup; exit 1; }
+cleanup() {
+    [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ] && rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT INT TERM
 
+# ---------- 参数校验 ----------
 if [ -z "$VKEY" ] || [ -z "$SERVER" ]; then
-    echo "用法: sh install.sh --openwrt VKEY SERVER [PORT]"
+    echo "用法: sh install.sh --openwrt VKEY SERVER [PORT] [TLS_FLAG]"
     exit 1
 fi
+case "$PORT" in
+    ''|*[!0-9]*) die "PORT 必须是数字: $PORT";;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    die "PORT 超出范围: $PORT"
+fi
+case "$VKEY" in
+    *[!A-Za-z0-9._-]*) die "VKEY 含非法字符";;
+esac
+case "$SERVER" in
+    *[!A-Za-z0-9.:_-]*) die "SERVER 含非法字符";;
+esac
+case "$TLS_FLAG" in
+    *[!A-Za-z0-9._=-]*) die "TLS_FLAG 含非法字符";;
+esac
 
-echo "==> 检测架构..."
+# ---------- 环境检测 ----------
+IS_OPENWRT=0
+[ -f /etc/openwrt_release ] && IS_OPENWRT=1
+log "检测架构..."
 ARCH="$(uname -m)"
 case "$ARCH" in
-    x86_64|amd64) PKG="linux_amd64_client.tar.gz";;
-    aarch64|arm64) PKG="linux_arm64_client.tar.gz";;
-    *) echo "不支持架构: $ARCH"; exit 1;;
+    x86_64|amd64)   PKG="linux_amd64_client.tar.gz";;
+    aarch64|arm64)  PKG="linux_arm64_client.tar.gz";;
+    *) die "不支持架构: $ARCH";;
 esac
 echo "    $ARCH -> $PKG"
 
-# 获取最新版本
-echo "==> 获取最新版本..."
-VER="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
-[ -n "$VER" ] || VER="v26.9.3"
+# ---------- 获取版本 ----------
+log "获取最新版本..."
+VER=""
+if command -v wget >/dev/null 2>&1; then
+    VER="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+elif command -v curl >/dev/null 2>&1; then
+    VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+fi
+[ -n "$VER" ] || VER="$FALLBACK_VER"
 echo "    $VER"
 
-# 下载
+# ---------- 下载 ----------
 URL="https://github.com/$REPO/releases/download/$VER/$PKG"
-echo "==> 下载 $PKG ..."
-dl() { wget -q -O "$2" "$1" 2>/dev/null || curl -fsSL -o "$2" "$1" 2>/dev/null; }
-dl "$URL" /tmp/natpunch.tar.gz || { echo "下载失败: $URL"; exit 1; }
+log "下载 $PKG ..."
+mkdir -p "$TMP_DIR" || die "无法创建临时目录"
+fetch() {
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "$2" "$1"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$2" "$1"
+    else
+        return 1
+    fi
+}
+fetch "$URL" "$TMP_DIR/pkg.tar.gz" || die "下载失败: $URL"
+[ -s "$TMP_DIR/pkg.tar.gz" ] || die "下载文件为空: $URL"
 
-# 解压
-echo "==> 解压..."
-cd /tmp && tar -zxf natpunch.tar.gz && rm -f natpunch.tar.gz
-BIN_PATH="$(find /tmp -name natpunch -type f 2>/dev/null | head -n1)"
-[ -n "$BIN_PATH" ] || { echo "解压失败: 未找到 natpunch 二进制"; exit 1; }
-cp -f "$BIN_PATH" /usr/bin/natpunch && chmod 755 /usr/bin/natpunch && rm -f "$BIN_PATH"
+# ---------- 解压 ----------
+log "解压..."
+tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"
+tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || die "解压失败"
+BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch | head -n1)"
+[ -n "$BIN_SRC" ] || die "未找到 natpunch 二进制"
+cp -f "$BIN_SRC" "$BIN" || die "安装到 $BIN 失败"
+chmod 755 "$BIN"
 
-# 写配置
-printf "SERVER=%s\nPORT=%s\nVKEY=%s\nTLS_FLAG=%s\n" "$SERVER" "$PORT" "$VKEY" "$TLS_FLAG" > /etc/natpunch.conf
-chmod 600 /etc/natpunch.conf
+# ---------- 写配置 ----------
+log "写入配置 $CONF"
+umask 077
+cat > "$CONF" <<EOF
+SERVER=$SERVER
+PORT=$PORT
+VKEY=$VKEY
+TLS_FLAG=$TLS_FLAG
+EOF
+chmod 600 "$CONF"
 
-# 注册自启
-if [ -d /etc/openwrt_release ] || [ -f /etc/openwrt_release ]; then
-    cat > /etc/init.d/natpunch <<EOF
+# ---------- 注册自启 ----------
+if [ "$IS_OPENWRT" -eq 1 ]; then
+    log "注册 OpenWrt init.d 服务..."
+    cat > /etc/init.d/natpunch <<'INIT'
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
 start() {
+    [ -f /etc/natpunch.conf ] || exit 1
     . /etc/natpunch.conf
-    /usr/bin/natpunch -server=\${SERVER}:\${PORT} -vkey=\${VKEY} -type=tcp $TLS_FLAG >>/tmp/natpunch.log 2>&1 &
+    /usr/bin/natpunch -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG:-} >>/tmp/natpunch.log 2>&1 &
 }
-stop() { killall natpunch 2>/dev/null; }
-EOF
+stop() {
+    killall natpunch 2>/dev/null
+}
+INIT
     chmod +x /etc/init.d/natpunch
     /etc/init.d/natpunch enable
     /etc/init.d/natpunch start
 else
-    cat > /etc/systemd/system/natpunch.service <<EOF
+    if ! command -v systemctl >/dev/null 2>&1; then
+        die "非 OpenWrt 环境且未找到 systemctl"
+    fi
+    log "注册 systemd 服务..."
+    cat > /etc/systemd/system/natpunch.service <<'SVC'
 [Unit]
 Description=NatPunch Client
 After=network.target
 [Service]
 Type=simple
-ExecStart=/usr/bin/natpunch -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp $TLS_FLAG
+EnvironmentFile=/etc/natpunch.conf
+ExecStart=/usr/bin/natpunch -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}
 Restart=always
+RestartSec=3
 [Install]
 WantedBy=multi-user.target
-EOF
+SVC
     systemctl daemon-reload
-    systemctl enable natpunch
-    systemctl start natpunch
-    sleep 3
-    if ! systemctl is-active natpunch >/dev/null 2>&1; then
-        echo "==> 启动失败，日志："
-        journalctl -u natpunch -n 20 --no-pager 2>/dev/null
-    fi
+    systemctl enable natpunch >/dev/null 2>&1
+    systemctl restart natpunch
 fi
 
-sleep 2
-if command -v systemctl >/dev/null 2>&1; then
-    OK=$(systemctl is-active natpunch 2>/dev/null)
+# ---------- 验证 ----------
+log "等待启动..."
+sleep 3
+OK=0
+if [ "$IS_OPENWRT" -eq 1 ]; then
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "/usr/bin/natpunch" >/dev/null 2>&1 && OK=1
+    else
+        ps w 2>/dev/null | grep -v grep | grep -q "/usr/bin/natpunch" && OK=1
+    fi
 else
-    OK=$(ps w 2>/dev/null | grep -v grep | grep -c "/usr/bin/natpunch")
+    systemctl is-active --quiet natpunch && OK=1
 fi
-if [ "$OK" = "active" ] || [ "$OK" -gt 0 ] 2>/dev/null; then
-    echo "==> 安装成功 ✓ $(/usr/bin/natpunch -version | head -n1)"
+if [ "$OK" -eq 1 ]; then
+    VER_OUT="$("$BIN" -version 2>/dev/null | head -n1)"
+    echo "==> 安装成功 ✓ ${VER_OUT:-$VER}"
+    exit 0
 else
-    echo "==> 启动失败，看 /tmp/natpunch.log"
-    cat /tmp/natpunch.log 2>/dev/null | tail -10
+    echo "==> 启动失败，日志如下："
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        tail -n 20 "$LOG" 2>/dev/null
+    else
+        journalctl -u natpunch -n 20 --no-pager 2>/dev/null
+        tail -n 20 "$LOG" 2>/dev/null
+    fi
+    exit 1
 fi
