@@ -208,6 +208,7 @@ apply_credentials() {
         set_kv web_open_ssl "true"
         set_kv web_cert_file "$NEW_CERT"
         set_kv web_key_file "$NEW_KEY"
+        set_kv web_domain "$NEW_DOMAIN"
         log "已启用 HTTPS/TLS: $NEW_DOMAIN"
         log "  证书: $NEW_CERT"
         log "  私钥: $NEW_KEY"
@@ -575,9 +576,13 @@ do_start() {
     start; RC=$?
     release_lock
     if [ $RC -eq 0 ]; then
-        IP=$(get_ip); PORT=$(get_web_port)
-        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
-        echo ""; echo "  面板地址: $SCHEME://$IP:$PORT"
+        PORT=$(get_web_port)
+        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+        else
+            SCHEME="http"; HOST="$(get_ip)"
+        fi
+        echo ""; echo "  面板地址: $SCHEME://$HOST:$PORT"
     fi
 }
 do_stop()   { acquire_lock; stop;    release_lock; }
@@ -586,9 +591,13 @@ do_restart() {
     restart; RC=$?
     release_lock
     if [ $RC -eq 0 ]; then
-        IP=$(get_ip); PORT=$(get_web_port)
-        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
-        echo ""; echo "  面板地址: $SCHEME://$IP:$PORT"
+        PORT=$(get_web_port)
+        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+        else
+            SCHEME="http"; HOST="$(get_ip)"
+        fi
+        echo ""; echo "  面板地址: $SCHEME://$HOST:$PORT"
     fi
 }
 do_status()  { status; }
@@ -629,8 +638,12 @@ do_passwd() {
         echo "  端口:   $IN_PORT"
         echo "  用户名: $IN_USER"
         echo "  密码:   $IN_PASS"
-        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
-        echo "  面板:   $SCHEME://$IP:$IN_PORT"
+        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+        else
+            SCHEME="http"; HOST="$(get_ip)"
+        fi
+        echo "  面板:   $SCHEME://$HOST:$IN_PORT"
         echo "=================================================="
     fi
 }
