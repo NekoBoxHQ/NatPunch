@@ -12,12 +12,11 @@ VER="v26.9.3"
 REPO="lima-droid/NatPunch"
 API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SELF="$(basename "$0")"
-
+SERVICE_NAME="natpunch"
 # ================= 工具 =================
 log()  { echo "[NatPunch] $*"; }
 die()  { echo "[NatPunch] 错误: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少依赖: $1"; }
-
 norm() {
     if command -v realpath >/dev/null 2>&1; then
         realpath "$1" 2>/dev/null && return 0
@@ -27,7 +26,6 @@ norm() {
     fi
     echo "$1"
 }
-
 safe_dir() {
     case "$DIR" in
         /?*) ;;
@@ -35,7 +33,6 @@ safe_dir() {
     esac
     [ "$DIR" != "/" ] || die "DIR 不能为根目录"
 }
-
 find_first_file() {
     for f in $(find "$1" -type f -name "$2" 2>/dev/null); do
         echo "$f"; return 0
@@ -48,13 +45,13 @@ find_first_dir() {
     done
     return 1
 }
-
+is_openwrt() { [ -f /etc/openwrt_release ]; }
+has_systemd() { command -v systemctl >/dev/null 2>&1; }
 # ================= 锁 =================
 LOCK_MODE=""
 acquire_lock() {
     safe_dir
     mkdir -p "$DIR" 2>/dev/null
-    rm -rf "$LOCK_DIR" 2>/dev/null
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         echo $$ > "$LOCK_DIR/pid" 2>/dev/null || true
         LOCK_MODE="held"; return 0
@@ -78,7 +75,6 @@ release_lock() {
     rm -rf "$LOCK_DIR" 2>/dev/null || true
     LOCK_MODE=""
 }
-
 # ================= 进程判断 =================
 is_running() {
     [ -f "$PID_FILE" ] || return 1
@@ -96,26 +92,33 @@ is_running() {
     case "$CMD" in *"$BIN"*) return 0 ;; esac
     return 1
 }
-
 find_all_nps() {
     if [ -f "$PID_FILE" ]; then
         p=$(cat "$PID_FILE" 2>/dev/null)
         case "$p" in ''|*[!0-9]*) ;; *) [ -d "/proc/$p" ] && echo "$p" ;; esac
     fi
+    TARGET="$(norm "$BIN")"
     if command -v pgrep >/dev/null 2>&1; then
-        pgrep -f "$BIN" 2>/dev/null | grep -v "^$$\$" || true
+        for p in $(pgrep -x natpunch 2>/dev/null); do
+            [ "$p" = "$$" ] && continue
+            exe=$(readlink "/proc/$p/exe" 2>/dev/null)
+            [ -n "$exe" ] && [ "$(norm "$exe")" = "$TARGET" ] && echo "$p"
+        done
     else
-        ps w 2>/dev/null | grep -F "$BIN" | grep -v grep | awk '{print $1}'
+        for d in /proc/[0-9]*; do
+            p=${d#/proc/}
+            [ "$p" = "$$" ] && continue
+            exe=$(readlink "$d/exe" 2>/dev/null)
+            [ -n "$exe" ] && [ "$(norm "$exe")" = "$TARGET" ] && echo "$p"
+        done
     fi
 }
-
 kill_one() {
     p="$1"; [ -n "$p" ] || return 0
     kill "$p" 2>/dev/null || true
     sleep 1
     kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
 }
-
 kill_all() {
     LIST=$(find_all_nps | sort -u)
     [ -n "$LIST" ] || return 0
@@ -130,7 +133,6 @@ kill_all() {
     done
     sleep 1
 }
-
 # ================= 配置读写 =================
 get_kv() {
     key="$1"
@@ -138,20 +140,22 @@ get_kv() {
     grep -E "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null \
         | head -n1 | sed "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//"
 }
-
 set_kv() {
     key="$1"; val="$2"
     case "$key" in *[!A-Za-z0-9_]*) die "非法配置键: $key" ;; esac
+    case "$val" in
+        *'
+'*) die "配置值不能包含换行: $key" ;;
+    esac
     [ -f "$CONF" ] || die "配置文件不存在: $CONF"
     awk -v k="$key" '
         BEGIN { pat = "^[[:space:]]*#?[[:space:]]*" k "[[:space:]]*=" }
         $0 !~ pat { print }
-    ' "$CONF" > "$CONF.clean" && mv "$CONF.clean" "$CONF"
-    esc=$(printf '%s' "$val" | sed 's/[&|\\]/\\&/g')
-    printf '%s=%s\n' "$key" "$esc" >> "$CONF" || die "追加 $key 失败"
+    ' "$CONF" > "$CONF.clean" || die "处理配置失败"
+    mv "$CONF.clean" "$CONF" || die "写回配置失败"
+    printf '%s=%s\n' "$key" "$val" >> "$CONF" || die "追加 $key 失败"
     grep -q "^$key=" "$CONF" || die "校验 $key 失败"
 }
-
 # ================= 交互输入端口/账号密码 =================
 prompt_credentials() {
     echo ""
@@ -189,7 +193,6 @@ prompt_credentials() {
     case "$IN_PASS" in *"="*) die "密码不能包含 =" ;; esac
     NEW_PORT="$IN_PORT"; NEW_BRIDGE="$IN_BRIDGE"; NEW_USER="$IN_USER"; NEW_PASS="$IN_PASS"
 }
-
 apply_credentials() {
     [ -f "$CONF" ] || die "配置文件不存在: $CONF"
     set_kv web_port "$NEW_PORT"
@@ -217,7 +220,6 @@ apply_credentials() {
     fi
     log "已设置面板账号: $NEW_USER"
 }
-
 # ================= 下载 =================
 choose_downloader() {
     if command -v wget >/dev/null 2>&1; then
@@ -228,21 +230,18 @@ choose_downloader() {
         die "缺少 wget/curl"
     fi
 }
-
 dl() {
     case "$DL_TYPE" in
         wget) wget -q -O "$2" "$1" ;;
         curl) curl -fsSL -o "$2" "$1" ;;
     esac
 }
-
 fetch() {
     case "$DL_TYPE" in
         wget) wget -q -O - "$1" 2>/dev/null ;;
         curl) curl -fsSL "$1" 2>/dev/null ;;
     esac
 }
-
 get_latest_ver() {
     RESP=$(fetch "$API_URL") || return 1
     [ -n "$RESP" ] || return 1
@@ -250,7 +249,6 @@ get_latest_ver() {
     [ -n "$VER_RAW" ] || return 1
     echo "$VER_RAW"
 }
-
 get_current_ver() {
     if [ -x "$BIN" ]; then
         V=$("$BIN" -version 2>/dev/null | head -n1)
@@ -258,7 +256,6 @@ get_current_ver() {
     fi
     echo "未知"
 }
-
 # ================= 安装 =================
 install() {
     safe_dir
@@ -266,7 +263,6 @@ install() {
     mkdir -p "$DIR" || die "无法创建 $DIR"
     TMP="$DIR/.install.$$"; rm -rf "$TMP"; mkdir -p "$TMP" || die "无法创建临时目录"
     cd "$TMP" || die "无法进入临时目录"
-
     LATEST=$(get_latest_ver)
     [ -n "$LATEST" ] || LATEST="$VER"
     ARCH=$(uname -m)
@@ -278,25 +274,20 @@ install() {
     log "下载 $LATEST ($SERVER_PKG) ..."
     DL_URL="https://github.com/$REPO/releases/download/$LATEST/$SERVER_PKG"
     dl "$DL_URL" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
-
     log "解压 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
     rm -f natpunch.tar.gz
-
     BIN_SRC=$(find_first_file . natpunch)
     CONF_SRC=$(find_first_dir . conf)
     WEB_SRC=$(find_first_dir . web)
     [ -n "$BIN_SRC" ]  || { cd /; rm -rf "$TMP"; die "压缩包中未找到 natpunch 二进制"; }
     [ -n "$CONF_SRC" ] || { cd /; rm -rf "$TMP"; die "压缩包中未找到 conf 目录"; }
     [ -n "$WEB_SRC" ]  || { cd /; rm -rf "$TMP"; die "压缩包中未找到 web 目录"; }
-
     cp "$BIN_SRC" "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "拷贝二进制失败"; }
     chmod +x "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "赋予执行权限失败"; }
     mv "$DIR/natpunch.new" "$BIN" || { cd /; rm -rf "$TMP"; die "替换二进制失败"; }
-
     [ -d "$CONF_DIR" ] || cp -r "$CONF_SRC" "$CONF_DIR" || { cd /; rm -rf "$TMP"; die "拷贝 conf 失败"; }
     [ -d "$WEB" ] || cp -r "$WEB_SRC" "$WEB" || { cd /; rm -rf "$TMP"; die "拷贝 web 失败"; }
-
     cd /; rm -rf "$TMP"
     [ -f "$CONF" ] || die "缺少配置文件 $CONF"
     set_kv http_proxy_port  0
@@ -304,12 +295,10 @@ install() {
     set_kv web_host         0.0.0.0
     log "安装完成"
 }
-
 upgrade() {
     safe_dir
     need tar; choose_downloader
     [ -x "$BIN" ] || die "NatPunch 未安装，请先安装"
-
     TARGET_VER="${1:-$VER}"
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -320,44 +309,35 @@ upgrade() {
     TARGET_URL="https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"
     TMP="$DIR/.upgrade.$$"; rm -rf "$TMP"; mkdir -p "$TMP" || die "无法创建临时目录"
     cd "$TMP" || die "无法进入临时目录"
-
     log "下载 $TARGET_VER ..."
     dl "$TARGET_URL" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
-
     log "解压 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
     rm -f natpunch.tar.gz
-
     BIN_SRC=$(find_first_file . natpunch)
     WEB_SRC=$(find_first_dir . web)
     [ -n "$BIN_SRC" ] || { cd /; rm -rf "$TMP"; die "压缩包中未找到 natpunch 二进制"; }
-
     BAK=""
     if [ -f "$BIN" ]; then
         BAK="$BIN.bak.$(date +%Y%m%d%H%M%S)"
         cp "$BIN" "$BAK" 2>/dev/null && log "已备份旧二进制: $BAK"
     fi
-
     cp "$BIN_SRC" "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "拷贝二进制失败"; }
     chmod +x "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "赋予执行权限失败"; }
-
     WAS_RUNNING=0
     is_running && WAS_RUNNING=1
     stop
-
     if ! mv "$DIR/natpunch.new" "$BIN"; then
         log "替换二进制失败，尝试回滚"
         [ -n "$BAK" ] && [ -f "$BAK" ] && cp "$BAK" "$BIN"
         [ "$WAS_RUNNING" = "1" ] && start
         cd /; rm -rf "$TMP"; die "替换二进制失败"
     fi
-
     if [ -n "$WEB_SRC" ]; then
         rm -rf "$WEB"
         cp -r "$WEB_SRC" "$WEB" || { cd /; rm -rf "$TMP"; die "拷贝 web 失败"; }
         log "已更新 web 目录"
     fi
-
     cd /; rm -rf "$TMP"
     [ -f "$CONF" ] || die "缺少配置文件 $CONF"
     set_kv http_proxy_port  0
@@ -366,7 +346,6 @@ upgrade() {
     start
     log "升级完成，当前版本: $TARGET_VER"
 }
-
 # ================= 启停 =================
 start() {
     if is_running; then log "已运行 (PID $(cat "$PID_FILE"))"; return 0; fi
@@ -384,14 +363,11 @@ start() {
         rm -f "$PID_FILE"; die "启动失败"
     fi
 }
-
 stop() {
     if is_running; then log "停止中 ..."; kill_one "$(cat "$PID_FILE" 2>/dev/null)"; fi
     kill_all; rm -f "$PID_FILE"; log "已停止"
 }
-
 restart() { stop; sleep 2; start; }
-
 status() {
     if is_running; then
         log "运行中 (PID $(cat "$PID_FILE"))"
@@ -402,56 +378,103 @@ status() {
         log "未运行"
     fi
 }
-
-# ================= 开机自启 =================
-enable() {
-    if [ ! -f /etc/openwrt_release ]; then log "非 OpenWrt 系统，跳过自启"; return 0; fi
-    cat > /etc/init.d/natpunch <<EOL
+# ================= 开机自启（安装时自动注册） =================
+register_autostart() {
+    if is_openwrt; then
+        log "注册 OpenWrt init.d 自启 ..."
+        cat > /etc/init.d/natpunch <<'EOL'
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
-PID_FILE="$PID_FILE"
-DIR="$DIR"
-BIN="$BIN"
-LOG="$LOG"
+PID_FILE="/opt/natpunch/natpunch.pid"
+DIR="/opt/natpunch"
+BIN="/opt/natpunch/natpunch"
+LOG="/opt/natpunch/natpunch.log"
 start() {
-    if [ -f "\$PID_FILE" ]; then
-        OP=\$(cat "\$PID_FILE" 2>/dev/null)
-        [ -n "\$OP" ] && kill -0 "\$OP" 2>/dev/null && exit 0
+    if [ -f "$PID_FILE" ]; then
+        OP=$(cat "$PID_FILE" 2>/dev/null)
+        [ -n "$OP" ] && kill -0 "$OP" 2>/dev/null && exit 0
     fi
-    cd "\$DIR" || exit 1
-    "\$BIN" >"\$LOG" 2>&1 &
-    NEWPID=\$!
-    echo \$NEWPID > "\$PID_FILE"
+    cd "$DIR" || exit 1
+    "$BIN" >"$LOG" 2>&1 &
+    NEWPID=$!
+    echo $NEWPID > "$PID_FILE"
     sleep 1
-    kill -0 \$NEWPID 2>/dev/null || {
+    kill -0 $NEWPID 2>/dev/null || {
         echo "[NatPunch] 启动失败" >&2
-        rm -f "\$PID_FILE"
+        rm -f "$PID_FILE"
         exit 1
     }
 }
 stop() {
-    if [ -f "\$PID_FILE" ]; then
-        OP=\$(cat "\$PID_FILE" 2>/dev/null)
-        if [ -n "\$OP" ]; then
-            kill "\$OP" 2>/dev/null
+    if [ -f "$PID_FILE" ]; then
+        OP=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$OP" ]; then
+            kill "$OP" 2>/dev/null
             sleep 1
-            kill -0 "\$OP" 2>/dev/null && kill -9 "\$OP" 2>/dev/null
+            kill -0 "$OP" 2>/dev/null && kill -9 "$OP" 2>/dev/null
         fi
-        rm -f "\$PID_FILE"
+        rm -f "$PID_FILE"
     fi
 }
 EOL
-    chmod +x /etc/init.d/natpunch || die "无法赋予 init 脚本执行权限"
-    if /etc/init.d/natpunch enable; then
-        if [ -e /etc/rc.d/S99natpunch ]; then log "已启用开机自启"
-        else die "自启脚本未生效 (/etc/rc.d/S99natpunch 不存在)"; fi
-    else die "启用开机自启失败"; fi
+        chmod +x /etc/init.d/natpunch || die "无法赋予 init 脚本执行权限"
+        if /etc/init.d/natpunch enable; then
+            if [ -e /etc/rc.d/S99natpunch ]; then
+                log "已启用开机自启 (init.d)"
+            else
+                log "警告: 自启脚本未生效 (/etc/rc.d/S99natpunch 不存在)"
+            fi
+        else
+            log "警告: 启用开机自启失败"
+        fi
+        return 0
+    fi
+    if has_systemd; then
+        log "注册 systemd 自启 ..."
+        cat > /etc/systemd/system/natpunch.service <<EOF
+[Unit]
+Description=NatPunch Server
+After=network.target
+[Service]
+Type=simple
+WorkingDirectory=$DIR
+ExecStart=$BIN
+Restart=always
+RestartSec=3
+PIDFile=$PID_FILE
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload 2>/dev/null
+        if systemctl enable natpunch >/dev/null 2>&1; then
+            log "已启用开机自启 (systemd)"
+        else
+            log "警告: systemctl enable 失败"
+        fi
+        return 0
+    fi
+    log "警告: 未识别的系统，跳过开机自启注册"
+    return 0
 }
-
+unregister_autostart() {
+    if is_openwrt; then
+        /etc/init.d/natpunch stop  >/dev/null 2>&1 || true
+        /etc/init.d/natpunch disable >/dev/null 2>&1 || true
+        rm -f /etc/init.d/natpunch
+        rm -f /etc/rc.d/*natpunch 2>/dev/null || true
+    fi
+    if has_systemd; then
+        systemctl stop natpunch >/dev/null 2>&1 || true
+        systemctl disable natpunch >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/natpunch.service
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    return 0
+}
 # ================= 清理旧版下载服务 =================
 cleanup_download() {
-    if [ ! -f /etc/openwrt_release ]; then
+    if ! is_openwrt; then
         log "非 OpenWrt 系统，跳过下载服务清理"
         return 0
     fi
@@ -471,18 +494,15 @@ cleanup_download() {
         rm -rf /opt/npc_download 2>/dev/null && log "已删除旧版下载目录: /opt/npc_download"
     fi
 }
-
 uninstall() {
     safe_dir
     stop; kill_all
+    unregister_autostart
     cleanup_download
     [ -n "$DIR" ] && [ "$DIR" != "/" ] && rm -rf "$DIR"
-    rm -f /etc/init.d/natpunch
-    rm -f /etc/rc.d/*natpunch 2>/dev/null || true
     rm -rf "$LOCK_DIR" 2>/dev/null || true
     log "已卸载"
 }
-
 # ================= 信息获取 =================
 get_ip() {
     IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
@@ -492,13 +512,11 @@ get_ip() {
     [ -n "$IP" ] || IP="<本机IP>"
     echo "$IP"
 }
-
 get_web_port() {
     P=$(get_kv web_port)
     [ -n "$P" ] && echo "$P" && return 0
     echo "8080"
 }
-
 # ================= 菜单 =================
 show_menu() {
     echo ""
@@ -510,22 +528,20 @@ show_menu() {
     echo "   3. 停止 NatPunch"
     echo "   4. 重启 NatPunch"
     echo "   5. 查看状态"
-    echo "   6. 启用开机自启 (仅 OpenWrt)"
-    echo "   7. 修改面板账号密码"
-    echo "   8. 升级 NatPunch"
-    echo "   9. 卸载 NatPunch"
+    echo "   6. 修改面板账号密码"
+    echo "   7. 升级 NatPunch"
+    echo "   8. 卸载 NatPunch"
     echo "   0. 退出"
     echo "=================================================="
-    printf "请输入选项 [0-9]: "
+    printf "请输入选项 [0-8]: "
 }
-
 # ================= 动作 =================
 do_install() {
     acquire_lock
     prompt_credentials
     install || { release_lock; return 1; }
     apply_credentials
-    enable
+    register_autostart
     start
     RC=$?
     release_lock
@@ -534,13 +550,16 @@ do_install() {
         echo ""
         echo "=================================================="
         echo "  ✅ 安装完成"
-        if [ "$NEW_HTTPS" = "true" ]; then echo "  面板地址: https://$NEW_DOMAIN:$NEW_PORT"; else echo "  面板地址: http://$IP:$NEW_PORT"; fi
+        if [ "$NEW_HTTPS" = "true" ]; then
+            echo "  面板地址: https://$NEW_DOMAIN:$NEW_PORT"
+        else
+            echo "  面板地址: http://$IP:$NEW_PORT"
+        fi
         echo "  用户名:   $NEW_USER"
         echo "  密码:     $NEW_PASS"
         echo "=================================================="
     fi
 }
-
 do_start() {
     acquire_lock
     start; RC=$?
@@ -551,7 +570,6 @@ do_start() {
         echo ""; echo "  面板地址: $SCHEME://$IP:$PORT"
     fi
 }
-
 do_stop()   { acquire_lock; stop;    release_lock; }
 do_restart() {
     acquire_lock
@@ -564,8 +582,6 @@ do_restart() {
     fi
 }
 do_status()  { status; }
-do_enable()  { acquire_lock; enable; release_lock; }
-
 do_passwd() {
     if [ ! -f "$CONF" ]; then die "NatPunch 未安装，找不到配置文件 $CONF"; fi
     acquire_lock
@@ -608,7 +624,6 @@ do_passwd() {
         echo "=================================================="
     fi
 }
-
 do_upgrade() {
     if [ ! -x "$BIN" ]; then die "NatPunch 未安装，请先安装"; fi
     echo ""
@@ -631,26 +646,24 @@ do_upgrade() {
     release_lock
     if [ $RC -eq 0 ]; then
         IP=$(get_ip); PORT=$(get_web_port)
+        SCHEME=$(grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && echo https || echo http)
         echo ""
         echo "=================================================="
         echo "  ✅ 升级完成"
         echo "  目标版本: $IN_VER"
-        echo "  面板地址: http://$IP:$PORT"
+        echo "  面板地址: $SCHEME://$IP:$PORT"
         echo "=================================================="
     fi
 }
-
 do_uninstall() {
-    printf "确认卸载 NatPunch？此操作会删除 %s、下载服务及所有配置 [y/N]: " "$DIR"; read ans
+    printf "确认卸载 NatPunch？此操作会删除 %s、自启服务及所有配置（含证书）[y/N]: " "$DIR"; read ans
     case "$ans" in y|Y|yes|YES) ;; *) echo "已取消"; return 0 ;; esac
     acquire_lock
     uninstall
     release_lock
 }
-
 # ================= 入口 =================
 trap 'release_lock' EXIT INT TERM
-
 if [ -n "${1:-}" ]; then
     case "$1" in
         install)   do_install ;;
@@ -658,7 +671,6 @@ if [ -n "${1:-}" ]; then
         stop)      do_stop ;;
         restart)   do_restart ;;
         status)    do_status ;;
-        enable)    do_enable ;;
         passwd)    do_passwd ;;
         upgrade)
             shift
@@ -672,11 +684,10 @@ if [ -n "${1:-}" ]; then
             fi
             ;;
         uninstall) do_uninstall ;;
-        *) echo "用法: $SELF {install|start|stop|restart|status|enable|passwd|upgrade [版本]|uninstall}" ;;
+        *) echo "用法: $SELF {install|start|stop|restart|status|passwd|upgrade [版本]|uninstall}" ;;
     esac
     exit $?
 fi
-
 while :; do
     show_menu
     read CHOICE
@@ -686,10 +697,9 @@ while :; do
         3) do_stop ;;
         4) do_restart ;;
         5) do_status ;;
-        6) do_enable ;;
-        7) do_passwd ;;
-        8) do_upgrade ;;
-        9) do_uninstall ;;
+        6) do_passwd ;;
+        7) do_upgrade ;;
+        8) do_uninstall ;;
         0) echo "已退出"; exit 0 ;;
         *) echo "无效选项，请重新输入" ;;
     esac
