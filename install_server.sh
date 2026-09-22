@@ -166,6 +166,21 @@ prompt_credentials() {
     [ -n "$IN_BRIDGE" ] || IN_BRIDGE="8024"
     case "$IN_BRIDGE" in *[!0-9]*) die "客户端连接端口必须是纯数字" ;; esac
     [ "$IN_BRIDGE" -ge 1 ] && [ "$IN_BRIDGE" -le 65535 ] || die "客户端连接端口范围必须是 1-65535"
+    printf "  启用 HTTPS/TLS (y/N): "; read IN_HTTPS
+    NEW_HTTPS="false"
+    NEW_CERT=""
+    NEW_KEY=""
+    NEW_DOMAIN=""
+    case "$IN_HTTPS" in
+        y|Y|yes|YES)
+            NEW_HTTPS="true"
+            printf "  域名: "; read NEW_DOMAIN
+            printf "  证书文件路径 [默认 /opt/natpunch/conf/server.pem]: "; read IN_CERT
+            [ -n "$IN_CERT" ] && NEW_CERT="$IN_CERT" || NEW_CERT="/opt/natpunch/conf/server.pem"
+            printf "  私钥文件路径 [默认 /opt/natpunch/conf/server.key]: "; read IN_KEY
+            [ -n "$IN_KEY" ] && NEW_KEY="$IN_KEY" || NEW_KEY="/opt/natpunch/conf/server.key"
+            ;;
+    esac
     printf "  用户名   [默认 admin]: "; read IN_USER
     [ -n "$IN_USER" ] || IN_USER="admin"
     printf "  密码     [默认 123  ]: "; read IN_PASS
@@ -183,7 +198,23 @@ apply_credentials() {
     set_kv web_password "$NEW_PASS"
     set_kv allow_user_change_username true
     log "已设置面板端口: $NEW_PORT"
-    log "已设置客户端TCP端口: $NEW_BRIDGE (明文)，TLS端口8025保留"
+    log "已设置客户端TCP端口: $NEW_BRIDGE (明文)"
+    if [ "$NEW_HTTPS" = "true" ]; then
+        set_kv tls_enable "true"
+        set_kv tls_bridge_port "8025"
+        set_kv web_open_ssl "true"
+        set_kv web_cert_file "$NEW_CERT"
+        set_kv web_key_file "$NEW_KEY"
+        log "已启用 HTTPS/TLS: $NEW_DOMAIN"
+        log "  证书: $NEW_CERT"
+        log "  私钥: $NEW_KEY"
+        log "  客户端TLS端口: 8025"
+    else
+        set_kv tls_enable "false"
+        set_kv tls_bridge_port "0"
+        set_kv web_open_ssl "false"
+        log "未启用 HTTPS/TLS"
+    fi
     log "已设置面板账号: $NEW_USER"
 }
 
