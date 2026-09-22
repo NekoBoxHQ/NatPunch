@@ -30,6 +30,18 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/
 
 安装完成后按提示打开 Web 面板，首次启动的默认账号密码见日志。
 
+### 客户端
+
+登录 Web 面板，在【客户端】页添加客户端，复制 VKEY，在待部署设备上 SSH 粘贴执行面板生成的一键安装命令。
+
+### 卸载客户端
+
+```shell
+wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
+```
+
+脚本自动识别客户端进程（按 -vkey= 精确匹配），停止服务、清理自启和配置，**不影响同机服务端**。
+
 ---
 
 ## 📃 License
