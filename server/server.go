@@ -607,13 +607,13 @@ func isPrivateIP(ip string) bool {
 		strings.HasPrefix(ip, "127.")
 }
 
-var cachedPublicIP = ""
+var (
+	cachedPublicIP   = ""
+	publicIPInited   = false
+)
 
-// getCachedPublicIP 返回缓存的公网 IPv4，首次调用时计算
-func getCachedPublicIP() string {
-	if cachedPublicIP != "" {
-		return cachedPublicIP
-	}
+func initPublicIP() {
+	defer func() { publicIPInited = true }()
 	localV4 := ""
 	for _, target := range []string{"223.5.5.5:80", "119.29.29.29:80", "8.8.8.8:80"} {
 		if conn, err := stdnet.Dial("tcp", target); err == nil {
@@ -626,10 +626,31 @@ func getCachedPublicIP() string {
 	}
 	if !isPrivateIP(localV4) && localV4 != "" {
 		cachedPublicIP = localV4
-		return localV4
+		return
 	}
 	cachedPublicIP = getPublicIPFromAPI()
-	return cachedPublicIP
+}
+
+// getCachedPublicIP 返回公网 IPv4。未算完时先返回本机出口 IP，不阻塞请求
+func getCachedPublicIP() string {
+	if cachedPublicIP != "" {
+		return cachedPublicIP
+	}
+	// 首次请求：返回本机网卡 IP（不阻塞），后台算公网 IP
+	localV4 := ""
+	for _, target := range []string{"223.5.5.5:80", "119.29.29.29:80", "8.8.8.8:80"} {
+		if conn, err := stdnet.Dial("tcp", target); err == nil {
+			if tcpAddr, ok := conn.LocalAddr().(*stdnet.TCPAddr); ok {
+				localV4 = tcpAddr.IP.String()
+			}
+			conn.Close()
+			break
+		}
+	}
+	if !publicIPInited {
+		go initPublicIP()
+	}
+	return localV4
 }
 
 // getPublicIPFromAPI 调外部 API 获取公网 IPv4
