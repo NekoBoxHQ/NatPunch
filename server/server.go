@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"ehang.io/nps/lib/version"
 	"errors"
 	"math"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"net/http"
 	"time"
 
 	"ehang.io/nps/bridge"
@@ -511,7 +511,7 @@ func GetDashboardData() map[string]interface{} {
 	data["ipLimit"] = beego.AppConfig.String("ip_limit")
 	data["flowStoreInterval"] = beego.AppConfig.String("flow_store_interval")
 	localV4, localV6 := "", ""
-	if conn, err := stdnet.Dial("udp", "8.8.8.8:80"); err == nil {
+	if conn, err := stdnet.Dial("udp", "223.5.5.5:80"); err == nil {
 		if udpAddr, ok := conn.LocalAddr().(*stdnet.UDPAddr); ok {
 			localV4 = udpAddr.IP.String()
 		}
@@ -520,7 +520,7 @@ func GetDashboardData() map[string]interface{} {
 	// NAT 环境：本机是内网 IP，后台用 DNS 查公网 IP（不阻塞页面）
 	if isPrivateIP(localV4) && publicIP == "" {
 		go func() {
-			publicIP = getPublicIPByDNS()
+			publicIP = getPublicIPByHTTP()
 		}()
 	}
 	// 获取本机 IPv6（全局单播）
@@ -625,18 +625,25 @@ func isPrivateIP(ip string) bool {
 // publicIP 缓存公网 IPv4（DNS 查询结果）
 var publicIP = ""
 
-// getPublicIPByDNS 用 OpenDNS 查询公网 IPv4（UDP DNS，毫秒级）
-func getPublicIPByDNS() string {
-	r := &stdnet.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (stdnet.Conn, error) {
-			d := stdnet.Dialer{Timeout: 2 * time.Second}
-			return d.DialContext(ctx, "udp", "resolver1.opendns.com:53")
-		},
+// getPublicIPByHTTP 后台查公网 IPv4（不阻塞请求，首次后缓存）
+func getPublicIPByHTTP() string {
+	urls := []string{
+		"https://ipinfo.io/ip",
+		"https://api.ipify.org",
 	}
-	ips, err := r.LookupIP(context.Background(), "ip4", "myip.opendns.com")
-	if err != nil || len(ips) == 0 {
-		return ""
+	client := http.Client{Timeout: 3 * time.Second}
+	for _, u := range urls {
+		if resp, err := client.Get(u); err == nil {
+			buf := make([]byte, 64)
+			n, _ := resp.Body.Read(buf)
+			resp.Body.Close()
+			if n > 0 {
+				ip := strings.TrimSpace(string(buf[:n]))
+				if parsed := stdnet.ParseIP(ip); parsed != nil && parsed.To4() != nil && !isPrivateIP(ip) {
+					return ip
+				}
+			}
+		}
 	}
-	return ips[0].String()
+	return ""
 }
