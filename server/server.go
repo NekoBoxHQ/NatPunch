@@ -1,11 +1,11 @@
 package server
 
 import (
+	"context"
 	"ehang.io/nps/lib/version"
 	"errors"
 	"math"
 	stdnet "net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -510,8 +510,19 @@ func GetDashboardData() map[string]interface{} {
 	data["httpsProxyPort"] = beego.AppConfig.String("https_proxy_port")
 	data["ipLimit"] = beego.AppConfig.String("ip_limit")
 	data["flowStoreInterval"] = beego.AppConfig.String("flow_store_interval")
-	// 获取公网 IPv4（启动时缓存一次）
-	localV4, localV6 := getCachedPublicIP(), ""
+	localV4, localV6 := "", ""
+	if conn, err := stdnet.Dial("udp", "8.8.8.8:80"); err == nil {
+		if udpAddr, ok := conn.LocalAddr().(*stdnet.UDPAddr); ok {
+			localV4 = udpAddr.IP.String()
+		}
+		conn.Close()
+	}
+	// NAT 环境：本机是内网 IP，后台用 DNS 查公网 IP（不阻塞页面）
+	if isPrivateIP(localV4) && publicIP == "" {
+		go func() {
+			publicIP = getPublicIPByDNS()
+		}()
+	}
 	// 获取本机 IPv6（全局单播）
 	if addrs, err := stdnet.InterfaceAddrs(); err == nil {
 		for _, addr := range addrs {
@@ -527,7 +538,11 @@ func GetDashboardData() map[string]interface{} {
 	if localV4 == "" {
 		localV4 = beego.AppConfig.String("p2p_ip")
 	}
-	data["serverIp"] = localV4
+	displayV4 := localV4
+	if publicIP != "" {
+		displayV4 = publicIP
+	}
+	data["serverIp"] = displayV4
 	data["serverIpv6"] = localV6
 	data["p2pPort"] = beego.AppConfig.String("p2p_port")
 	data["logLevel"] = beego.AppConfig.String("log_level")
@@ -607,81 +622,21 @@ func isPrivateIP(ip string) bool {
 		strings.HasPrefix(ip, "127.")
 }
 
-var (
-	cachedPublicIP   = ""
-	publicIPInited   = false
-)
+// publicIP 缓存公网 IPv4（DNS 查询结果）
+var publicIP = ""
 
-func initPublicIP() {
-	defer func() { publicIPInited = true }()
-	localV4 := ""
-	for _, target := range []string{"223.5.5.5:80", "119.29.29.29:80", "8.8.8.8:80"} {
-		if conn, err := stdnet.Dial("tcp", target); err == nil {
-			if tcpAddr, ok := conn.LocalAddr().(*stdnet.TCPAddr); ok {
-				localV4 = tcpAddr.IP.String()
-			}
-			conn.Close()
-			break
-		}
+// getPublicIPByDNS 用 OpenDNS 查询公网 IPv4（UDP DNS，毫秒级）
+func getPublicIPByDNS() string {
+	r := &stdnet.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (stdnet.Conn, error) {
+			d := stdnet.Dialer{Timeout: 2 * time.Second}
+			return d.DialContext(ctx, "udp", "resolver1.opendns.com:53")
+		},
 	}
-	if !isPrivateIP(localV4) && localV4 != "" {
-		cachedPublicIP = localV4
-		return
+	ips, err := r.LookupIP(context.Background(), "ip4", "myip.opendns.com")
+	if err != nil || len(ips) == 0 {
+		return ""
 	}
-	cachedPublicIP = getPublicIPFromAPI()
-}
-
-// getCachedPublicIP 返回公网 IPv4。未算完时先返回本机出口 IP，不阻塞请求
-func getCachedPublicIP() string {
-	if cachedPublicIP != "" {
-		return cachedPublicIP
-	}
-	// 首次请求：返回本机网卡 IP（不阻塞），后台算公网 IP
-	localV4 := ""
-	for _, target := range []string{"223.5.5.5:80", "119.29.29.29:80", "8.8.8.8:80"} {
-		if conn, err := stdnet.Dial("tcp", target); err == nil {
-			if tcpAddr, ok := conn.LocalAddr().(*stdnet.TCPAddr); ok {
-				localV4 = tcpAddr.IP.String()
-			}
-			conn.Close()
-			break
-		}
-	}
-	if !publicIPInited {
-		go initPublicIP()
-	}
-	return localV4
-}
-
-// getPublicIPFromAPI 调外部 API 获取公网 IPv4
-func getPublicIPFromAPI() string {
-	urls := []string{
-		"https://ipinfo.io/ip",
-		"https://api.ipify.org",
-		"https://ifconfig.me/ip",
-		"http://ip.3322.net",
-	}
-	client := http.Client{Timeout: 3 * time.Second}
-	for _, u := range urls {
-		if resp, err := client.Get(u); err == nil {
-			buf := make([]byte, 128)
-			n, _ := resp.Body.Read(buf)
-			resp.Body.Close()
-			if n > 0 {
-				raw := strings.TrimSpace(string(buf[:n]))
-				ip := ""
-				for _, f := range strings.Fields(raw) {
-					f = strings.TrimRight(f, "():，。 ")
-					if parsed := stdnet.ParseIP(f); parsed != nil && parsed.To4() != nil {
-						ip = f
-						break
-					}
-				}
-				if ip != "" && !isPrivateIP(ip) {
-					return ip
-				}
-			}
-		}
-	}
-	return ""
+	return ips[0].String()
 }
