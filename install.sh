@@ -83,7 +83,12 @@ EOF
 fi
 
 sleep 2
-if ps w 2>/dev/null | grep -v grep | grep -q "/usr/bin/natpunch"; then
+if command -v systemctl >/dev/null 2>&1; then
+    OK=$(systemctl is-active natpunch 2>/dev/null)
+else
+    OK=$(ps w 2>/dev/null | grep -v grep | grep -c "/usr/bin/natpunch")
+fi
+if [ "$OK" = "active" ] || [ "$OK" -gt 0 ] 2>/dev/null; then
     echo "==> 安装成功 ✓ $(/usr/bin/natpunch -version | head -n1)"
 else
     echo "==> 启动失败，看 /tmp/natpunch.log"
