@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	stdnet "net"
-	"context"
 	"net/http"
 	"os"
 	"strconv"
@@ -511,19 +510,8 @@ func GetDashboardData() map[string]interface{} {
 	data["httpsProxyPort"] = beego.AppConfig.String("https_proxy_port")
 	data["ipLimit"] = beego.AppConfig.String("ip_limit")
 	data["flowStoreInterval"] = beego.AppConfig.String("flow_store_interval")
-	// 获取公网 IPv4（UDP dial 出口地址法）
-	localV4, localV6 := "", ""
-	// 强制 IPv4 dial
-	if conn, err := stdnet.Dial("tcp4", "8.8.8.8:80"); err == nil {
-		if tcpAddr, ok := conn.LocalAddr().(*stdnet.TCPAddr); ok {
-			localV4 = tcpAddr.IP.String()
-		}
-		conn.Close()
-	}
-	// 如果是内网 IP（NAT 环境），调外部 API 取公网 IP
-	if isPrivateIP(localV4) {
-		localV4 = getPublicIPFromAPI()
-	}
+	// 获取公网 IPv4（启动时缓存一次）
+	localV4, localV6 := getCachedPublicIP(), ""
 	// 获取本机 IPv6（全局单播）
 	if addrs, err := stdnet.InterfaceAddrs(); err == nil {
 		for _, addr := range addrs {
@@ -619,22 +607,40 @@ func isPrivateIP(ip string) bool {
 		strings.HasPrefix(ip, "127.")
 }
 
+var cachedPublicIP = ""
+
+// getCachedPublicIP 返回缓存的公网 IPv4，首次调用时计算
+func getCachedPublicIP() string {
+	if cachedPublicIP != "" {
+		return cachedPublicIP
+	}
+	localV4 := ""
+	for _, target := range []string{"223.5.5.5:80", "119.29.29.29:80", "8.8.8.8:80"} {
+		if conn, err := stdnet.Dial("tcp", target); err == nil {
+			if tcpAddr, ok := conn.LocalAddr().(*stdnet.TCPAddr); ok {
+				localV4 = tcpAddr.IP.String()
+			}
+			conn.Close()
+			break
+		}
+	}
+	if !isPrivateIP(localV4) && localV4 != "" {
+		cachedPublicIP = localV4
+		return localV4
+	}
+	cachedPublicIP = getPublicIPFromAPI()
+	return cachedPublicIP
+}
+
 // getPublicIPFromAPI 调外部 API 获取公网 IPv4
 func getPublicIPFromAPI() string {
 	urls := []string{
+		"https://ipinfo.io/ip",
 		"https://api.ipify.org",
 		"https://ifconfig.me/ip",
-		"http://ipv4.icanhazip.com",
 		"http://ip.3322.net",
 	}
-	// 强制 IPv4 连接
-	dialer := &stdnet.Dialer{Timeout: 5 * time.Second}
-	tr := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (stdnet.Conn, error) {
-			return dialer.DialContext(ctx, "tcp4", addr)
-		},
-	}
-	client := http.Client{Timeout: 5 * time.Second, Transport: tr}
+	client := http.Client{Timeout: 3 * time.Second}
 	for _, u := range urls {
 		if resp, err := client.Get(u); err == nil {
 			buf := make([]byte, 128)
@@ -642,7 +648,6 @@ func getPublicIPFromAPI() string {
 			resp.Body.Close()
 			if n > 0 {
 				raw := strings.TrimSpace(string(buf[:n]))
-				// 提取 IPv4
 				ip := ""
 				for _, f := range strings.Fields(raw) {
 					f = strings.TrimRight(f, "():，。 ")
