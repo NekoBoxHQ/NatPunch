@@ -505,7 +505,17 @@ uninstall() {
 }
 # ================= 信息获取 =================
 get_ip() {
-    IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
+    IP=""
+    # 优先取公网出口 IP
+    if command -v wget >/dev/null 2>&1; then
+        IP=$(wget -qO- --timeout=3 https://api.ipify.org 2>/dev/null | head -n1)
+    elif command -v curl >/dev/null 2>&1; then
+        IP=$(curl -fsSL --max-time 3 https://api.ipify.org 2>/dev/null | head -n1)
+    fi
+    # 公网 API 不可用时取本机出口 IP
+    if [ -z "$IP" ]; then
+        IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
+    fi
     if [ -z "$IP" ]; then
         IP=$(ip addr 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
     fi
