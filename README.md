@@ -37,10 +37,12 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/
 ### 卸载客户端
 
 ```shell
+# OpenWrt
+uclient-fetch -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
+
+# Linux
 wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
 ```
-
-脚本自动识别客户端进程（按 -vkey= 精确匹配），停止服务、清理自启和配置，**不影响同机服务端**。
 
 ---
 
