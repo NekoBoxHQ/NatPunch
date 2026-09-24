@@ -243,8 +243,8 @@
                     var dom = location.hostname;
                     var port = "{{if .tls_enable}}{{.tls_p}}{{else}}{{.p}}{{end}}";
                     var tlsFlag = "{{if .tls_enable}}-tls_enable=true{{end}}";
-                    var ow = "uclient-fetch -qO- https://raw.githubusercontent.com/internetdroid/NatPunch/master/install.sh | sh -s -- --openwrt '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
-                    var lx = "wget -qO- https://raw.githubusercontent.com/internetdroid/NatPunch/master/install.sh | sh -s -- --openwrt '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
+                    var ow = "uclient-fetch -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/install.sh | sh -s -- --openwrt '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
+                    var lx = "wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/install.sh | sh -s -- --openwrt '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
                     return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
                         + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
                         + '<a href="{{.web_base_url}}/index/hostlist?client_id=' + row.Id
