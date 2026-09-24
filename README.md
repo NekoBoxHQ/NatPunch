@@ -58,4 +58,4 @@ GPL-3.0 License
 
 ## 讨论群组 / Discussion Group
 
-加入 Telegram 群组交流反馈: https://t.me/+Kdxyw8yLTz85ODg5
+加入 Telegram 群组交流反馈: [NatPunch 讨论群](https://t.me/+Kdxyw8yLTz85ODg5)
