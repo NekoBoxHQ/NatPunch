@@ -81,3 +81,16 @@ jobs:
         with:
           files: dist/*.tar.gz
           generate_release_notes: true
+
+      - name: Notify Telegram Group
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MSG=$(printf '<b>🚀 NatPunch %s 已发布</b>\n\n⚫ 下载: <a href="%s">GitHub Releases</a>\n⚫ 讨论群组: <a href="https://t.me/+Kdxyw8yLTz85ODg5">Telegram</a>' \
+            "${GITHUB_REF_NAME}" \
+            "https://github.com/internetdroid/NatPunch/releases/tag/${GITHUB_REF_NAME}")
+          curl -s -m 30 -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_CHAT}" \
+            --data-urlencode "text=${MSG}" \
+            -d "parse_mode=HTML"
