@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	updateRepo     = "internetdroid/nps"
+	updateRepo     = "lima-droid/nps"
 	updateAPIURL   = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
 	updateDownBase = "https://github.com/" + updateRepo + "/releases/download"
 )
