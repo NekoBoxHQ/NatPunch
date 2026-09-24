@@ -53,3 +53,9 @@ uclient-fetch -qO- https://raw.githubusercontent.com/internetdroid/NatPunch/mast
 ## 📃 License
 
 GPL-3.0 License
+
+---
+
+## 讨论群组 / Discussion Group
+
+加入 Telegram 群组交流反馈: https://t.me/+Kdxyw8yLTz85ODg5
