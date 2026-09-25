@@ -25,7 +25,7 @@
 SSH 粘贴执行，自动下载最新版、解压、启动：
 
 ```shell
-sh -c "$(wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/install_server.sh)"
+sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"
 ```
 
 安装完成后按提示打开 Web 面板，首次启动的默认账号密码见日志。
@@ -39,13 +39,13 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/
 Linux：
 
 ```shell
-wget -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
+wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
 ```
 
 OpenWrt：
 
 ```shell
-uclient-fetch -qO- https://raw.githubusercontent.com/lima-droid/NatPunch/master/uninstall_client.sh | sh
+uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
 ```
 
 ---
