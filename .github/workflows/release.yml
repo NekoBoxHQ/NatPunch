@@ -87,9 +87,9 @@ jobs:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          MSG=$(printf '<b>🚀 NatPunch %s 已发布</b>\n\n⚫ 下载: <a href="%s">GitHub Releases</a>\n⚫ 讨论群组: <a href="https://t.me/+Kdxyw8yLTz85ODg5">Telegram</a>' \
+          MSG=$(printf '<b>NatPunch %s 已发布</b>\n\n🔧 NAT 设备 内网穿透\n🖥️ 平台: OpenWrt / Linux\n🔗 项目: <a href="%s">GitHub</a>' \
             "${GITHUB_REF_NAME}" \
-            "https://github.com/NekoBoxHQ/NatPunch/releases/tag/${GITHUB_REF_NAME}")
+            "https://github.com/NekoBoxHQ/NatPunch")
           curl -s -m 30 -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             -d "chat_id=${TG_CHAT}" \
             --data-urlencode "text=${MSG}" \
