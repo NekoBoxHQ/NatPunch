@@ -214,6 +214,78 @@ if [ "$ACTION" = "update" ]; then
     cp -f "$BIN_SRC" "$CLIENT_BIN_1" || { warn "写入 $CLIENT_BIN_1 失败"; exit 1; }
     chmod 755 "$CLIENT_BIN_1"
     [ -f "$CLIENT_BIN_2" ] && { cp -f "$BIN_SRC" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
+    # —— 旧命名客户端迁移（v26.9.5 及以前装的 natpunch 命名）——
+    # 老版本只有旧命名自启；若升级后直接清理，新命名自启不存在 → 客户端不自启、不启动 → 失联。
+    # 此处从旧自启脚本 / rc.local 提取启动参数，注册新命名自启；提取失败则中止并提示重装。
+    NEED_REG=0
+    if [ -f "$LEGACY_INIT" ]; then init_owner "$LEGACY_INIT"; [ "$?" = "0" ] && NEED_REG=1; fi
+    if [ "$NEED_REG" = "0" ] && command -v systemctl >/dev/null 2>&1; then
+        for U in "$LEGACY_UNIT_1" "$LEGACY_UNIT_2"; do
+            [ -f "$U" ] || continue
+            unit_owner "$U"; [ "$?" = "0" ] && NEED_REG=1 && break
+        done
+    fi
+    if [ "$NEED_REG" = "0" ] && grep -q 'natpunch.*-vkey=' /etc/rc.local 2>/dev/null; then
+        NEED_REG=1
+    fi
+    if [ "$NEED_REG" = "1" ]; then
+        ARGS=""
+        if [ -z "$ARGS" ] && [ -f "$LEGACY_INIT" ]; then
+            L=$(grep -m1 'natpunch.*-vkey=' "$LEGACY_INIT" 2>/dev/null)
+            [ -n "$L" ] && ARGS=$(echo "$L" | sed 's/[;&"].*$//' | sed 's|[^ ]*natpunch ||')
+        fi
+        if [ -z "$ARGS" ] && command -v systemctl >/dev/null 2>&1; then
+            for U in "$LEGACY_UNIT_1" "$LEGACY_UNIT_2"; do
+                [ -f "$U" ] || continue
+                L=$(grep -m1 'ExecStart=.*-vkey=' "$U" 2>/dev/null)
+                [ -n "$L" ] && { ARGS=$(echo "$L" | sed 's/.*ExecStart=//; s/[;&"].*$//' | sed 's|[^ ]*natpunch ||'); break; }
+            done
+        fi
+        if [ -z "$ARGS" ] && grep -q 'natpunch.*-vkey=' /etc/rc.local 2>/dev/null; then
+            L=$(grep -m1 'natpunch.*-vkey=' /etc/rc.local 2>/dev/null)
+            [ -n "$L" ] && ARGS=$(echo "$L" | sed 's/[;&"].*$//' | sed 's|[^ ]*natpunch ||')
+        fi
+        if [ -n "$ARGS" ]; then
+            if [ -f /etc/openwrt_release ]; then
+                cat > "$CLIENT_INIT" <<EOF
+#!/bin/sh /etc/rc.common
+START=99
+STOP=10
+start() {
+    /usr/bin/natpunch-client $ARGS >>/tmp/natpunch-client.log 2>&1 &
+    sleep 1
+    kill -0 \$! 2>/dev/null || { echo "[NatPunch] 客户端启动失败" >&2; exit 1; }
+}
+stop() {
+    killall natpunch-client 2>/dev/null
+    sleep 1
+    killall -9 natpunch-client 2>/dev/null || true
+}
+EOF
+                chmod +x "$CLIENT_INIT" || { warn "无法赋予 init 脚本执行权限"; exit 1; }
+                "$CLIENT_INIT" enable 2>/dev/null || true
+            elif command -v systemctl >/dev/null 2>&1; then
+                cat > "$CLIENT_SYSTEMD_1" <<EOF
+[Unit]
+Description=NatPunch Client
+After=network.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/natpunch-client $ARGS
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+EOF
+                systemctl daemon-reload 2>/dev/null || true
+                systemctl enable natpunch-client 2>/dev/null || true
+            fi
+            log "旧版命名客户端已迁移到 natpunch-client 自启"
+        else
+            warn "无法从旧版客户端提取启动参数，请使用一键安装命令重新安装（配置 /etc/natpunch.conf 已保留）"
+            exit 1
+        fi
+    fi
     # 重新启动客户端服务（natpunch-client 专属名称，不触碰服务端 natpunch）
     if [ -f /etc/openwrt_release ]; then
         [ -f "$CLIENT_INIT" ] && "$CLIENT_INIT" start 2>/dev/null || true
