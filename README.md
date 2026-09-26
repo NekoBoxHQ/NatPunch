@@ -1,9 +1,5 @@
 # NatPunch
 
-![Version](https://img.shields.io/badge/version-v26.9.6-blue)
-![License](https://img.shields.io/badge/license-GPL--3.0-green)
-![Go](https://img.shields.io/badge/Go-%3E%3D1.22-00ADD8?logo=go)
-
 > 轻量级内网穿透 / 无公网设备管理平台。TLS 全程加密，TCP/UDP 隧道 + HTTP/SOCKS5 代理，静默管理软路由与服务器。
 
 ---
