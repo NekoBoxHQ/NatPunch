@@ -36,7 +36,9 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/i
 
 ### 卸载 / 更新客户端
 
-`uninstall_client.sh` 同时支持卸载与更新（更新保留 `/etc/natpunch.conf` 配置，仅替换二进制并重启）：
+`uninstall_client.sh` 同时支持卸载与更新（更新保留 `/etc/natpunch.conf` 配置，仅替换二进制并重启）。
+
+> **升级断连安全**：SSH 通过客户端隧道连接时，升级会自动先下载并校验升级文件，再将替换/重启流程转入后台执行（日志 `/tmp/natpunch_update.log`）。断开 SSH 不影响升级，完成后客户端自动重启、隧道恢复即可重新连接。同机部署服务端时，脚本只操作属于客户端的自启与进程，不影响服务端。
 
 **卸载（Linux）**
 

@@ -92,6 +92,18 @@ if [ "$ACTION" = "update" ]; then
     tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || { warn "解压失败"; exit 1; }
     BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch | head -n1)"
     [ -n "$BIN_SRC" ] || { warn "压缩包内未找到 natpunch 二进制"; exit 1; }
+    # —— 断连保护 ——
+    # SSH 通常通过客户端打通的隧道连接：停止客户端 = 隧道断 = SSH 断。
+    # 升级文件已下载并校验完成，此处让后续替换/重启流程脱离终端会话，
+    # 忽略挂断信号并改道日志，否则脚本随 SSH 挂断被杀 → 客户端停而不启 → 设备失联。
+    if [ -z "${NATPUNCH_UPDATE_DETACHED:-}" ]; then
+        export NATPUNCH_UPDATE_DETACHED=1
+        echo "==> 升级文件已就绪，流程转入后台执行"
+        echo "==> SSH 断开后自动完成替换与重启，日志: /tmp/natpunch_update.log"
+        echo "==> 完成后客户端自动重启，隧道恢复后请重新连接"
+        trap '' HUP
+        exec > /tmp/natpunch_update.log 2>&1 < /dev/null
+    fi
     # 停止客户端服务与残留进程（仅操作属于客户端的自启，不影响同机服务端）
     IO=2
     if [ -f "$CLIENT_INIT" ]; then
