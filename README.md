@@ -38,21 +38,27 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/i
 
 `uninstall_client.sh` 同时支持卸载与更新（更新保留 `/etc/natpunch.conf` 配置，仅替换二进制并重启）：
 
-Linux（wget）：
+**卸载（Linux）**
 
 ```shell
-# 卸载
 wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
-# 更新
+```
+
+**更新（Linux）**
+
+```shell
 wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
 ```
 
-OpenWrt（uclient-fetch）：
+**卸载（OpenWrt）**
 
 ```shell
-# 卸载
 uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
-# 更新
+```
+
+**更新（OpenWrt）**
+
+```shell
 uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
 ```
 
