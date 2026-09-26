@@ -401,10 +401,6 @@ func inputCmd() {
 	inputCmd()
 }
 
-func installNps() {
-
-}
-
 type nps struct {
 	exit chan struct{}
 }

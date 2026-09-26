@@ -18,7 +18,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,13 +66,13 @@ func (s *httpServer) Start() error {
 		go func() {
 			l, err := connection.GetHttpListener()
 			if err != nil {
-				logs.Error(err)
-				os.Exit(0)
+				logs.Error("start http proxy listener error: %v", err)
+				return
 			}
 			err = s.httpServer.Serve(l)
 			if err != nil {
-				logs.Error(err)
-				os.Exit(0)
+				logs.Error("http proxy serve error: %v", err)
+				return
 			}
 		}()
 	}
@@ -82,8 +81,8 @@ func (s *httpServer) Start() error {
 		go func() {
 			s.httpsListener, err = connection.GetHttpsListener()
 			if err != nil {
-				logs.Error(err)
-				os.Exit(0)
+				logs.Error("start https proxy listener error: %v", err)
+				return
 			}
 			logs.Error(NewHttpsServer(s.httpsListener, s.bridge, s.useCache, s.cacheLen).Start())
 		}()
@@ -227,7 +226,7 @@ reset:
 					logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
 					jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "参数错误"})
 				}
-				s.errorContent, err = jsonBytes, err
+				s.errorContent = jsonBytes
 				s.errorCode = 200
 				return
 			}
@@ -235,7 +234,7 @@ reset:
 			errorContent, _ := web.ReadStaticFile("page/auth.html")
 			authHtml := string(errorContent)
 			authHtml = strings.ReplaceAll(authHtml, "${ip}", common.GetIpByAddr(c.RemoteAddr().String()))
-			s.errorContent, err = []byte(authHtml), err
+			s.errorContent = []byte(authHtml)
 			s.errorCode = 401
 			return
 		}
@@ -255,8 +254,8 @@ reset:
 	connClient = conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
 
 	//read from inc-client
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		isReset = false
 		defer connClient.Close()
 		defer func() {

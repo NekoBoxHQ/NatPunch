@@ -15,7 +15,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,34 +22,6 @@ import (
 
 	"ehang.io/nps/lib/crypt"
 )
-
-// Get the corresponding IP address through domain name
-func GetHostByName(hostname string) string {
-	if !DomainCheck(hostname) {
-		return hostname
-	}
-	ips, _ := net.LookupIP(hostname)
-	if ips != nil {
-		for _, v := range ips {
-			if v.To4() != nil {
-				return v.String()
-			}
-		}
-	}
-	return ""
-}
-
-// Check the legality of domain
-func DomainCheck(domain string) bool {
-	var match bool
-	IsLine := "^((http://)|(https://))?([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,6}(/)"
-	NotLine := "^((http://)|(https://))?([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,6}"
-	match, _ = regexp.MatchString(IsLine, domain)
-	if !match {
-		match, _ = regexp.MatchString(NotLine, domain)
-	}
-	return match
-}
 
 // Check if the Request request is validated
 func CheckAuth(r *http.Request, user, passwd string) bool {
@@ -81,14 +52,6 @@ func GetBoolByStr(s string) bool {
 		return true
 	}
 	return false
-}
-
-// get str by bool
-func GetStrByBool(b bool) string {
-	if b {
-		return "1"
-	}
-	return "0"
 }
 
 // int
@@ -432,22 +395,13 @@ func BytesToNum(b []byte) int {
 }
 
 // get the length of the sync map
-func GeSynctMapLen(m sync.Map) int {
+func GeSynctMapLen(m *sync.Map) int {
 	var c int
 	m.Range(func(key, value interface{}) bool {
 		c++
 		return true
 	})
 	return c
-}
-
-func GetExtFromPath(path string) string {
-	s := strings.Split(path, ".")
-	re, err := regexp.Compile(`(\w+)`)
-	if err != nil {
-		return ""
-	}
-	return string(re.Find([]byte(s[0])))
 }
 
 var externalIp string

@@ -26,14 +26,16 @@ func NewKcpListenerAndProcess(addr string, f func(c net.Conn)) error {
 	}
 	for {
 		c, err := kcpListener.AcceptKCP()
-		SetUdpSession(c)
 		if err != nil {
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				return nil
+			}
 			logs.Warn(err)
 			continue
 		}
+		SetUdpSession(c)
 		go f(c)
 	}
-	return nil
 }
 
 func Accept(l net.Listener, f func(c net.Conn)) {
