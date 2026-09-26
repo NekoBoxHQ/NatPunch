@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ehang.io/nps/bridge"
@@ -94,6 +95,8 @@ func StartNewServer(bridgePort int, cnf *file.Tunnel, bridgeType string, bridgeD
 	}
 	// 启动后台 IO 速率采集，Dashboard 直接读缓存，无需 Sleep
 	tool.StartIORateCollector()
+	// 启动公网 IPv4 定时刷新（30 分钟自动重查，失败保留旧值）
+	startPublicIPRefresher()
 	go func() {
 		if err := Bridge.StartTunnel(); err != nil {
 			logs.Error("start server bridge error", err)
@@ -552,10 +555,12 @@ func GetDashboardData() map[string]interface{} {
 		}
 		conn.Close()
 	}
-	// NAT 环境：本机是内网 IP，后台用 DNS 查公网 IP（不阻塞页面）
-	if isPrivateIP(localV4) && publicIP == "" {
+	// NAT 环境：本机是内网 IP，后台查询公网 IP（不阻塞页面；此后由定时刷新器接管）
+	if isPrivateIP(localV4) && cachedPublicIP() == "" {
 		go func() {
-			publicIP = getPublicIPByHTTP()
+			if ip := getPublicIPByHTTP(); ip != "" {
+				storePublicIP(ip)
+			}
 		}()
 	}
 	// 获取本机 IPv6（全局单播）
@@ -574,8 +579,8 @@ func GetDashboardData() map[string]interface{} {
 		localV4 = beego.AppConfig.String("p2p_ip")
 	}
 	displayV4 := localV4
-	if publicIP != "" {
-		displayV4 = publicIP
+	if ip := cachedPublicIP(); ip != "" {
+		displayV4 = ip
 	}
 	data["serverIp"] = displayV4
 	data["serverIpv6"] = localV6
@@ -657,10 +662,44 @@ func isPrivateIP(ip string) bool {
 		strings.HasPrefix(ip, "127.")
 }
 
-// publicIP 缓存公网 IPv4（DNS 查询结果）
-var publicIP = ""
+// publicIPCache 缓存公网 IPv4（atomic.Value：页面请求无锁读，后台定期刷新，永不阻塞面板）
+var publicIPCache atomic.Value // ipEntry
 
-// getPublicIPByHTTP 后台查公网 IPv4（不阻塞请求，首次后缓存）
+// ipEntry 公网 IPv4 缓存条目
+type ipEntry struct {
+	ip      string
+	updated time.Time
+}
+
+const publicIPRefreshInterval = 30 * time.Minute
+
+// cachedPublicIP 读取缓存（未初始化返回空串）
+func cachedPublicIP() string {
+	v := publicIPCache.Load()
+	if v == nil {
+		return ""
+	}
+	return v.(ipEntry).ip
+}
+
+// storePublicIP 写入缓存
+func storePublicIP(ip string) {
+	publicIPCache.Store(ipEntry{ip: ip, updated: time.Now()})
+}
+
+// startPublicIPRefresher 后台定期刷新公网 IPv4；查询失败保留旧值，下一周期重试
+func startPublicIPRefresher() {
+	go func() {
+		for {
+			time.Sleep(publicIPRefreshInterval)
+			if ip := getPublicIPByHTTP(); ip != "" {
+				storePublicIP(ip)
+			}
+		}
+	}()
+}
+
+// getPublicIPByHTTP 后台查公网 IPv4（不阻塞请求，多源探测）
 func getPublicIPByHTTP() string {
 	urls := []string{
 		"https://ipinfo.io/ip",

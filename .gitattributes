@@ -1,0 +1,11 @@
+# 统一行尾为 LF（覆盖 core.autocrlf），保证 Go/Shell 格式与跨平台一致
+* text=auto eol=lf
+
+# 二进制文件不参与行尾转换
+*.png binary
+*.ico binary
+*.icns binary
+*.car binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
