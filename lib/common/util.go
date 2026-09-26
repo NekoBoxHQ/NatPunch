@@ -115,7 +115,7 @@ func FileExists(name string) bool {
 
 // Judge whether the TCP port can open normally
 func TestTcpPort(port int) bool {
-	l, err := net.ListenTCP("tcp", &net.TCPAddr{net.ParseIP("0.0.0.0"), port, ""})
+	l, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: port})
 	defer func() {
 		if l != nil {
 			l.Close()
@@ -129,7 +129,7 @@ func TestTcpPort(port int) bool {
 
 // Judge whether the UDP port can open normally
 func TestUdpPort(port int) bool {
-	l, err := net.ListenUDP("udp", &net.UDPAddr{net.ParseIP("0.0.0.0"), port, ""})
+	l, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: port})
 	defer func() {
 		if l != nil {
 			l.Close()

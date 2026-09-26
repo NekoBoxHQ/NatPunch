@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"crypto/tls"
-	_ "crypto/tls"
 	"ehang.io/nps/lib/nps_mux"
 	"encoding/binary"
 	"errors"
@@ -56,11 +55,11 @@ type Bridge struct {
 	CloseClient    chan int
 	SecretChan     chan *conn.Secret
 	ipVerify       bool
-	runList        sync.Map //map[int]interface{}
+	runList        *sync.Map //map[int]interface{}
 	disconnectTime int
 }
 
-func NewTunnel(tunnelPort int, tunnelType string, ipVerify bool, runList sync.Map, disconnectTime int) *Bridge {
+func NewTunnel(tunnelPort int, tunnelType string, ipVerify bool, runList *sync.Map, disconnectTime int) *Bridge {
 	return &Bridge{
 		TunnelPort:     tunnelPort,
 		tunnelType:     tunnelType,
@@ -102,7 +101,7 @@ func (s *Bridge) StartTunnel() error {
 				tlsBridgePort := beego.AppConfig.DefaultInt("tls_bridge_port", 8025)
 
 				logs.Info("tls server start, the bridge type is %s, the tls bridge port is %d", "tcp", tlsBridgePort)
-				tlsListener, tlsErr := net.ListenTCP("tcp", &net.TCPAddr{net.ParseIP(beego.AppConfig.String("bridge_ip")), tlsBridgePort, ""})
+				tlsListener, tlsErr := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(beego.AppConfig.String("bridge_ip")), Port: tlsBridgePort})
 				if tlsErr != nil {
 					logs.Error(tlsErr)
 					os.Exit(0)

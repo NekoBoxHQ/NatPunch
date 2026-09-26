@@ -5,11 +5,11 @@ import (
 	"errors"
 	"math"
 	stdnet "net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"net/http"
 	"time"
 
 	"ehang.io/nps/bridge"
@@ -87,7 +87,7 @@ func DealBridgeTask() {
 
 // start a new server
 func StartNewServer(bridgePort int, cnf *file.Tunnel, bridgeType string, bridgeDisconnect int) {
-	Bridge = bridge.NewTunnel(bridgePort, bridgeType, common.GetBoolByStr(beego.AppConfig.String("ip_limit")), RunList, bridgeDisconnect)
+	Bridge = bridge.NewTunnel(bridgePort, bridgeType, common.GetBoolByStr(beego.AppConfig.String("ip_limit")), &RunList, bridgeDisconnect)
 	// 启动流量持久化（只启动一次，避免每次 AddTask 创建泄漏的 goroutine）
 	if minute, err := beego.AppConfig.Int("flow_store_interval"); err == nil && minute > 0 {
 		go flowSession(time.Minute * time.Duration(minute))
@@ -211,13 +211,48 @@ func NewMode(Bridge *bridge.Bridge, c *file.Tunnel) proxy.Service {
 	case "udp":
 		service = proxy.NewUdpModeServer(Bridge, c)
 	case "tcp+udp":
-		tcpT := *c
-		tcpT.Mode = "tcp"
-		udpT := *c
-		udpT.Mode = "udp"
+		// 避免拷贝含 sync.RWMutex 的 Tunnel 结构（复制锁），逐字段构造两个独立副本
+		tcpT := &file.Tunnel{
+			Id: c.Id, Sort: c.Sort, Port: c.Port, ServerIp: c.ServerIp,
+			Mode: "tcp", Status: c.Status, RunStatus: c.RunStatus, Client: c.Client,
+			Ports: c.Ports, Flow: c.Flow, Password: c.Password, Remark: c.Remark,
+			TargetAddr: c.TargetAddr, NoStore: c.NoStore, LocalPath: c.LocalPath,
+			StripPre: c.StripPre, ProtoVersion: c.ProtoVersion, Target: c.Target,
+			MultiAccount: c.MultiAccount,
+			Health: file.Health{
+				HealthCheckTimeout:  c.HealthCheckTimeout,
+				HealthMaxFail:       c.HealthMaxFail,
+				HealthCheckInterval: c.HealthCheckInterval,
+				HealthNextTime:      c.HealthNextTime,
+				HealthMap:           c.HealthMap,
+				HttpHealthUrl:       c.HttpHealthUrl,
+				HealthRemoveArr:     c.HealthRemoveArr,
+				HealthCheckType:     c.HealthCheckType,
+				HealthCheckTarget:   c.HealthCheckTarget,
+			},
+		}
+		udpT := &file.Tunnel{
+			Id: c.Id, Sort: c.Sort, Port: c.Port, ServerIp: c.ServerIp,
+			Mode: "udp", Status: c.Status, RunStatus: c.RunStatus, Client: c.Client,
+			Ports: c.Ports, Flow: c.Flow, Password: c.Password, Remark: c.Remark,
+			TargetAddr: c.TargetAddr, NoStore: c.NoStore, LocalPath: c.LocalPath,
+			StripPre: c.StripPre, ProtoVersion: c.ProtoVersion, Target: c.Target,
+			MultiAccount: c.MultiAccount,
+			Health: file.Health{
+				HealthCheckTimeout:  c.HealthCheckTimeout,
+				HealthMaxFail:       c.HealthMaxFail,
+				HealthCheckInterval: c.HealthCheckInterval,
+				HealthNextTime:      c.HealthNextTime,
+				HealthMap:           c.HealthMap,
+				HttpHealthUrl:       c.HttpHealthUrl,
+				HealthRemoveArr:     c.HealthRemoveArr,
+				HealthCheckType:     c.HealthCheckType,
+				HealthCheckTarget:   c.HealthCheckTarget,
+			},
+		}
 		service = &multiService{svcs: []proxy.Service{
-			proxy.NewTunnelModeServer(proxy.ProcessTunnel, Bridge, &tcpT),
-			proxy.NewUdpModeServer(Bridge, &udpT),
+			proxy.NewTunnelModeServer(proxy.ProcessTunnel, Bridge, tcpT),
+			proxy.NewUdpModeServer(Bridge, udpT),
 		}}
 	case "webServer":
 		InitFromCsv()

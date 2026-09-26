@@ -104,8 +104,12 @@ func SortTunnels(list []*Tunnel, sortField, order string) {
 			// 默认：按客户端 ID 升序（同客户端排在一起），再按 Id 升序
 			sort.SliceStable(list, func(i, j int) bool {
 				ci, cj := 0, 0
-				if list[i].Client != nil { ci = list[i].Client.Id }
-				if list[j].Client != nil { cj = list[j].Client.Id }
+				if list[i].Client != nil {
+					ci = list[i].Client.Id
+				}
+				if list[j].Client != nil {
+					cj = list[j].Client.Id
+				}
 				if ci != cj {
 					return ci < cj
 				}

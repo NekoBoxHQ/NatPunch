@@ -42,7 +42,7 @@ func GetBridgeListener(tp string) (net.Listener, error) {
 	if pMux != nil {
 		return pMux.GetClientListener(), nil
 	}
-	return net.ListenTCP("tcp", &net.TCPAddr{net.ParseIP(beego.AppConfig.String("bridge_ip")), p, ""})
+	return net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(beego.AppConfig.String("bridge_ip")), Port: p})
 }
 
 func GetHttpListener() (net.Listener, error) {
@@ -81,5 +81,5 @@ func getTcpListener(ip, p string) (net.Listener, error) {
 	if ip == "" {
 		ip = "0.0.0.0"
 	}
-	return net.ListenTCP("tcp", &net.TCPAddr{net.ParseIP(ip), port, ""})
+	return net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(ip), Port: port})
 }

@@ -35,12 +35,12 @@ func (s *Rate) add(size int64) {
 	atomic.AddInt64(&s.bucketSurplusSize, size)
 }
 
-//回桶
+// 回桶
 func (s *Rate) ReturnBucket(size int64) {
 	s.add(size)
 }
 
-//停止
+// 停止
 func (s *Rate) Stop() {
 	s.stopChan <- true
 }

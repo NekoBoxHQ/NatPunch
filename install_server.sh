@@ -1,4 +1,5 @@
 #!/bin/sh
+set -u
 # ================= 基本配置 =================
 DIR="/opt/natpunch"
 BIN="$DIR/natpunch"
@@ -28,22 +29,17 @@ if [ ! -t 1 ]; then
     C_GREEN=''; C_YELLOW=''; C_RED=''; C_CYAN=''; C_BLUE=''
 fi
 LINE="----------------------------------------"
+# 输出统一用 printf（%b 解释 \033 转义），兼容 busybox 不带 -e 的 echo，避免输出字面 "-e" 前缀
 title() {
-    echo ""
-    echo -e "${C_CYAN}${LINE}${C_RESET}"
-    echo -e "${C_BOLD}  $*${C_RESET}"
-    echo -e "${C_CYAN}${LINE}${C_RESET}"
+    printf '\n%b\n%b\n%b\n' "${C_CYAN}${LINE}${C_RESET}" "${C_BOLD}  $*${C_RESET}" "${C_CYAN}${LINE}${C_RESET}"
 }
 section() {
-    echo ""
-    echo -e "${C_BLUE}${LINE}${C_RESET}"
-    echo -e "${C_BOLD}  $*${C_RESET}"
-    echo -e "${C_BLUE}${LINE}${C_RESET}"
+    printf '\n%b\n%b\n%b\n' "${C_BLUE}${LINE}${C_RESET}" "${C_BOLD}  $*${C_RESET}" "${C_BLUE}${LINE}${C_RESET}"
 }
-log()  { echo -e "  ${C_GREEN}[OK]${C_RESET}   $*"; }
-info() { echo -e "  ${C_CYAN}[INFO]${C_RESET} $*"; }
-warn() { echo -e "  ${C_YELLOW}[WARN]${C_RESET} $*" >&2; }
-die()  { echo -e "  ${C_RED}[FAIL]${C_RESET} $*" >&2; exit 1; }
+log()  { printf '%b\n' "  ${C_GREEN}[OK]${C_RESET}   $*"; }
+info() { printf '%b\n' "  ${C_CYAN}[INFO]${C_RESET} $*"; }
+warn() { printf '%b\n' "  ${C_YELLOW}[WARN]${C_RESET} $*" >&2; }
+die()  { printf '%b\n' "  ${C_RED}[FAIL]${C_RESET} $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少依赖: $1"; }
 kv() {
     printf "  ${C_DIM}%-10s${C_RESET} %s\n" "$1" "$2"
@@ -201,6 +197,7 @@ prompt_credentials() {
         y|Y|yes|YES)
             NEW_HTTPS="true"
             printf "  域名: "; read NEW_DOMAIN
+            [ -n "$NEW_DOMAIN" ] || NEW_DOMAIN="$(get_ip)"
             printf "  pem [默认 /opt/natpunch/conf/server.pem]: "; read IN_CERT
             [ -n "$IN_CERT" ] && NEW_CERT="$IN_CERT" || NEW_CERT="/opt/natpunch/conf/server.pem"
             printf "  key [默认 /opt/natpunch/conf/server.key]: "; read IN_KEY
@@ -262,8 +259,8 @@ fetch() {
     esac
 }
 get_latest_ver() {
-    # 多源探测：优先 GitHub API，失败后回退 GitHub 网页重定向（github.com 通常更稳定），
-    # 两者都失败返回空（由调用方回退到 VER 默认版本）。
+    # 多源探测：优先 GitHub API，失败后回退 GitHub 网页重定向（github.com 通常更稳定）。
+    # 仅用于展示版本号；两者都失败返回空，下载仍走 releases/latest/download 自动取最新。
     V=""
     RESP=$(fetch "$API_URL") || RESP=""
     if [ -n "$RESP" ]; then
@@ -525,19 +522,19 @@ get_web_port() {
 # ================= 菜单 =================
 show_menu() {
     echo ""
-    echo -e "${C_CYAN}${LINE}${C_RESET}"
-    echo -e "${C_BOLD}         NatPunch 服务端管理脚本${C_RESET}"
-    echo -e "${C_CYAN}${LINE}${C_RESET}"
-    echo -e "   ${C_GREEN}1${C_RESET}  安装 NatPunch"
-    echo -e "   ${C_GREEN}2${C_RESET}  启动 NatPunch"
-    echo -e "   ${C_GREEN}3${C_RESET}  停止 NatPunch"
-    echo -e "   ${C_GREEN}4${C_RESET}  重启 NatPunch"
-    echo -e "   ${C_GREEN}5${C_RESET}  查看状态"
-    echo -e "   ${C_GREEN}6${C_RESET}  修改面板账号密码"
-    echo -e "   ${C_GREEN}7${C_RESET}  升级 NatPunch"
-    echo -e "   ${C_GREEN}8${C_RESET}  卸载 NatPunch"
-    echo -e "   ${C_RED}0${C_RESET}  退出"
-    echo -e "${C_CYAN}${LINE}${C_RESET}"
+    printf '%b\n' "${C_CYAN}${LINE}${C_RESET}"
+    printf '%b\n' "${C_BOLD}         NatPunch 服务端管理脚本${C_RESET}"
+    printf '%b\n' "${C_CYAN}${LINE}${C_RESET}"
+    printf '%b\n' "   ${C_GREEN}1${C_RESET}  安装 NatPunch"
+    printf '%b\n' "   ${C_GREEN}2${C_RESET}  启动 NatPunch"
+    printf '%b\n' "   ${C_GREEN}3${C_RESET}  停止 NatPunch"
+    printf '%b\n' "   ${C_GREEN}4${C_RESET}  重启 NatPunch"
+    printf '%b\n' "   ${C_GREEN}5${C_RESET}  查看状态"
+    printf '%b\n' "   ${C_GREEN}6${C_RESET}  修改面板账号密码"
+    printf '%b\n' "   ${C_GREEN}7${C_RESET}  升级 NatPunch"
+    printf '%b\n' "   ${C_GREEN}8${C_RESET}  卸载 NatPunch"
+    printf '%b\n' "   ${C_RED}0${C_RESET}  退出"
+    printf '%b\n' "${C_CYAN}${LINE}${C_RESET}"
     printf "  请输入选项 [0-8]: "
 }
 # ================= 动作 =================
@@ -549,9 +546,9 @@ do_install() {
     RC=$?; release_lock
     if [ $RC -eq 0 ]; then
         echo ""
-        echo -e "${C_GREEN}${LINE}${C_RESET}"
-        echo -e "${C_GREEN}${C_BOLD}  [OK] 安装完成${C_RESET}"
-        echo -e "${C_GREEN}${LINE}${C_RESET}"
+        printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
+        printf '%b\n' "${C_GREEN}${C_BOLD}  [OK] 安装完成${C_RESET}"
+        printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
         if [ "$NEW_HTTPS" = "true" ]; then
             kv "面板地址" "https://$NEW_DOMAIN:$NEW_PORT"
@@ -617,9 +614,9 @@ do_passwd() {
             SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
         else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""
-        echo -e "${C_GREEN}${LINE}${C_RESET}"
-        echo -e "${C_GREEN}${C_BOLD}  [OK] 修改完成${C_RESET}"
-        echo -e "${C_GREEN}${LINE}${C_RESET}"
+        printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
+        printf '%b\n' "${C_GREEN}${C_BOLD}  [OK] 修改完成${C_RESET}"
+        printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
         kv "端口" "$IN_PORT"; kv "用户名" "$IN_USER"; kv "密码" "$IN_PASS"; kv "面板" "$SCHEME://$HOST:$IN_PORT"
         echo ""
@@ -646,9 +643,9 @@ do_upgrade() {
             SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
         else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""
-        echo -e "${C_GREEN}${LINE}${C_RESET}"
-        echo -e "${C_GREEN}${C_BOLD}  [OK] 升级完成${C_RESET}"
-        echo -e "${C_GREEN}${LINE}${C_RESET}"
+        printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
+        printf '%b\n' "${C_GREEN}${C_BOLD}  [OK] 升级完成${C_RESET}"
+        printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
         kv "目标版本" "${IN_VER:-最新版}"; kv "面板地址" "$SCHEME://$HOST:$PORT"
         echo ""
@@ -656,8 +653,8 @@ do_upgrade() {
 }
 do_uninstall() {
     echo ""
-    echo -e "  ${C_YELLOW}[WARN]${C_RESET} 即将卸载 NatPunch"
-    echo -e "  ${C_DIM}       将删除: $DIR、自启服务、全部配置（含证书）${C_RESET}"
+    printf '%b\n' "  ${C_YELLOW}[WARN]${C_RESET} 即将卸载 NatPunch"
+    printf '%b\n' "  ${C_DIM}       将删除: $DIR、自启服务、全部配置（含证书）${C_RESET}"
     printf "  确认卸载？[y/N]: "; read ans
     case "$ans" in y|Y|yes|YES) ;; *) echo "  已取消"; return 0 ;; esac
     acquire_lock; uninstall; release_lock

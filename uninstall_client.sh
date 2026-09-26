@@ -118,7 +118,23 @@ if [ "$ACTION" = "update" ]; then
     fi
     sleep 3
     VER_OUT="$("$CLIENT_BIN_1" -version 2>/dev/null | head -n1)"
-    log "更新完成 ${VER_OUT:-最新版}"
+    # 验证客户端已恢复运行（断连保护场景下此段写入后台日志）
+    RUNNING=0
+    if [ -d /proc ]; then
+        for d in /proc/[0-9]*; do
+            exe=$(readlink "$d/exe" 2>/dev/null) || continue
+            case "$exe" in
+                */natpunch-client) RUNNING=1; break ;;
+            esac
+        done
+    else
+        ps w 2>/dev/null | grep -v grep | grep -q 'natpunch-client' && RUNNING=1
+    fi
+    if [ "$RUNNING" = "1" ]; then
+        log "更新完成 ${VER_OUT:-最新版}"
+    else
+        warn "更新完成但客户端未运行，请检查日志: /tmp/natpunch_update.log"
+    fi
     rm -rf "$TMP_DIR"
     trap - EXIT INT TERM
     exit 0

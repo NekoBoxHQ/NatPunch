@@ -86,6 +86,19 @@ tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"
 tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || die "解压失败"
 BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client | head -n1)"
 [ -n "$BIN_SRC" ] || die "未找到 natpunch-client 二进制"
+
+# ---------- 安装前清理既有客户端进程/服务，避免重装后双跑 ----------
+if command -v killall >/dev/null 2>&1; then
+    killall natpunch-client 2>/dev/null || true
+elif command -v pkill >/dev/null 2>&1; then
+    pkill -x natpunch-client 2>/dev/null || true
+fi
+[ -f "$INIT" ] && "$INIT" stop 2>/dev/null || true
+if command -v systemctl >/dev/null 2>&1 && { [ -f "$UNIT" ] || [ -f /lib/systemd/system/natpunch-client.service ]; }; then
+    systemctl stop natpunch-client 2>/dev/null || true
+fi
+sleep 1
+
 cp -f "$BIN_SRC" "$BIN" || die "安装到 $BIN 失败"
 chmod 755 "$BIN"
 

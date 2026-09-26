@@ -21,7 +21,7 @@ func NewSnappyConn(conn io.ReadWriteCloser) *SnappyConn {
 	return c
 }
 
-//snappy压缩写
+// snappy压缩写
 func (s *SnappyConn) Write(b []byte) (n int, err error) {
 	if n, err = s.w.Write(b); err != nil {
 		return
@@ -32,7 +32,7 @@ func (s *SnappyConn) Write(b []byte) (n int, err error) {
 	return
 }
 
-//snappy压缩读
+// snappy压缩读
 func (s *SnappyConn) Read(b []byte) (n int, err error) {
 	return s.r.Read(b)
 }

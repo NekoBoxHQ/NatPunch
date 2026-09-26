@@ -31,7 +31,7 @@ func NewP2PServer(p2pPort int) *P2PServer {
 func (s *P2PServer) Start() error {
 	logs.Info("start p2p server port", s.p2pPort)
 	var err error
-	s.listener, err = net.ListenUDP("udp", &net.UDPAddr{net.ParseIP("0.0.0.0"), s.p2pPort, ""})
+	s.listener, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: s.p2pPort})
 	if err != nil {
 		return err
 	}

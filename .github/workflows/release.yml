@@ -83,6 +83,7 @@ jobs:
           generate_release_notes: true
 
       - name: Notify Telegram Group
+        continue-on-error: true
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}

@@ -65,7 +65,7 @@ func (s *UdpModeServer) Start() error {
 	if s.task.ServerIp == "" {
 		s.task.ServerIp = "0.0.0.0"
 	}
-	s.listener, err = net.ListenUDP("udp", &net.UDPAddr{net.ParseIP(s.task.ServerIp), s.task.Port, ""})
+	s.listener, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(s.task.ServerIp), Port: s.task.Port})
 	if err != nil {
 		return err
 	}
