@@ -9,7 +9,7 @@
 #   sh uninstall_client.sh update      更新客户端（保留 /etc/natpunch.conf 配置）
 set -u
 REPO="NekoBoxHQ/NatPunch"
-FALLBACK_VER="v26.9.5"
+FALLBACK_VER="v26.9.6"
 ACTION="${1:-uninstall}"
 SERVER_DIR="/opt/natpunch"
 SERVER_BIN="$SERVER_DIR/natpunch"

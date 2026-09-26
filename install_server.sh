@@ -8,7 +8,7 @@ WEB="$DIR/web"
 PID_FILE="$DIR/natpunch.pid"
 LOCK_DIR="$DIR/natpunch.lock.d"
 LOG="$DIR/natpunch.log"
-VER="v26.9.3"
+VER="v26.9.6"
 REPO="NekoBoxHQ/NatPunch"
 API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SELF="$(basename "$0")"
@@ -261,9 +261,24 @@ fetch() {
     esac
 }
 get_latest_ver() {
-    RESP=$(fetch "$API_URL") || return 1
-    [ -n "$RESP" ] || return 1
-    echo "$RESP" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1
+    # 多源探测：优先 GitHub API，失败后回退 GitHub 网页重定向（github.com 通常更稳定），
+    # 两者都失败返回空（由调用方回退到 VER 默认版本）。
+    V=""
+    RESP=$(fetch "$API_URL") || RESP=""
+    if [ -n "$RESP" ]; then
+        V=$(echo "$RESP" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+    fi
+    if [ -z "$V" ]; then
+        LOC=""
+        if command -v curl >/dev/null 2>&1; then
+            LOC=$(curl -sI --max-time 10 "https://github.com/$REPO/releases/latest" 2>/dev/null | tr -d '\r' | grep -i '^location:' | head -n1)
+        else
+            LOC=$(wget -qO- --timeout=10 --server-response "https://github.com/$REPO/releases/latest" 2>&1 | tr -d '\r' | grep -i 'location:' | head -n1)
+        fi
+        V=$(echo "$LOC" | sed 's/.*tag\///' | tr -d '[:space:]')
+    fi
+    [ -n "$V" ] && echo "$V" && return 0
+    return 1
 }
 get_current_ver() {
     if [ -x "$BIN" ]; then
