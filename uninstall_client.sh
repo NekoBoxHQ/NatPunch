@@ -1,5 +1,13 @@
 #!/bin/sh
-# 卸载 NatPunch 客户端（不影响同机服务端）
+# NatPunch 客户端管理脚本（卸载 / 更新，不影响同机服务端）
+# 用法:
+#   sh uninstall_client.sh             卸载客户端（默认）
+#   sh uninstall_client.sh uninstall   卸载客户端
+#   sh uninstall_client.sh update      更新客户端（保留 /etc/natpunch.conf 配置）
+set -u
+REPO="NekoBoxHQ/NatPunch"
+FALLBACK_VER="v26.9.3"
+ACTION="${1:-uninstall}"
 SERVER_BIN="/opt/natpunch/natpunch"
 SERVER_INIT="/etc/init.d/natpunch-server"
 SERVER_SYSTEMD="/etc/systemd/system/natpunch-server.service"
@@ -13,6 +21,71 @@ CLIENT_SYSTEMD_1="/etc/systemd/system/natpunch.service"
 CLIENT_SYSTEMD_2="/lib/systemd/system/natpunch.service"
 log() { echo "==> $*"; }
 warn() { echo "==> 警告: $*" >&2; }
+
+# ---------- 更新模式：保留配置，仅替换二进制并重启 ----------
+if [ "$ACTION" = "update" ]; then
+    log "更新 NatPunch 客户端（保留配置）..."
+    if [ ! -f "$CLIENT_BIN_1" ] && [ ! -f "$CLIENT_BIN_2" ]; then
+        warn "未检测到已安装客户端，请使用 install.sh 全新安装"
+        exit 1
+    fi
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+        x86_64|amd64)   PKG="linux_amd64_client.tar.gz" ;;
+        aarch64|arm64)  PKG="linux_arm64_client.tar.gz" ;;
+        *) warn "不支持架构: $ARCH（当前仅支持 x86_64 / arm64）"; exit 1 ;;
+    esac
+    VER=""
+    if command -v wget >/dev/null 2>&1; then
+        VER="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+    elif command -v curl >/dev/null 2>&1; then
+        VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+    fi
+    [ -n "$VER" ] || VER="$FALLBACK_VER"
+    log "最新版本: $VER"
+    URL="https://github.com/$REPO/releases/download/$VER/$PKG"
+    TMP_DIR="/tmp/natpunch_update.$$"
+    mkdir -p "$TMP_DIR" || { warn "无法创建临时目录"; exit 1; }
+    trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "$TMP_DIR/pkg.tar.gz" "$URL" || { warn "下载失败: $URL"; exit 1; }
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$TMP_DIR/pkg.tar.gz" "$URL" || { warn "下载失败: $URL"; exit 1; }
+    else
+        warn "未找到 wget / curl"; exit 1
+    fi
+    [ -s "$TMP_DIR/pkg.tar.gz" ] || { warn "下载文件为空"; exit 1; }
+    tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || { warn "压缩包损坏"; exit 1; }
+    tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || { warn "解压失败"; exit 1; }
+    BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch | head -n1)"
+    [ -n "$BIN_SRC" ] || { warn "压缩包内未找到 natpunch 二进制"; exit 1; }
+    # 停止客户端服务与残留进程（仅匹配带 -vkey= 的客户端，不影响同机服务端）
+    [ -f "$CLIENT_INIT" ] && { "$CLIENT_INIT" stop 2>/dev/null || true; }
+    command -v systemctl >/dev/null 2>&1 && systemctl stop natpunch 2>/dev/null || true
+    command -v pkill >/dev/null 2>&1 && pkill -f 'natpunch .*-vkey=' 2>/dev/null || true
+    sleep 1
+    # 替换二进制（覆盖两处常见安装路径）
+    cp -f "$BIN_SRC" "$CLIENT_BIN_1" || { warn "写入 $CLIENT_BIN_1 失败"; exit 1; }
+    chmod 755 "$CLIENT_BIN_1"
+    [ -f "$CLIENT_BIN_2" ] && { cp -f "$BIN_SRC" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
+    # 重新启动
+    if [ -f /etc/openwrt_release ]; then
+        [ -f "$CLIENT_INIT" ] && "$CLIENT_INIT" start 2>/dev/null || true
+    elif command -v systemctl >/dev/null 2>&1; then
+        systemctl restart natpunch 2>/dev/null || systemctl start natpunch 2>/dev/null || true
+    fi
+    sleep 3
+    VER_OUT="$("$CLIENT_BIN_1" -version 2>/dev/null | head -n1)"
+    log "更新完成 ${VER_OUT:-$VER}"
+    rm -rf "$TMP_DIR"
+    trap - EXIT INT TERM
+    exit 0
+fi
+if [ "$ACTION" != "uninstall" ]; then
+    echo "用法: sh uninstall_client.sh [update|uninstall]" >&2
+    exit 1
+fi
+
 SERVER_PRESENT=0
 [ -f "$SERVER_BIN" ] && SERVER_PRESENT=1
 [ -f "$SERVER_INIT" ] && SERVER_PRESENT=1

@@ -1,6 +1,6 @@
 package version
 
-var VERSION = "0.26.38" // 编译时可用 -X 注入构建时间戳，用于静态资源缓存刷新
+var VERSION = "v26.9.3" // 默认版本号；发布时由 release.yml 用 -ldflags -X 注入实际 tag（如 v26.9.3）
 
 // Compulsory minimum version, Minimum downward compatibility to this version
 func GetVersion() string {

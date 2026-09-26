@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	updateRepo     = "lima-droid/nps"
+	updateRepo     = "NekoBoxHQ/NatPunch"
 	updateAPIURL   = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
 	updateDownBase = "https://github.com/" + updateRepo + "/releases/download"
 )

@@ -9,6 +9,7 @@
 - **HTTP / SOCKS5 代理**：支持账号密码，安全出网
 - **静默管理**：实时展示在线状态、隧道数、流量与带宽统计
 - **一键部署**：OpenWrt / Linux / Windows 一键安装，注册为系统服务静默运行
+- **一键更新 / 卸载**：`uninstall_client.sh update` 保留配置更新到最新版，`uninstall_client.sh uninstall` 彻底卸载
 
 ## 📃 License
 

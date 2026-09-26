@@ -1,6 +1,6 @@
 # NatPunch
 
-![Version](https://img.shields.io/badge/version-v0.26.38-blue)
+![Version](https://img.shields.io/badge/version-v26.9.3-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 ![Go](https://img.shields.io/badge/Go-%3E%3D1.22-00ADD8?logo=go)
 
@@ -34,18 +34,28 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/i
 
 登录 Web 面板，在【客户端】页添加客户端，复制 VKEY，在待部署设备上 SSH 粘贴执行面板生成的一键安装命令。
 
-### 卸载客户端
+### 卸载 / 更新客户端
+
+`uninstall_client.sh` 同时支持卸载与更新（更新保留 `/etc/natpunch.conf` 配置，仅替换二进制并重启）：
 
 Linux：
 
 ```shell
+# 卸载（默认）
 wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
+
+# 更新到最新版
+wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
 ```
 
 OpenWrt：
 
 ```shell
+# 卸载（默认）
 uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
+
+# 更新到最新版
+uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
 ```
 
 ---
