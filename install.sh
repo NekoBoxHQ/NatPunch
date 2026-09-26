@@ -201,7 +201,7 @@ HAS_LEGACY=0
 [ -f "$LEGACY_INIT" ] && HAS_LEGACY=1
 [ -f "$LEGACY_UNIT_1" ] || [ -f "$LEGACY_UNIT_2" ] && HAS_LEGACY=1
 if [ "$HAS_LEGACY" = "1" ]; then
-    echo "==> 检测到旧版客户端命名残留，正在迁移清理..."
+    # 静默清理旧版客户端残留（不输出任何提示）
     # 精确结束旧客户端进程（仅匹配 -vkey=，服务端不受影响）
     OLD_PIDS=""
     if [ -d /proc ]; then
@@ -244,8 +244,6 @@ if [ "$HAS_LEGACY" = "1" ]; then
     if [ "$IO" = "0" ]; then
         "$LEGACY_INIT" disable 2>/dev/null || true
         rm -f "$LEGACY_INIT" /etc/rc.d/*natpunch 2>/dev/null
-    elif [ "$IO" = "1" ]; then
-        echo "==> 警告: $LEGACY_INIT 属于服务端，保留"
     fi
     if command -v systemctl >/dev/null 2>&1; then
         for U in "$LEGACY_UNIT_1" "$LEGACY_UNIT_2"; do
@@ -254,8 +252,6 @@ if [ "$HAS_LEGACY" = "1" ]; then
             if [ "$UO" = "0" ]; then
                 systemctl disable natpunch 2>/dev/null || true
                 rm -f "$U"
-            elif [ "$UO" = "1" ]; then
-                echo "==> 警告: $U 属于服务端，保留"
             fi
         done
         systemctl daemon-reload 2>/dev/null || true
@@ -264,6 +260,5 @@ if [ "$HAS_LEGACY" = "1" ]; then
     if [ "$SERVER_PRESENT" = "0" ]; then
         rm -f "$LEGACY_BIN_1" "$LEGACY_BIN_2"
     fi
-    echo "==> 旧版客户端残留清理完成"
 fi
 exit 0
