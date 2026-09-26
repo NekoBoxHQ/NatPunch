@@ -702,10 +702,17 @@ func startPublicIPRefresher() {
 // getPublicIPByHTTP 后台查公网 IPv4（不阻塞请求，多源探测）
 func getPublicIPByHTTP() string {
 	urls := []string{
-		"https://ipinfo.io/ip",
+		"https://ip.3322.net", // 国内可达，优先
 		"https://api.ipify.org",
+		"https://ipinfo.io/ip",
 	}
-	client := http.Client{Timeout: 3 * time.Second}
+	// 禁用环境代理：公网 IP 查询必须走本机真实出口，避免升级/系统代理干扰显示
+	client := http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			Proxy: nil,
+		},
+	}
 	for _, u := range urls {
 		if resp, err := client.Get(u); err == nil {
 			buf := make([]byte, 64)
