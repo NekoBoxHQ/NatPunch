@@ -9,7 +9,6 @@
 #   sh uninstall_client.sh update      更新客户端（保留 /etc/natpunch.conf 配置）
 set -u
 REPO="NekoBoxHQ/NatPunch"
-FALLBACK_VER="v26.9.6"
 ACTION="${1:-uninstall}"
 SERVER_DIR="/opt/natpunch"
 SERVER_BIN="$SERVER_DIR/natpunch"
@@ -174,9 +173,9 @@ if [ "$ACTION" = "update" ]; then
     elif command -v curl >/dev/null 2>&1; then
         VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
     fi
-    [ -n "$VER" ] || VER="$FALLBACK_VER"
-    log "最新版本: $VER"
-    URL="https://github.com/$REPO/releases/download/$VER/$PKG"
+    log "最新版本: ${VER:-最新发布}"
+    # 下载走 releases/latest/download，自动指向最新发布，不依赖写死的版本号
+    URL="https://github.com/$REPO/releases/latest/download/$PKG"
     TMP_DIR="/tmp/natpunch_update.$$"
     mkdir -p "$TMP_DIR" || { warn "无法创建临时目录"; exit 1; }
     trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
@@ -228,7 +227,7 @@ if [ "$ACTION" = "update" ]; then
     if [ "$SERVER_PRESENT" = "0" ]; then
         rm -f "$LEGACY_BIN_1" "$LEGACY_BIN_2"
     fi
-    log "更新完成 ${VER_OUT:-$VER}"
+    log "更新完成 ${VER_OUT:-最新版}"
     rm -rf "$TMP_DIR"
     trap - EXIT INT TERM
     exit 0

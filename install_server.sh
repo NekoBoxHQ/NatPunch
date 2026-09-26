@@ -8,7 +8,8 @@ WEB="$DIR/web"
 PID_FILE="$DIR/natpunch.pid"
 LOCK_DIR="$DIR/natpunch.lock.d"
 LOG="$DIR/natpunch.log"
-VER="v26.9.6"
+# 版本号不写死：下载始终走 releases/latest/download（自动指向最新发布），
+# 仅需展示版本号时才探测（get_latest_ver），探测失败也不影响安装/升级。
 REPO="NekoBoxHQ/NatPunch"
 API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SELF="$(basename "$0")"
@@ -293,15 +294,14 @@ install() {
     mkdir -p "$DIR" || die "无法创建 $DIR"
     TMP="$DIR/.install.$$"; rm -rf "$TMP"; mkdir -p "$TMP" || die "无法创建临时目录"
     cd "$TMP" || die "无法进入临时目录"
-    LATEST=$(get_latest_ver); [ -n "$LATEST" ] || LATEST="$VER"
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64|amd64) SERVER_PKG="linux_amd64_server.tar.gz";;
         aarch64|arm64) SERVER_PKG="linux_arm64_server.tar.gz";;
         *) SERVER_PKG="linux_amd64_server.tar.gz";;
     esac
-    info "下载 $LATEST ($SERVER_PKG) ..."
-    dl "https://github.com/$REPO/releases/download/$LATEST/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
+    info "下载最新发布 ($SERVER_PKG) ..."
+    dl "https://github.com/$REPO/releases/latest/download/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
     info "解压安装包 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
     rm -f natpunch.tar.gz
@@ -326,17 +326,22 @@ install() {
 upgrade() {
     safe_dir; need tar; choose_downloader
     [ -x "$BIN" ] || die "NatPunch 未安装，请先安装"
-    TARGET_VER="${1:-$VER}"
+    TARGET_VER="${1:-}"
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64|amd64) SERVER_PKG="linux_amd64_server.tar.gz";;
         aarch64|arm64) SERVER_PKG="linux_arm64_server.tar.gz";;
         *) SERVER_PKG="linux_amd64_server.tar.gz";;
     esac
-    TARGET_URL="https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"
+    if [ -n "$TARGET_VER" ]; then
+        TARGET_URL="https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"
+        info "下载 $TARGET_VER ..."
+    else
+        TARGET_URL="https://github.com/$REPO/releases/latest/download/$SERVER_PKG"
+        info "下载最新发布 ..."
+    fi
     TMP="$DIR/.upgrade.$$"; rm -rf "$TMP"; mkdir -p "$TMP" || die "无法创建临时目录"
     cd "$TMP" || die "无法进入临时目录"
-    info "下载 $TARGET_VER ..."
     dl "$TARGET_URL" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
     info "解压安装包 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
@@ -370,7 +375,7 @@ upgrade() {
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
     start
-    log "升级完成，当前版本: $TARGET_VER"
+    log "升级完成，当前版本: ${TARGET_VER:-最新版}"
 }
 # ================= 启停 =================
 start() {
@@ -627,10 +632,12 @@ do_upgrade() {
     kv "当前版本" "$(get_current_ver)"
     info "正在获取最新版本 ..."
     LATEST=$(get_latest_ver)
-    if [ -n "$LATEST" ]; then DEFAULT_VER="$LATEST"; info "GitHub 最新版本: $LATEST"
-    else DEFAULT_VER="$VER"; warn "获取失败，回退到: $VER"; fi
-    printf "  目标版本 [回车使用 %s]: " "$DEFAULT_VER"; read IN_VER
-    [ -n "$IN_VER" ] || IN_VER="$DEFAULT_VER"
+    if [ -n "$LATEST" ]; then
+        info "GitHub 最新版本: $LATEST"
+    else
+        warn "无法获取最新版本号（将直接下载最新发布）"
+    fi
+    printf "  目标版本 [回车使用最新版]: "; read IN_VER
     case "$IN_VER" in *"/"*|*" "*|*".."*) die "版本号不合法" ;; esac
     acquire_lock; upgrade "$IN_VER"; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
@@ -643,7 +650,7 @@ do_upgrade() {
         echo -e "${C_GREEN}${C_BOLD}  [OK] 升级完成${C_RESET}"
         echo -e "${C_GREEN}${LINE}${C_RESET}"
         echo ""
-        kv "目标版本" "$IN_VER"; kv "面板地址" "$SCHEME://$HOST:$PORT"
+        kv "目标版本" "${IN_VER:-最新版}"; kv "面板地址" "$SCHEME://$HOST:$PORT"
         echo ""
     fi
 }
@@ -667,14 +674,8 @@ if [ -n "${1:-}" ]; then
         passwd)    do_passwd ;;
         upgrade)
             shift
-            if [ -n "${1:-}" ]; then
-                acquire_lock; upgrade "$1"; RC=$?; release_lock
-                [ $RC -eq 0 ] && log "升级完成: $1"
-            else
-                LATEST=$(get_latest_ver); [ -n "$LATEST" ] || LATEST="$VER"
-                acquire_lock; upgrade "$LATEST"; RC=$?; release_lock
-                [ $RC -eq 0 ] && log "升级完成: $LATEST"
-            fi
+            acquire_lock; upgrade "${1:-}"; RC=$?; release_lock
+            [ $RC -eq 0 ] && log "升级完成${1:+: $1}"
             ;;
         uninstall) do_uninstall ;;
         *) echo "用法: $SELF {install|start|stop|restart|status|passwd|upgrade [版本]|uninstall}" ;;

@@ -3,7 +3,6 @@
 # 用法: sh install.sh --openwrt VKEY SERVER [PORT] [TLS_FLAG]
 set -u
 REPO="NekoBoxHQ/NatPunch"
-FALLBACK_VER="v26.9.6"
 VKEY="${2:-}"
 SERVER="${3:-}"
 PORT="${4:-8025}"
@@ -54,7 +53,7 @@ case "$ARCH" in
 esac
 echo "    $ARCH -> $PKG"
 
-# ---------- 获取版本 ----------
+# ---------- 获取版本（仅用于显示，下载走 releases/latest/download 自动指向最新） ----------
 log "获取最新版本..."
 VER=""
 if command -v wget >/dev/null 2>&1; then
@@ -62,11 +61,10 @@ if command -v wget >/dev/null 2>&1; then
 elif command -v curl >/dev/null 2>&1; then
     VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
 fi
-[ -n "$VER" ] || VER="$FALLBACK_VER"
-echo "    $VER"
+echo "    ${VER:-最新发布}"
 
-# ---------- 下载 ----------
-URL="https://github.com/$REPO/releases/download/$VER/$PKG"
+# ---------- 下载（自动指向最新发布，不依赖写死的版本号） ----------
+URL="https://github.com/$REPO/releases/latest/download/$PKG"
 log "下载 $PKG ..."
 mkdir -p "$TMP_DIR" || die "无法创建临时目录"
 fetch() {
@@ -158,7 +156,7 @@ else
 fi
 if [ "$OK" -eq 1 ]; then
     VER_OUT="$("$BIN" -version 2>/dev/null | head -n1)"
-    echo "==> 安装成功 ✓ ${VER_OUT:-$VER}"
+    echo "==> 安装成功 ✓ ${VER_OUT:-最新版}"
 else
     echo "==> 启动失败，日志如下："
     if [ "$IS_OPENWRT" -eq 1 ]; then
