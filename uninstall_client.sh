@@ -1,36 +1,44 @@
 #!/bin/sh
-# NatPunch 客户端管理脚本（卸载 / 更新，不影响同机服务端）
+# NatPunch 客户端管理脚本（卸载 / 更新）
+# 客户端命名 natpunch-client，与服务端 natpunch 完全隔离（进程名 / 自启名 / 二进制名均不同），
+# 卸载与更新仅按客户端专属名称操作，同机部署服务端时互不影响。
+# 兼容清理旧版命名（natpunch）的客户端残留。
 # 用法:
 #   sh uninstall_client.sh             卸载客户端（默认）
 #   sh uninstall_client.sh uninstall   卸载客户端
 #   sh uninstall_client.sh update      更新客户端（保留 /etc/natpunch.conf 配置）
 set -u
 REPO="NekoBoxHQ/NatPunch"
-FALLBACK_VER="v26.9.4"
+FALLBACK_VER="v26.9.5"
 ACTION="${1:-uninstall}"
 SERVER_DIR="/opt/natpunch"
 SERVER_BIN="$SERVER_DIR/natpunch"
 SERVER_CONF="$SERVER_DIR/conf/natpunch.conf"
-CLIENT_BIN_1="/usr/bin/natpunch"
-CLIENT_BIN_2="/usr/local/bin/natpunch"
+SERVER_PID_FILE="$SERVER_DIR/natpunch.pid"
+CLIENT_BIN_1="/usr/bin/natpunch-client"
+CLIENT_BIN_2="/usr/local/bin/natpunch-client"
 CLIENT_CONF_1="/etc/natpunch.conf"
 CLIENT_CONF_2="/etc/natpunch/natpunch.conf"
 CLIENT_CONF_3="/usr/local/etc/natpunch.conf"
-CLIENT_INIT="/etc/init.d/natpunch"
-CLIENT_SYSTEMD_1="/etc/systemd/system/natpunch.service"
-CLIENT_SYSTEMD_2="/lib/systemd/system/natpunch.service"
+CLIENT_INIT="/etc/init.d/natpunch-client"
+CLIENT_SYSTEMD_1="/etc/systemd/system/natpunch-client.service"
+CLIENT_SYSTEMD_2="/lib/systemd/system/natpunch-client.service"
+# 旧版命名（迁移兼容，内容归属判定后清理）
+LEGACY_BIN_1="/usr/bin/natpunch"
+LEGACY_BIN_2="/usr/local/bin/natpunch"
+LEGACY_INIT="/etc/init.d/natpunch"
+LEGACY_UNIT_1="/etc/systemd/system/natpunch.service"
+LEGACY_UNIT_2="/lib/systemd/system/natpunch.service"
 log() { echo "==> $*"; }
 warn() { echo "==> 警告: $*" >&2; }
 
-# ---------- 自启文件归属判定 ----------
-# 服务端(install_server.sh)与客户端(install.sh)的 init.d / systemd 文件名
-# 都是 natpunch，必须按内容区分，避免卸载/更新客户端时误伤同机服务端。
+# ---------- 旧命名自启文件归属判定（区分旧客户端 / 服务端） ----------
 # 返回: 0=客户端  1=服务端  2=不存在/无法判定
 init_owner() {
     f="$1"
     [ -f "$f" ] || return 2
     if grep -q '/opt/natpunch' "$f" 2>/dev/null; then return 1; fi
-    if grep -q '/usr/bin/natpunch\|/etc/natpunch.conf' "$f" 2>/dev/null; then return 0; fi
+    if grep -q '/usr/bin/natpunch' "$f" 2>/dev/null; then return 0; fi
     return 2
 }
 unit_owner() {
@@ -42,23 +50,115 @@ unit_owner() {
 }
 
 # ---------- 同机服务端检测 ----------
+# 服务端特征：/opt/natpunch 二进制/配置/进程、旧命名自启内容判定为服务端、
+# /usr/bin/natpunch 被无 -vkey= 的进程占用（早期服务端部署）。
 SERVER_PRESENT=0
 [ -f "$SERVER_BIN" ] && SERVER_PRESENT=1
 [ -f "$SERVER_CONF" ] && SERVER_PRESENT=1
-init_owner "$CLIENT_INIT"; [ "$?" -eq 1 ] && SERVER_PRESENT=1
-unit_owner "$CLIENT_SYSTEMD_1"; [ "$?" -eq 1 ] && SERVER_PRESENT=1
-unit_owner "$CLIENT_SYSTEMD_2"; [ "$?" -eq 1 ] && SERVER_PRESENT=1
+init_owner "$LEGACY_INIT"; [ "$?" -eq 1 ] && SERVER_PRESENT=1
+unit_owner "$LEGACY_UNIT_1"; [ "$?" -eq 1 ] && SERVER_PRESENT=1
+unit_owner "$LEGACY_UNIT_2"; [ "$?" -eq 1 ] && SERVER_PRESENT=1
 if [ -d /proc ]; then
     for d in /proc/[0-9]*; do
         exe=$(readlink "$d/exe" 2>/dev/null) || continue
-        [ "$exe" = "$SERVER_BIN" ] && { SERVER_PRESENT=1; break; }
+        case "$exe" in
+            /opt/natpunch/natpunch)
+                SERVER_PRESENT=1
+                break
+                ;;
+            /usr/bin/natpunch|/usr/local/bin/natpunch)
+                cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+                case "$cmd" in
+                    *" -vkey="*) ;;
+                    *) SERVER_PRESENT=1; break ;;
+                esac
+                ;;
+        esac
     done
 fi
+
+# ---------- 客户端进程精确识别 ----------
+# 新客户端（natpunch-client）：exe 名专属，直接匹配。
+# 旧客户端（natpunch）：exe 名为 natpunch 且命令行含 -vkey=（无 -vkey 的是服务端，排除）。
+get_client_pids() {
+    PIDS=""
+    if [ -d /proc ]; then
+        for d in /proc/[0-9]*; do
+            p=${d#/proc/}
+            [ "$p" = "$$" ] && continue
+            exe=$(readlink "$d/exe" 2>/dev/null) || continue
+            case "$exe" in
+                */natpunch-client|*/natpunch-client\ \(deleted\))
+                    PIDS="$PIDS $p"
+                    ;;
+                */natpunch|*/natpunch\ \(deleted\))
+                    cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+                    case "$cmd" in
+                        *" -vkey="*) PIDS="$PIDS $p" ;;
+                    esac
+                    ;;
+            esac
+        done
+    else
+        PIDS=$(ps w 2>/dev/null | grep -v grep | grep 'natpunch' | grep ' -vkey=' | awk '{print $1}')
+    fi
+    # 排除服务端 pid 文件记录的进程，双保险
+    if [ -f "$SERVER_PID_FILE" ]; then
+        SPID=$(cat "$SERVER_PID_FILE" 2>/dev/null)
+        case "$SPID" in
+            ''|*[!0-9]*) ;;
+            *)
+                NEW=""
+                for p in $PIDS; do
+                    [ "$p" = "$SPID" ] && continue
+                    NEW="$NEW $p"
+                done
+                PIDS="$NEW"
+                ;;
+        esac
+    fi
+    echo "$PIDS"
+}
+kill_client_pids() {
+    PIDS=$(get_client_pids)
+    [ -z "$PIDS" ] && return 0
+    for p in $PIDS; do kill "$p" 2>/dev/null || true; done
+    sleep 1
+    for p in $PIDS; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true; done
+    sleep 1
+}
+
+# ---------- 清理旧命名客户端自启（内容判定为客户端版才删，服务端不动） ----------
+clean_legacy_autostart() {
+    IO=2
+    if [ -f "$LEGACY_INIT" ]; then
+        init_owner "$LEGACY_INIT"; IO=$?
+    fi
+    if [ "$IO" = "0" ]; then
+        "$LEGACY_INIT" disable 2>/dev/null || true
+        rm -f "$LEGACY_INIT" /etc/rc.d/*natpunch 2>/dev/null
+    elif [ "$IO" = "1" ]; then
+        warn "$LEGACY_INIT 属于服务端，跳过删除"
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        for U in "$LEGACY_UNIT_1" "$LEGACY_UNIT_2"; do
+            [ -f "$U" ] || continue
+            unit_owner "$U"; UO=$?
+            if [ "$UO" = "0" ]; then
+                systemctl disable natpunch 2>/dev/null || true
+                rm -f "$U"
+            elif [ "$UO" = "1" ]; then
+                warn "$U 属于服务端，跳过删除"
+            fi
+        done
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+}
 
 # ---------- 更新模式：保留配置，仅替换二进制并重启 ----------
 if [ "$ACTION" = "update" ]; then
     log "更新 NatPunch 客户端（保留配置）..."
-    if [ ! -f "$CLIENT_BIN_1" ] && [ ! -f "$CLIENT_BIN_2" ]; then
+    if [ ! -f "$CLIENT_BIN_1" ] && [ ! -f "$CLIENT_BIN_2" ] && [ ! -f "$LEGACY_BIN_1" ] && [ ! -f "$LEGACY_BIN_2" ]; then
         warn "未检测到已安装客户端，请使用 install.sh 全新安装"
         exit 1
     fi
@@ -90,8 +190,8 @@ if [ "$ACTION" = "update" ]; then
     [ -s "$TMP_DIR/pkg.tar.gz" ] || { warn "下载文件为空"; exit 1; }
     tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || { warn "压缩包损坏"; exit 1; }
     tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || { warn "解压失败"; exit 1; }
-    BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch | head -n1)"
-    [ -n "$BIN_SRC" ] || { warn "压缩包内未找到 natpunch 二进制"; exit 1; }
+    BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client | head -n1)"
+    [ -n "$BIN_SRC" ] || { warn "压缩包内未找到 natpunch-client 二进制"; exit 1; }
     # —— 断连保护 ——
     # SSH 通常通过客户端打通的隧道连接：停止客户端 = 隧道断 = SSH 断。
     # 升级文件已下载并校验完成，此处让后续替换/重启流程脱离终端会话，
@@ -104,49 +204,30 @@ if [ "$ACTION" = "update" ]; then
         trap '' HUP
         exec > /tmp/natpunch_update.log 2>&1 < /dev/null
     fi
-    # 停止客户端服务与残留进程（仅操作属于客户端的自启，不影响同机服务端）
-    IO=2
-    if [ -f "$CLIENT_INIT" ]; then
-        init_owner "$CLIENT_INIT"; IO=$?
+    # 停止客户端服务与残留进程（按客户端专属名称精确操作，不影响同机服务端）
+    if command -v systemctl >/dev/null 2>&1; then
+        if [ -f "$CLIENT_SYSTEMD_1" ] || [ -f "$CLIENT_SYSTEMD_2" ]; then
+            systemctl stop natpunch-client 2>/dev/null || true
+        fi
     fi
-    if [ "$IO" = "0" ]; then
-        "$CLIENT_INIT" stop 2>/dev/null || true
-    elif [ "$IO" = "1" ]; then
-        warn "$CLIENT_INIT 属于服务端，跳过停止"
-    fi
-    UO=2
-    for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
-        [ -f "$U" ] || continue
-        unit_owner "$U"; UO=$?
-        break
-    done
-    if command -v systemctl >/dev/null 2>&1 && [ "$UO" = "0" ]; then
-        systemctl stop natpunch 2>/dev/null || true
-    fi
-    command -v pkill >/dev/null 2>&1 && pkill -f 'natpunch .*-vkey=' 2>/dev/null || true
-    sleep 1
-    # 替换二进制（覆盖两处常见安装路径）
+    kill_client_pids
+    # 替换二进制（新命名 natpunch-client）
     cp -f "$BIN_SRC" "$CLIENT_BIN_1" || { warn "写入 $CLIENT_BIN_1 失败"; exit 1; }
     chmod 755 "$CLIENT_BIN_1"
     [ -f "$CLIENT_BIN_2" ] && { cp -f "$BIN_SRC" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
-    # 重新启动（仅当自启归属客户端；服务端 unit 存在时不做任何启停）
+    # 重新启动客户端服务（natpunch-client 专属名称，不触碰服务端 natpunch）
     if [ -f /etc/openwrt_release ]; then
-        IO=2
-        if [ -f "$CLIENT_INIT" ]; then
-            init_owner "$CLIENT_INIT"; IO=$?
-        fi
-        [ "$IO" = "0" ] && "$CLIENT_INIT" start 2>/dev/null || true
+        [ -f "$CLIENT_INIT" ] && "$CLIENT_INIT" start 2>/dev/null || true
     elif command -v systemctl >/dev/null 2>&1; then
-        UO=2
-        for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
-            [ -f "$U" ] || continue
-            unit_owner "$U"; UO=$?
-            break
-        done
-        [ "$UO" = "0" ] && { systemctl restart natpunch 2>/dev/null || systemctl start natpunch 2>/dev/null || true; }
+        systemctl restart natpunch-client 2>/dev/null || systemctl start natpunch-client 2>/dev/null || true
     fi
     sleep 3
     VER_OUT="$("$CLIENT_BIN_1" -version 2>/dev/null | head -n1)"
+    # 清理旧命名客户端残留（进程已在上方精确清理；旧二进制仅在同机无服务端时删除）
+    clean_legacy_autostart
+    if [ "$SERVER_PRESENT" = "0" ]; then
+        rm -f "$LEGACY_BIN_1" "$LEGACY_BIN_2"
+    fi
     log "更新完成 ${VER_OUT:-$VER}"
     rm -rf "$TMP_DIR"
     trap - EXIT INT TERM
@@ -157,91 +238,35 @@ if [ "$ACTION" != "uninstall" ]; then
     exit 1
 fi
 
-# 1. 精确识别并结束客户端进程（仅匹配带 -vkey= 的客户端，不影响同机服务端）
-CLIENT_PIDS=""
-if [ -d /proc ]; then
-    for d in /proc/[0-9]*; do
-        p=${d#/proc/}
-        [ "$p" = "$$" ] && continue
-        exe=$(readlink "$d/exe" 2>/dev/null) || continue
-        case "$exe" in
-            */natpunch|*/natpunch\ \(deleted\)) ;;
-            *) continue ;;
-        esac
-        cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
-        case "$cmd" in
-            *" -vkey="*) CLIENT_PIDS="$CLIENT_PIDS $p" ;;
-        esac
-    done
-else
-    CLIENT_PIDS=$(ps w 2>/dev/null | grep -v grep | grep 'natpunch' | grep ' -vkey=' | awk '{print $1}')
-fi
-if [ -f /opt/natpunch/natpunch.pid ]; then
-    SPID=$(cat /opt/natpunch/natpunch.pid 2>/dev/null)
-    case "$SPID" in
-        ''|*[!0-9]*) ;;
-        *)
-            NEW=""
-            for p in $CLIENT_PIDS; do
-                [ "$p" = "$SPID" ] && continue
-                NEW="$NEW $p"
-            done
-            CLIENT_PIDS="$NEW"
-            ;;
-    esac
-fi
-if [ -n "$CLIENT_PIDS" ]; then
-    kill $CLIENT_PIDS 2>/dev/null
-    sleep 1
-    for p in $CLIENT_PIDS; do
-        [ -d "/proc/$p" ] && kill -9 "$p" 2>/dev/null
-    done
-    sleep 1
-fi
-# 2. 停止/删除客户端自启（仅操作属于客户端的文件，服务端的一律跳过）
-IO=2
+# ================= 卸载模式 =================
+# 1. 精确结束客户端进程（新命名 natpunch-client 专属匹配 + 旧命名 -vkey= 匹配，不影响同机服务端）
+kill_client_pids
+# 2. 停止/删除客户端自启（新命名无条件，旧命名内容判定为客户端才删）
 if [ -f "$CLIENT_INIT" ]; then
-    init_owner "$CLIENT_INIT"; IO=$?
-fi
-if [ "$IO" = "0" ]; then
     "$CLIENT_INIT" stop 2>/dev/null || true
     "$CLIENT_INIT" disable 2>/dev/null || true
     rm -f "$CLIENT_INIT"
-    rm -f /etc/rc.d/*natpunch 2>/dev/null
-    for f in /etc/rc.d/S??natpunch /etc/rc.d/K??natpunch /etc/rc*.d/S??natpunch /etc/rc*.d/K??natpunch; do
-        [ -e "$f" ] || continue
-        case "$f" in
-            *natpunch-server*) continue ;;
-            *natpunch-*) continue ;;
-        esac
-        rm -f "$f"
-    done
-elif [ "$IO" = "1" ]; then
-    warn "$CLIENT_INIT 属于服务端，跳过删除"
-else
-    warn "$CLIENT_INIT 归属无法判定，跳过删除（如确需删除请手动处理）"
 fi
+rm -f /etc/rc.d/*natpunch-client 2>/dev/null
+for f in /etc/rc.d/S??natpunch-client /etc/rc.d/K??natpunch-client /etc/rc*.d/S??natpunch-client /etc/rc*.d/K??natpunch-client; do
+    [ -e "$f" ] || continue
+    rm -f "$f"
+done
 if command -v systemctl >/dev/null 2>&1; then
     for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
         [ -f "$U" ] || continue
-        unit_owner "$U"; UO=$?
-        if [ "$UO" = "0" ]; then
-            systemctl stop natpunch 2>/dev/null || true
-            systemctl disable natpunch 2>/dev/null || true
-            rm -f "$U"
-            systemctl daemon-reload 2>/dev/null || true
-        elif [ "$UO" = "1" ]; then
-            warn "$U 属于服务端，跳过删除"
-        else
-            warn "$U 归属无法判定，跳过删除（如确需删除请手动处理）"
-        fi
+        systemctl stop natpunch-client 2>/dev/null || true
+        systemctl disable natpunch-client 2>/dev/null || true
+        rm -f "$U"
     done
+    systemctl daemon-reload 2>/dev/null || true
 fi
+clean_legacy_autostart
 if command -v service >/dev/null 2>&1 && [ -d /usr/local/etc/rc.d ]; then
-    if [ -f /usr/local/etc/rc.d/natpunch ]; then
-        service natpunch stop 2>/dev/null || true
-        rm -f /usr/local/etc/rc.d/natpunch
-        command -v sysrc >/dev/null 2>&1 && sysrc -x natpunch_enable 2>/dev/null || true
+    if [ -f /usr/local/etc/rc.d/natpunch-client ]; then
+        service natpunch-client stop 2>/dev/null || true
+        rm -f /usr/local/etc/rc.d/natpunch-client
+        command -v sysrc >/dev/null 2>&1 && sysrc -x natpunch_client_enable 2>/dev/null || true
     fi
 fi
 if [ -d /Library/LaunchDaemons ]; then
@@ -260,16 +285,9 @@ fi
 if [ -f /etc/rc.local ]; then
     cp -f /etc/rc.local /etc/rc.local.natpunch-client.bak 2>/dev/null || true
     if sed --version >/dev/null 2>&1; then
-        sed -i '/natpunch -server=/d; /natpunch.*-vkey=/d' /etc/rc.local 2>/dev/null || true
+        sed -i '/natpunch-client -server=/d; /natpunch-client.*-vkey=/d; /natpunch -server=/d; /natpunch.*-vkey=/d' /etc/rc.local 2>/dev/null || true
     else
-        sed -i '' '/natpunch -server=/d; /natpunch.*-vkey=/d' /etc/rc.local 2>/dev/null || true
-    fi
-    if [ "$SERVER_PRESENT" = "0" ]; then
-        if sed --version >/dev/null 2>&1; then
-            sed -i '/\/usr\/bin\/natpunch/d; /\/usr\/local\/bin\/natpunch/d' /etc/rc.local 2>/dev/null || true
-        else
-            sed -i '' '/\/usr\/bin\/natpunch/d; /\/usr\/local\/bin\/natpunch/d' /etc/rc.local 2>/dev/null || true
-        fi
+        sed -i '' '/natpunch-client -server=/d; /natpunch-client.*-vkey=/d; /natpunch -server=/d; /natpunch.*-vkey=/d' /etc/rc.local 2>/dev/null || true
     fi
 fi
 # 4. 删除客户端配置
@@ -288,12 +306,13 @@ if [ -d /usr/local/etc/natpunch ]; then
         warn "/usr/local/etc/natpunch 目录含服务端文件，跳过删除"
     fi
 fi
-# 5. 删除客户端二进制（同机存在服务端时保留，避免误删）
+# 5. 删除客户端二进制（新命名无条件删除；旧命名仅在同机无服务端时删除）
+rm -f "$CLIENT_BIN_1" "$CLIENT_BIN_2"
 if [ "$SERVER_PRESENT" = "0" ]; then
-    rm -f "$CLIENT_BIN_1" "$CLIENT_BIN_2"
+    rm -f "$LEGACY_BIN_1" "$LEGACY_BIN_2"
 fi
 # 6. 清理日志
-rm -f /tmp/natpunch.log /var/log/natpunch.log /tmp/natpunch 2>/dev/null || true
+rm -f /tmp/natpunch.log /var/log/natpunch.log /tmp/natpunch-client.log /var/log/natpunch-client.log /tmp/natpunch 2>/dev/null || true
 # 7. 复查
 REMAIN=0
 if [ -d /proc ]; then
@@ -302,12 +321,13 @@ if [ -d /proc ]; then
         [ "$p" = "$$" ] && continue
         exe=$(readlink "$d/exe" 2>/dev/null) || continue
         case "$exe" in
-            */natpunch) ;;
-            *) continue ;;
-        esac
-        cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
-        case "$cmd" in
-            *" -vkey="*) REMAIN=1; echo "残留 PID $p: $cmd" ;;
+            */natpunch-client) REMAIN=1; echo "残留 PID $p: $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" ;;
+            */natpunch)
+                cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+                case "$cmd" in
+                    *" -vkey="*) REMAIN=1; echo "残留 PID $p: $cmd" ;;
+                esac
+                ;;
         esac
     done
 fi

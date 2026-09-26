@@ -1,6 +1,6 @@
 # NatPunch
 
-![Version](https://img.shields.io/badge/version-v26.9.4-blue)
+![Version](https://img.shields.io/badge/version-v26.9.5-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 ![Go](https://img.shields.io/badge/Go-%3E%3D1.22-00ADD8?logo=go)
 
@@ -34,11 +34,13 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/i
 
 登录 Web 面板，在【客户端】页添加客户端，复制 VKEY，在待部署设备上 SSH 粘贴执行面板生成的一键安装命令。
 
+> 客户端命名为 **`natpunch-client`**（二进制 `/usr/bin/natpunch-client`、自启 `natpunch-client`），与服务端 **`natpunch`** 在进程名、自启名上完全隔离——同机部署服务端时，客户端的安装/卸载/更新均不会影响服务端运行。
+
 ### 卸载 / 更新客户端
 
 `uninstall_client.sh` 同时支持卸载与更新（更新保留 `/etc/natpunch.conf` 配置，仅替换二进制并重启）。
 
-> **升级断连安全**：SSH 通过客户端隧道连接时，升级会自动先下载并校验升级文件，再将替换/重启流程转入后台执行（日志 `/tmp/natpunch_update.log`）。断开 SSH 不影响升级，完成后客户端自动重启、隧道恢复即可重新连接。同机部署服务端时，脚本只操作属于客户端的自启与进程，不影响服务端。
+> **升级断连安全**：SSH 通过客户端隧道连接时，升级会自动先下载并校验升级文件，再将替换/重启流程转入后台执行（日志 `/tmp/natpunch_update.log`）。断开 SSH 不影响升级，完成后客户端自动重启、隧道恢复即可重新连接。客户端与服务端命名隔离（`natpunch-client` / `natpunch`），同机部署时卸载、更新均不影响服务端。
 
 **卸载（Linux）**
 

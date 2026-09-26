@@ -51,8 +51,8 @@ jobs:
             tar -czf ../linux_${{ matrix.goarch }}_server.tar.gz .
           else
             go build -ldflags "-s -w -extldflags -static -X ehang.io/nps/lib/version.VERSION=$TAG" \
-              -o out/natpunch ./cmd/npc/npc.go
-            tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch
+              -o out/natpunch-client ./cmd/npc/npc.go
+            tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch-client
           fi
 
       - name: Upload artifact
