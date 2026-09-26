@@ -16,7 +16,7 @@ var trayIcon []byte
 
 func main() {
 	app := application.New(application.Options{
-		Name: "NPS 客户端",
+		Name: "NatPunch 客户端",
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
@@ -33,7 +33,7 @@ func main() {
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
-		Title:            "NPS 客户端",
+		Title:            "NatPunch 客户端",
 		Width:            1000,
 		Height:           600,
 		MinWidth:         1000,

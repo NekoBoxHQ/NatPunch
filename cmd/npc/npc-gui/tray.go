@@ -12,7 +12,7 @@ func (a *App) startTray() {
 	if len(trayIcon) > 0 {
 		tray.SetIcon(trayIcon)
 	}
-	tray.SetTooltip("NPS 客户端")
+	tray.SetTooltip("NatPunch 客户端")
 
 	menu := a.app.NewMenu()
 	menu.Add("显示").OnClick(func(_ *application.Context) {

@@ -3,7 +3,7 @@
 # 用法: sh install.sh --openwrt VKEY SERVER [PORT] [TLS_FLAG]
 set -u
 REPO="NekoBoxHQ/NatPunch"
-FALLBACK_VER="v26.9.3"
+FALLBACK_VER="v26.9.4"
 VKEY="${2:-}"
 SERVER="${3:-}"
 PORT="${4:-8025}"

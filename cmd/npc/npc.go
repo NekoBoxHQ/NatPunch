@@ -71,7 +71,7 @@ func main() {
 	options := make(service.KeyValue)
 	svcConfig := &service.Config{
 		Name:        "Npc",
-		DisplayName: "nps内网穿透客户端",
+		DisplayName: "NatPunch 内网穿透客户端",
 		Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
 		Option:      options,
 	}
@@ -277,7 +277,7 @@ func printSlogan() {
 	fmt.Printf("%s", green(""))
 
 	fmt.Printf("\033[32;0m###########################################################\n")
-	fmt.Printf("\033[32;0m#                   \033[31mNPS内网穿透客户端\033[0m                     #\n")
+	fmt.Printf("\033[32;0m#                   \033[31mNatPunch 内网穿透客户端\033[0m              #\n")
 	fmt.Printf("\033[32;0m#                            			          #\n")
 	fmt.Printf("\033[32;0m#\033[32m 服务：\033[31;0m自建内网穿透\033[0m                     #\n")
 	fmt.Printf("\033[32;0m#\033[32m 提示：\033[32;0m1、涉及到系统服务的需要以管理员身份运行\033[0m\033[32;0m	          #\n")

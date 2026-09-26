@@ -102,7 +102,7 @@ func main() {
 	options := make(service.KeyValue)
 	svcConfig := &service.Config{
 		Name:        "Nps",
-		DisplayName: "nps内网穿透代理服务器",
+		DisplayName: "NatPunch 内网穿透代理服务器",
 		Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
 		Option:      options,
 	}
@@ -215,7 +215,7 @@ func printSlogan() {
 
 	fmt.Printf("%s", green(""))
 
-	fmt.Printf("\033[32;0m欢迎使用 NPS 管理脚本，当前版本：v%s\n", version.VERSION)
+	fmt.Printf("\033[32;0m欢迎使用 NatPunch 管理脚本，当前版本：v%s\n", version.VERSION)
 	fmt.Printf("\033[0m") // 重置颜色
 
 	fmt.Printf("\n")
@@ -257,7 +257,7 @@ func inputCmd() {
 		options := make(service.KeyValue)
 		svcConfig := &service.Config{
 			Name:        "Nps",
-			DisplayName: "nps内网穿透代理服务器",
+			DisplayName: "NatPunch 内网穿透代理服务器",
 			Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
 			Option:      options,
 		}
