@@ -28,13 +28,15 @@ SSH 粘贴执行，进入管理菜单后**输入 `1` 安装**，按提示设置�
 sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"
 ```
 
-> 该脚本是交互式管理菜单（`1` 安装 / `5` 状态 / `8` 卸载等），并非执行即自动安装。服务端与客户端请**分机部署**：两者的 init.d / systemd 自启名称均为 `natpunch`，同机安装会互相覆盖自启文件。
+> 该脚本是交互式管理菜单（`1` 安装 / `5` 状态 / `8` 卸载等），并非执行即自动安装。服务端与客户端命名隔离（`natpunch` / `natpunch-client`），同机部署互不影响。
 
 ### 客户端
 
 登录 Web 面板，在【客户端】页添加客户端，复制 VKEY，在待部署设备上 SSH 粘贴执行面板生成的一键安装命令。
 
 > 客户端命名为 **`natpunch-client`**（二进制 `/usr/bin/natpunch-client`、自启 `natpunch-client`），与服务端 **`natpunch`** 在进程名、自启名上完全隔离——同机部署服务端时，客户端的安装/卸载/更新均不会影响服务端运行。
+>
+> 安装与更新**自动获取最新发布**（`releases/latest/download`），无需指定版本号；版本探测失败时仍可正常安装/更新到最新版。
 
 ### 卸载 / 更新客户端
 
