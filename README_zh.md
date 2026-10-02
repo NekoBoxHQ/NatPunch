@@ -1,0 +1,18 @@
+# NatPunch
+
+一款轻量级、高性能、功能强大的**内网穿透 / 无公网设备管理平台**。
+
+## ✨ 特性
+
+- **TLS 全程加密**，数据传输安全可靠
+- **TCP / UDP 隧道**：SSH、远程桌面、任意端口，公网直达内网设备
+- **HTTP / SOCKS5 代理**：支持账号密码，安全出网
+- **静默管理**：实时展示在线状态、隧道数、流量与带宽统计
+- **一键部署**：OpenWrt / Linux 一键安装，注册为系统服务静默运行
+- **一键更新 / 卸载**：`uninstall_client.sh update` 保留配置更新到最新版，`uninstall_client.sh uninstall` 彻底卸载
+- **自动获取最新版**：安装/更新走 `releases/latest/download`，无需指定版本号，永远下载最新发布
+- **命名隔离**：客户端 `natpunch-client` 与服务端 `natpunch` 完全隔离，同机部署互不影响
+
+## 📃 License
+
+GPL-3.0 License
