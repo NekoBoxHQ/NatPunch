@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+    <title langtag="title-admin"></title>
+    <link rel="icon" type="image/png" href="{{.web_base_url}}/static/img/nekobox.png">
+
+    <!-- Mainly scripts -->
+    <!-- Latest compiled and minified CSS -->
+    <link href="{{.web_base_url}}/static/css/toastr.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/fontawesome.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/solid.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/bootstrap.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/bootstrap-table.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/style.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/flatpickr.min.css?v={{.version}}" rel="stylesheet">
+
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="{{.web_base_url}}/static/js/jquery-3.4.1.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/clipboard.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/toastr.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/popper.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/bootstrap.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/bootstrap-table.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/bootstrap-table-locale-all.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/echarts.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/inspinia.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/flatpickr.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/flatpickr-l10n-zh.js?v={{.version}}"></script>
+    <!-- Latest compiled and minified Locales -->
+    <script src="{{.web_base_url}}/static/js/language.js?v={{.version}}" type="text/javascript"></script>
+
+
+</head>
+
+<style>
+    #page-wrapper .ibox,
+    #page-wrapper .ibox-content,
+    #page-wrapper .ibox-title,
+    #page-wrapper .panel,
+    #page-wrapper .panel-default > .panel-heading,
+    #page-wrapper .white-bg,
+    #page-wrapper .bootstrap-table,
+    #page-wrapper .fixed-table-container,
+    #page-wrapper .fixed-table-body,
+    #page-wrapper .table,
+    #page-wrapper .table-striped > tbody > tr,
+    #page-wrapper .table-hover > tbody > tr:hover,
+    #page-wrapper .table-bordered,
+    #page-wrapper .table-bordered > thead > tr > th,
+    #page-wrapper .table-bordered > tbody > tr > td,
+    #page-wrapper .ibox-tools,
+    #page-wrapper .form-control {
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    #page-wrapper .table-bordered,
+    #page-wrapper .table-bordered > thead > tr > th,
+    #page-wrapper .table-bordered > tbody > tr > td {
+        border-color: rgba(255,255,255,0.55) !important;
+    }
+    #page-wrapper .ibox {
+        border-color: rgba(255,255,255,0.55) !important;
+    }
+    #page-wrapper {
+        color: #333;
+    }
+    #page-wrapper .text-muted { color: #555 !important; }
+    #page-wrapper .navbar-fixed-top {
+        border-bottom: none !important;
+    }
+    #wrapper .navbar-static-side {
+        border-right: none !important;
+        box-shadow: none !important;
+    }
+    #wrapper .navbar-static-side .nav > li.active {
+        border-left: none !important;
+    }
+    #page-wrapper .minimalize-styl-2 {
+        margin-left: 0 !important;
+    }
+    #page-wrapper .dropdown-menu {
+        background: rgba(255,255,255,0.55) !important;
+        border-color: rgba(255,255,255,0.4) !important;
+        color: #333 !important;
+    }
+    #page-wrapper .dropdown-menu a,
+    #page-wrapper .dropdown-menu label,
+    #page-wrapper .dropdown-menu .checkbox-inline {
+        color: #333 !important;
+    }
+    body {
+        background: transparent !important;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: url('{{.web_base_url}}/static/img/login_bg.jpg') center/cover no-repeat;
+        z-index: 0;
+        pointer-events: none;
+    }
+    #wrapper {
+        position: relative;
+        z-index: 1;
+    }
+    #page-wrapper {
+        background: transparent !important;
+    }
+    #page-wrapper .ibox,
+    #page-wrapper .ibox-title {
+        border-color: transparent !important;
+    }
+    #wrapper .navbar-static-side,
+    #wrapper nav.navbar-static-side,
+    #wrapper #side-menu {
+        border-right: none !important;
+        box-shadow: none !important;
+    }
+    #page-wrapper .ibox,
+    #page-wrapper .ibox-content,
+    #page-wrapper .panel,
+    #page-wrapper .white-bg,
+    #page-wrapper .bootstrap-table,
+    #page-wrapper .fixed-table-container,
+    #page-wrapper .fixed-table-body,
+    #page-wrapper .table,
+    #page-wrapper .btn {
+        box-shadow: none !important;
+    }
+    #wrapper *,
+    #page-wrapper * {
+        box-shadow: none !important;
+    }
+    #wrapper .navbar-static-side .nav > li > a,
+    #wrapper .navbar-static-side .nav > li > a:hover,
+    #wrapper .navbar-static-side .nav > li > a:focus,
+    #wrapper .navbar-static-side .nav > li.active,
+    #wrapper .navbar-static-side .nav > li.active > a {
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    #wrapper .navbar-static-side .nav-header,
+    #wrapper .navbar-static-side .profile-element {
+        background: transparent !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+    #wrapper .navbar-static-side .nav > li > a,
+    #wrapper .navbar-static-side .nav > li > a i,
+    #wrapper .navbar-static-side .nav > li.active > a,
+    #wrapper .navbar-static-side .nav-header,
+    #wrapper .navbar-static-side .nav-header i,
+    #wrapper .navbar-static-side .nav-header strong,
+    #wrapper .navbar-static-side .profile-element {
+        color: #333 !important;
+    }
+    #page-wrapper .minimalize-styl-2 {
+        position: static !important;
+        margin: 10px 5px 5px 0 !important;
+        border-radius: 4px !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #333 !important;
+    }
+    #page-wrapper #languagemenu {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #333 !important;
+    }
+    #page-wrapper .footer,
+    .footer {
+        background: transparent !important;
+        border-top: none !important;
+        box-shadow: none !important;
+        text-align: center !important;
+        color: #333 !important;
+    }
+</style>
+
+<body class="pace-done fixed-nav fixed-nav-basic">
+<div id="wrapper">
+    <nav class="navbar-default navbar-static-side" role="navigation">
+        <div class="sidebar-collapse">
+            <ul class="nav metismenu" id="side-menu">
+                <li class="nav-header">
+                    <div class="dropdown profile-element">
+                    {{if eq true .isAdmin}}
+                        <span><i class="fa fa-user-cog fa-3x"></i></span>
+                        <span class="clear"> <span class="block m-t-xs"><strong class="font-bold" langtag="word-admin"></strong></span>
+                    {{else}}
+                        <span><i class="fa fa-user fa-3x"></i></span>
+                        <span class="clear"> <span class="block m-t-xs"><strong class="font-bold">{{.username}}</strong></span>
+                        <span class="text-muted text-xs block" langtag="word-user">
+                    {{end}}
+                        </span>
+                    </div>
+                    <div class="logo-element">NP</div>
+                </li>
+                <li class="{{if eq "index" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/"><i class="fa fa-tachometer-alt fa-lg"></i>
+                    <span class="nav-label" langtag="word-dashboard"></span></a>
+                </li>
+
+                <li class="{{if eq "client" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/client/list"><i class="fa fa-desktop fa-lg"></i>
+                    <span class="nav-label" langtag="word-client"></span></a>
+                </li>
+                <li class="{{if eq "terminal" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/terminal/index"><i class="fa fa-terminal fa-lg"></i>
+                    <span class="nav-label" langtag="word-terminal"></span></a>
+                </li>
+                <li class="{{if eq "tcpudp" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/index/tcpudp"><i class="fa fa-retweet fa-lg"></i>
+                    <span class="nav-label" langtag="word-tunnelmanage"></span></a>
+                </li>
+                <li class="{{if eq "http" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/index/http"><i class="fa fa-server fa-lg"></i>
+                    <span class="nav-label" langtag="scheme-httpproxy"></span></a>
+                </li>
+                <li class="{{if eq "socks5" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/index/socks5"><i class="fa fa-layer-group fa-lg"></i>
+                    <span class="nav-label" langtag="scheme-socks5"></span></a>
+                </li>
+
+            </ul>
+        </div>
+    </nav>
+    <div id="page-wrapper" class="gray-bg" style="min-height:100vh;">
+        <div class="row">
+            <nav class="navbar white-bg navbar-fixed-top" role="navigation" style="margin-bottom: 0">
+
+                <div class="navbar-header">
+                    <a class="navbar-minimalize minimalize-styl-2 btn btn-primary " href="#"><i class="fa fa-bars"></i></a>
+                </div>
+                <ul class="nav navbar-top-links navbar-right">
+                    <li>
+                        <span class="m-r-sm text-muted welcome-message"><span langtag="word-welcome"></span>
+                        <a langtag="application" href="https://github.com/NekoBoxHQ/NatPunch" target="_blank" style="color:#23c6c8;text-decoration:none;"></a></span>
+                    </li>
+                    <li>
+                        <span class="btn-group dropdown">
+                            <button id="languagemenu" class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><i class="fa fa-globe-asia fa-lg"></i><span></span></button>
+                            <ul class="dropdown-menu"></ul>
+                        </span>
+                    </li>
+                    <li>
+                        <a href="{{.web_base_url}}/login/out">
+                            <i class="fa fa-sign-in-alt"></i><span langtag="word-logout"></span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+
+    {{.LayoutContent}}
+
+    <div class="footer fixed" style="background:transparent;border-top:none;box-shadow:none;text-align:center;padding:8px;">
+            <div><strong langtag="word-copyright"></strong> <span langtag="application"></span> &copy; 2026</div>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
+
+<script>
+    window.natpunch = { "web_base_url": {{.web_base_url}}, "version": "{{.version}}" }
+/*     googleTranslateElementInit()
+    
+     function googleTranslateElementInit() {
+         new google.translate.TranslateElement({
+             layout: google.translate.TranslateElement.InlineLayout.HORIZONTAL
+         }, 'wrapper');
+     }
+*/
+</script>
+{{/*<script src="http://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>*/}}
+
