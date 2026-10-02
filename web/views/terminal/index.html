@@ -1,0 +1,269 @@
+<div class="wrapper wrapper-content animated fadeInRight">
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5 langtag="word-terminal"></h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
+                        <a class="close-link"><i class="fa fa-times"></i></a>
+                    </div>
+                </div>
+                <div class="ibox-content">
+                    <div class="row" style="margin-bottom:10px;">
+                        <div class="col-sm-4">
+                            <select id="term_client" class="form-control">
+                                <option value="" langtag="word-term-selectclient"></option>
+                            </select>
+                        </div>
+                        <div class="col-sm-8">
+                            <button id="term_connect" class="btn btn-primary dim"><i class="fa fa-plug"></i> <span langtag="word-term-connect"></span></button>
+                            <button id="term_disconnect" class="btn btn-danger dim" style="display:none;"><i class="fa fa-power-off"></i> <span langtag="word-term-disconnect"></span></button>
+                        </div>
+                    </div>
+                    <div style="display:flex;align-items:flex-start;">
+                        <div style="flex:1;min-width:0;">
+                            <div id="term_box" style="height:460px;background:rgba(0,0,0,0.82);border-radius:4px;padding:6px;"></div>
+                        </div>
+                        <div id="cmd_panel" style="width:190px;margin-left:10px;border:1px solid rgba(51,51,51,0.25);border-radius:4px;background:transparent;flex-shrink:0;">
+                            <div style="padding:6px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(51,51,51,0.15);">
+                                <span style="font-size:13px;color:#333;font-weight:bold;" langtag="word-term-cmd"></span>
+                                <span style="font-size:12px;color:#888;" id="cmd_count"></span>
+                                <button id="cmd_toggle" type="button" style="border:none;background:transparent;color:#333;font-size:13px;cursor:pointer;" title="折叠">›</button>
+                            </div>
+                            <div id="cmd_body" style="padding:6px 8px;max-height:412px;overflow-y:auto;">
+                                <div id="cmd_list"></div>
+                                <div style="display:flex;margin-top:6px;">
+                                    <input id="cmd_new" type="text" placeholder="+ 添加命令" style="flex:1;min-width:0;height:22px;font-size:12px;border:1px solid rgba(51,51,51,0.4);background:transparent;color:#333;padding:0 6px;border-radius:2px;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex;margin-top:10px;">
+                        <input id="term_input" type="text" placeholder="预输入命令，按 Enter 整行发送" style="flex:1;height:30px;font-size:13px;border:1px solid rgba(51,51,51,0.4);background:transparent;color:#333;padding:0 10px;border-radius:2px;">
+                        <button id="term_send" class="btn btn-primary" style="margin-left:6px;height:30px;padding:0 14px;"><span langtag="word-term-send"></span></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<link href="{{.web_base_url}}/static/terminal/xterm.min.css" rel="stylesheet">
+<script src="{{.web_base_url}}/static/terminal/xterm.min.js"></script>
+<script src="{{.web_base_url}}/static/terminal/xterm-addon-fit.min.js"></script>
+<script>
+(function () {
+    var webBase = '{{.web_base_url}}';
+    var initClientId = {{.client_id}};
+    var term = null, fitAddon = null, ws = null;
+    var boxEl = $('#term_box');
+    var STAR_KEY = 'np_term_stars';
+    var CUSTOM_KEY = 'np_term_customs';
+    var QUICK_CMDS = [
+        {label: 'top', cmd: 'top'},
+        {label: 'df -h', cmd: 'df -h'},
+        {label: 'free -m', cmd: 'free -m'},
+        {label: 'ps', cmd: 'ps aux | head -20'},
+        {label: 'ip a', cmd: 'ip a'},
+        {label: 'netstat', cmd: 'netstat -tlnp | head -20'},
+        {label: 'ping', cmd: 'ping -c 4 baidu.com'},
+        {label: '重启网络', cmd: '/etc/init.d/network restart'},
+        {label: '跟踪日志', cmd: 'tail -f /var/log/syslog'}
+    ];
+
+    function getStars() {
+        try { return JSON.parse(localStorage.getItem(STAR_KEY) || '[]'); } catch (e) { return []; }
+    }
+    function setStars(list) {
+        try { localStorage.setItem(STAR_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+    function getCustoms() {
+        try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); } catch (e) { return []; }
+    }
+    function setCustoms(list) {
+        try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+
+    function sendLine(cmd) {
+        if (ws && ws.readyState === 1) {
+            try { ws.send(new TextEncoder().encode(cmd + '\r')); } catch (e) {}
+        }
+    }
+
+    function renderCmdPanel() {
+        var stars = getStars();
+        function starred(cmd) {
+            for (var i = 0; i < stars.length; i++) { if (stars[i].cmd === cmd) return true; }
+            return false;
+        }
+        var html = '';
+        var cmds = [];
+        for (var i = 0; i < QUICK_CMDS.length; i++) cmds.push(QUICK_CMDS[i]);
+        var customs = getCustoms();
+        for (var j = 0; j < customs.length; j++) cmds.push(customs[j]);
+        $('#cmd_count').text(cmds.length + ' 条命令');
+        for (var k = 0; k < cmds.length; k++) {
+            var c = cmds[k];
+            var st = starred(c.cmd) ? '★' : '☆';
+            html += '<div style="display:flex;align-items:center;margin-bottom:3px;padding:2px 4px;border-radius:2px;" onmouseover="this.style.background=\'rgba(35,198,200,0.12)\'" onmouseout="this.style.background=\'transparent\'">'
+                + '<button type="button" class="cmd-run" data-cmd="' + c.cmd.replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:2px 4px;">' + c.label + '</button>'
+                + '<button type="button" class="cmd-star" data-cmd="' + c.cmd.replace(/"/g, '&quot;') + '" data-label="' + c.label.replace(/"/g, '&quot;') + '" style="border:none;background:transparent;color:#e6a23c;font-size:12px;cursor:pointer;padding:2px 4px;" title="收藏">' + st + '</button>'
+                + '<button type="button" class="cmd-del" data-cmd="' + c.cmd.replace(/"/g, '&quot;') + '" style="border:none;background:transparent;color:#888;font-size:12px;cursor:pointer;padding:2px 4px;display:' + (c.custom ? 'block' : 'none') + ';" title="删除">×</button>'
+                + '</div>';
+        }
+        $('#cmd_list').html(html);
+        $('#cmd_list').find('.cmd-run').on('click', function () {
+            sendLine($(this).data('cmd'));
+        });
+        $('#cmd_list').find('.cmd-star').on('click', function () {
+            var cmd = $(this).data('cmd'), label = $(this).data('label');
+            var list = getStars(), idx = -1;
+            for (var m = 0; m < list.length; m++) { if (list[m].cmd === cmd) { idx = m; break; } }
+            if (idx >= 0) { list.splice(idx, 1); } else { list.push({cmd: cmd, label: label}); }
+            setStars(list);
+            renderCmdPanel();
+        });
+        $('#cmd_list').find('.cmd-del').on('click', function () {
+            var cmd = $(this).data('cmd');
+            var list = getCustoms();
+            for (var n = 0; n < list.length; n++) {
+                if (list[n].cmd === cmd) { list.splice(n, 1); break; }
+            }
+            setCustoms(list);
+            renderCmdPanel();
+        });
+    }
+
+    $('#cmd_toggle').on('click', function () {
+        var body = $('#cmd_body');
+        if (body.is(':visible')) {
+            body.hide();
+            $('#cmd_toggle').text('‹');
+            $('#cmd_count').hide();
+        } else {
+            body.show();
+            $('#cmd_toggle').text('›');
+            $('#cmd_count').show();
+        }
+    });
+
+    $('#cmd_new').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            var cmd = $(this).val().trim();
+            if (!cmd) { return; }
+            var list = getCustoms();
+            for (var i = 0; i < list.length; i++) { if (list[i].cmd === cmd) { $(this).val(''); return; } }
+            list.push({label: cmd.split(' ')[0], cmd: cmd, custom: true});
+            setCustoms(list);
+            $(this).val('');
+            renderCmdPanel();
+        }
+    });
+
+    // 加载客户端列表
+    $.ajax({
+        url: webBase + '/terminal/getclients',
+        type: 'post',
+        dataType: 'json',
+        success: function (r) {
+            if (!r || r.code !== 1) { return; }
+            var sel = $('#term_client');
+            $.each(r.data, function (i, c) {
+                var name = c.remark || ('client ' + c.id);
+                if (!c.is_connect) name += ' (offline)';
+                sel.append('<option value="' + c.id + '">' + name + '</option>');
+            });
+            if (initClientId > 0 && sel.find('option[value="' + initClientId + '"]').length > 0) {
+                sel.val(initClientId);
+                doConnect(initClientId);
+            }
+        },
+        error: function () {}
+    });
+
+    function openTerm() {
+        if (term) { return; }
+        term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            rendererType: 'dom',
+            theme: {background: '#000000'}
+        });
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(boxEl[0]);
+        fitAddon.fit();
+        term.onData(function (data) {
+            if (ws && ws.readyState === 1) {
+                try { ws.send(new TextEncoder().encode(data)); } catch (e) {}
+            }
+        });
+    }
+
+    function doConnect(clientId) {
+        openTerm();
+        closeWs();
+        term.reset();
+        term.write('\x1b[33mconnecting...\x1b[0m\r\n');
+        var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
+        var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
+        try { ws = new WebSocket(url); } catch (e) { return; }
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = function () {
+            $('#term_connect').hide();
+            $('#term_disconnect').show();
+            $('#term_input').focus();
+        };
+        ws.onmessage = function (ev) {
+            if (ev.data instanceof ArrayBuffer) {
+                term.write(new Uint8Array(ev.data));
+            } else {
+                term.write(String(ev.data));
+            }
+        };
+        ws.onerror = function () {};
+        ws.onclose = function () {
+            $('#term_connect').show();
+            $('#term_disconnect').hide();
+        };
+    }
+
+    function closeWs() {
+        if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} ws = null; }
+    }
+
+    $('#term_connect').click(function () {
+        var cid = parseInt($('#term_client').val(), 10);
+        if (!cid) { return; }
+        doConnect(cid);
+    });
+
+    $('#term_disconnect').click(function () {
+        closeWs();
+        $('#term_connect').show();
+        $('#term_disconnect').hide();
+    });
+
+    $('#term_input').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            var cmd = $(this).val();
+            sendLine(cmd);
+            $(this).val('');
+        }
+    });
+
+    $('#term_send').click(function () {
+        var cmd = $('#term_input').val();
+        sendLine(cmd);
+        $('#term_input').val('');
+    });
+
+    $(window).on('resize', function () {
+        if (fitAddon) { try { fitAddon.fit(); } catch (e) {} }
+    });
+
+    renderCmdPanel();
+})();
+</script>
