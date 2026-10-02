@@ -1,0 +1,295 @@
+<div class="wrapper wrapper-content animated fadeInRight">
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5 langtag="word-terminal"></h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
+                        <a class="close-link"><i class="fa fa-times"></i></a>
+                    </div>
+                </div>
+                <div class="ibox-content" style="display:flex;align-items:flex-start;padding-left:15px;padding-right:0;">
+                    <div style="flex:1;min-width:0;">
+                        <div id="term_box" style="height:500px;background:rgba(0,0,0,0.82);border-radius:4px;padding:6px;"></div>
+                        <div style="display:flex;margin-top:10px;">
+                            <input id="term_input" type="text" placeholder="预输入命令，按 Enter 整行发送" style="flex:1;height:30px;font-size:13px;border:1px solid rgba(51,51,51,0.4);background:transparent;color:#333;padding:0 10px;border-radius:2px;">
+                            <button id="term_send" class="btn btn-primary" style="margin-left:6px;height:30px;padding:0 14px;border-radius:0;"><span langtag="word-term-send"></span></button>
+                        </div>
+                    </div>
+                    <div id="cmd_panel" style="width:96px;margin-left:0;border-left:1px solid rgba(51,51,51,0.25);border-right:none;background:transparent;flex-shrink:0;">
+                        <div style="padding:5px 4px;border-bottom:1px solid rgba(51,51,51,0.15);text-align:center;">
+                            <div style="font-size:13px;color:#333;font-weight:bold;" langtag="word-term-cmd"></div>
+                            <div id="cmd_count" style="font-size:10px;color:#888;margin-top:1px;"></div>
+                        </div>
+                        <div style="padding:6px 4px;border-bottom:1px solid rgba(51,51,51,0.15);">
+                            <button id="term_toggle" class="btn btn-sm btn-danger" style="width:100%;padding:3px 0;font-size:12px;border-radius:0;"><span id="term_toggle_txt" langtag="word-term-disconnect"></span></button>
+                        </div>
+                        <div id="cmd_body" style="padding:4px;max-height:340px;overflow-y:auto;">
+                            <div id="cmd_list"></div>
+                            <button id="cmd_add" type="button" style="width:100%;border:none;background:transparent;color:#23c6c8;font-size:12px;padding:5px 0;cursor:pointer;">＋ 添加</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="cmd_modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;">
+    <div style="width:340px;background:rgba(15,20,30,0.94);border-radius:6px;padding:16px 18px;color:#fff;box-sizing:border-box;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <span id="cmd_modal_title" style="font-size:15px;font-weight:bold;">添加命令</span>
+            <button id="cmd_modal_close" type="button" style="border:none;background:transparent;color:#aaa;font-size:16px;cursor:pointer;padding:0 4px;">×</button>
+        </div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:4px;">名称</div>
+        <input id="cmd_modal_name" type="text" placeholder="例如：查看容器" style="width:100%;height:28px;font-size:13px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.06);color:#fff;padding:0 8px;border-radius:3px;box-sizing:border-box;outline:none;">
+        <div style="font-size:12px;color:#aaa;margin:10px 0 4px;">命令</div>
+        <textarea id="cmd_modal_cmd" placeholder="例如：docker ps" style="width:100%;height:60px;font-size:13px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.06);color:#fff;padding:6px 8px;border-radius:3px;box-sizing:border-box;resize:none;outline:none;"></textarea>
+        <div style="font-size:11px;color:#888;margin:8px 0;">收藏保存在本机浏览器，请勿保存密码、Token、私钥等敏感内容。</div>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+            <button id="cmd_modal_cancel" type="button" style="border:1px solid rgba(255,255,255,0.25);background:transparent;color:#ccc;font-size:13px;padding:4px 16px;border-radius:3px;cursor:pointer;">取消</button>
+            <button id="cmd_modal_save" type="button" style="border:none;background:#23c6c8;color:#fff;font-size:13px;padding:4px 16px;border-radius:3px;cursor:pointer;margin-left:8px;">保存</button>
+        </div>
+    </div>
+</div>
+
+<link href="{{.web_base_url}}/static/terminal/xterm.min.css" rel="stylesheet">
+<style>
+.cmd-run:hover { color:#23c6c8 !important; }
+.cmd-edit:hover { color:#23c6c8 !important; }
+.cmd-del:hover { color:#e74c3c !important; }
+</style>
+<script src="{{.web_base_url}}/static/terminal/xterm.min.js"></script>
+<script src="{{.web_base_url}}/static/terminal/xterm-addon-fit.min.js"></script>
+<script>
+(function () {
+    var webBase = '{{.web_base_url}}';
+    var initClientId = {{.client_id}};
+    var term = null, fitAddon = null, ws = null;
+    var boxEl = $('#term_box');
+    // 快捷命令持久化在面板服务器（conf/quick_cmds.json），所有入口通用
+    var SERVER_CMDS = {customs: [], hidden: []};
+
+    function loadCmds() {
+        $.get(webBase + '/terminal/getcmds', function (d) {
+            if (d && d.customs) { SERVER_CMDS = d; }
+            renderCmdPanel();
+        }).fail(function () { renderCmdPanel(); });
+    }
+    function saveCmds() {
+        $.ajax({
+            url: webBase + '/terminal/savecmds',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(SERVER_CMDS)
+        });
+    }
+    function getCustoms() { return SERVER_CMDS.customs; }
+    function getHidden() { return SERVER_CMDS.hidden; }
+
+    function sendLine(cmd) {
+        if (ws && ws.readyState === 1) {
+            try { ws.send(new TextEncoder().encode(cmd + '\r')); } catch (e) {}
+        }
+    }
+
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    function renderCmdPanel() {
+        var hidden = getHidden();
+        function hiddenCmd(cmd) {
+            for (var i = 0; i < hidden.length; i++) { if (hidden[i] === cmd) return true; }
+            return false;
+        }
+        var cmds = [];
+        var customs = getCustoms();
+        for (var j = 0; j < customs.length; j++) { if (!hiddenCmd(customs[j].cmd)) cmds.push(customs[j]); }
+
+        $('#cmd_count').text(cmds.length + ' 条命令');
+
+        var html = '';
+        for (var k = 0; k < cmds.length; k++) {
+            var c = cmds[k];
+            html += '<div class="cmd-row" data-cmd="' + esc(c.cmd) + '" data-label="' + esc(c.label) + '" style="display:flex;align-items:center;margin:0;border-bottom:1px solid rgba(51,51,51,0.08);">'
+                + '<button type="button" class="cmd-run" data-cmd="' + esc(c.cmd) + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:6px 3px;">' + c.label + '</button>'
+                + '<button type="button" class="cmd-edit" data-cmd="' + esc(c.cmd) + '" data-label="' + esc(c.label) + '" onclick="npCmdEdit(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:13px;cursor:pointer;padding:6px 4px;line-height:1;" title="编辑">✎</button>'
+                + '<button type="button" class="cmd-del" data-cmd="' + esc(c.cmd) + '" onclick="npCmdDel(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;padding:6px 6px;line-height:1;" title="删除">×</button>'
+                + '</div>';
+        }
+        $('#cmd_list').html(html);
+    }
+
+    // 全局入口（内联 onclick 双保险）
+    window.npCmdDel = function (btn) {
+        var cmd = $(btn).data('cmd');
+        // 直接从自定义列表移除
+        var cs = getCustoms();
+        for (var i = 0; i < cs.length; i++) { if (cs[i].cmd === cmd) { cs.splice(i, 1); break; } }
+        // 内置命令：加入隐藏列表
+        var h = getHidden();
+        var inHidden = false;
+        for (var j = 0; j < h.length; j++) { if (h[j] === cmd) { inHidden = true; break; } }
+        if (!inHidden) { h.push(cmd); }
+        saveCmds();
+        renderCmdPanel();
+    };
+    window.npCmdEdit = function (btn) {
+        openModal($(btn).data('label'), $(btn).data('cmd'));
+    };
+
+    // 事件委托：动态渲染后依然可靠响应
+    $(document).on('click', '.cmd-run', function () { sendLine($(this).data('cmd')); });
+
+    $(document).on('click', '.cmd-del', function () {
+        window.npCmdDel(this);
+    });
+
+    $(document).on('click', '.cmd-edit', function () {
+        openModal($(this).data('label'), $(this).data('cmd'));
+    });
+
+    // 弹窗添加/编辑
+    var editingCmd = '';
+    function openModal(label, cmd) {
+        editingCmd = cmd || '';
+        $('#cmd_modal_title').text(editingCmd ? '编辑命令' : '添加命令');
+        $('#cmd_modal_name').val(label || '');
+        $('#cmd_modal_cmd').val(cmd || '');
+        $('#cmd_modal').css('display', 'flex');
+        $('#cmd_modal_name').focus();
+    }
+    function closeModal() {
+        $('#cmd_modal').hide();
+        editingCmd = '';
+    }
+    function saveModal() {
+        var label = $('#cmd_modal_name').val().trim();
+        var cmd = $('#cmd_modal_cmd').val().trim();
+        if (!cmd) { return; }
+        if (!label) { label = cmd.split(' ')[0]; }
+        var customs = getCustoms();
+        if (editingCmd) {
+            var found = false;
+            for (var i = 0; i < customs.length; i++) {
+                if (customs[i].cmd === editingCmd) { customs[i].label = label; customs[i].cmd = cmd; found = true; break; }
+            }
+            if (!found) {
+                customs.push({label: label, cmd: cmd});
+            }
+        } else {
+            // 重名时更新（而不是静默丢弃）
+            var found = false;
+            for (var m = 0; m < customs.length; m++) {
+                if (customs[m].cmd === cmd) { customs[m].label = label; found = true; break; }
+            }
+            if (!found) {
+                customs.push({label: label, cmd: cmd});
+            }
+        }
+        saveCmds();
+        closeModal();
+        renderCmdPanel();
+    }
+
+    $('#cmd_add').on('click', function () { openModal('', ''); });
+    $('#cmd_modal_close').on('click', closeModal);
+    $('#cmd_modal_cancel').on('click', closeModal);
+    $('#cmd_modal_save').on('click', saveModal);
+    $('#cmd_modal_cmd').on('keydown', function (e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { saveModal(); }
+    });
+
+    // 自动连接（从客户端列表进入）
+    if (initClientId > 0) {
+        doConnect(initClientId);
+    }
+
+    loadCmds();
+
+    function openTerm() {
+        if (term) { return; }
+        term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            rendererType: 'dom',
+            theme: {background: '#000000'}
+        });
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(boxEl[0]);
+        fitAddon.fit();
+        term.onData(function (data) {
+            if (ws && ws.readyState === 1) {
+                try { ws.send(new TextEncoder().encode(data)); } catch (e) {}
+            }
+        });
+    }
+
+    function doConnect(clientId) {
+        openTerm();
+        closeWs();
+        term.reset();
+        var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
+        var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
+        try { ws = new WebSocket(url); } catch (e) { return; }
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = function () {
+            setToggle(true);
+            $('#term_input').focus();
+        };
+        ws.onmessage = function (ev) {
+            if (ev.data instanceof ArrayBuffer) {
+                term.write(new Uint8Array(ev.data));
+            } else {
+                term.write(String(ev.data));
+            }
+        };
+        ws.onerror = function () {};
+        ws.onclose = function () { setToggle(false); };
+    }
+
+    function closeWs() {
+        if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} ws = null; }
+        setToggle(false);
+    }
+
+    function setToggle(connected) {
+        var btn = $('#term_toggle_txt');
+        if (connected) {
+            btn.text('断开');
+            btn.closest('button').removeClass('btn-primary').addClass('btn-danger');
+        } else {
+            btn.text('连接');
+            btn.closest('button').removeClass('btn-danger').addClass('btn-primary');
+        }
+    }
+
+    $('#term_toggle').click(function () {
+        if (ws && ws.readyState === 1) {
+            closeWs();
+        } else {
+            if (initClientId > 0) { doConnect(initClientId); }
+        }
+    });
+
+    $('#term_input').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            sendLine($(this).val());
+            $(this).val('');
+        }
+    });
+
+    $('#term_send').click(function () {
+        sendLine($('#term_input').val());
+        $('#term_input').val('');
+    });
+
+    $(window).on('resize', function () {
+        if (fitAddon) { try { fitAddon.fit(); } catch (e) {} }
+    });
+})();
+</script>
