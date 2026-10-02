@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title langtag="title-login"></title>
+    <link rel="icon" type="image/png" href="{{.web_base_url}}/static/img/nekobox.png">
+
+    <!-- Mainly scripts -->
+    <!-- Latest compiled and minified CSS -->
+    <link href="{{.web_base_url}}/static/css/fontawesome.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/solid.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/bootstrap.min.css?v={{.version}}" rel="stylesheet">
+    <link href="{{.web_base_url}}/static/css/style.css?v={{.version}}" rel="stylesheet">
+
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="{{.web_base_url}}/static/js/jquery-3.4.1.min.js?v={{.version}}"></script>
+    <script src="{{.web_base_url}}/static/js/bootstrap.min.js?v={{.version}}"></script>
+    <!-- Latest compiled and minified Locales -->
+    <script src="{{.web_base_url}}/static/js/language.js?v={{.version}}" type="text/javascript"></script>
+
+</head>
+
+<style>
+    .form-control,
+    .form-control:hover,
+    .form-control:focus {
+        background-color: transparent !important;
+        background: transparent !important;
+        border: 1px solid rgba(0,0,0,0.3) !important;
+        box-shadow: none !important;
+    }
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+        -webkit-box-shadow: 0 0 0 1000px rgba(255,255,255,0.05) inset !important;
+        -webkit-text-fill-color: #333 !important;
+        transition: background-color 5000s ease-in-out 0s;
+    }
+    body {
+        background: transparent !important;
+    }
+    body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: url('{{.web_base_url}}/static/img/login_bg.jpg') center/cover no-repeat;
+        z-index: 0;
+        pointer-events: none;
+    }
+    #languagemenu {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #333 !important;
+    }
+</style>
+
+<body>
+<div class="row" style="position:relative;z-index:2;">
+    <nav class="navbar navbar-static-top" role="navigation" style="margin: 16px 40px;display:flex;justify-content:flex-end;background:transparent;border:none;box-shadow:none;">
+        <span class="btn-group dropdown">
+                <button id="languagemenu" class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown"
+                        aria-haspopup="true" aria-expanded="false"><i
+                            class="fa fa-globe-asia fa-lg"></i><span></span></button>
+                <ul class="dropdown-menu"></ul>
+            </span>
+    </nav>
+</div>
+<div class="loginColumns animated fadeInDown px-5" style="position:relative;z-index:1;">
+    <div class="row justify-content-center" style="min-height:calc(100vh - 240px);display:flex;flex-direction:column;justify-content:center;align-items:center;">
+
+        <div class="col-md-6 mt-4" style="max-width:320px;">
+            <div class="ibox-content" style="padding:40px 40px 30px;background:transparent;border:none;box-shadow:none;">
+                <div class="text-center" style="margin-bottom:14px;">
+                    <img src="{{.web_base_url}}/static/img/nekobox.png" alt="NatPunch" style="width:64px;height:64px;">
+                </div>
+                <form class="m-t" onsubmit="return false">
+                    <div class="form-group">
+                        <input name="username" class="form-control input-lg" placeholder="username" required=""
+                               langtag="word-username" style="height:48px;font-size:16px;background:transparent !important;border:1px solid rgba(0,0,0,0.3) !important;box-shadow:none !important;">
+                    </div>
+                    <div class="form-group">
+                        <input name="password" type="password" class="form-control input-lg" placeholder="password" required=""
+                               langtag="word-password" style="height:48px;font-size:16px;background:transparent !important;border:1px solid rgba(0,0,0,0.3) !important;box-shadow:none !important;">
+                    </div>
+                    {{if eq true .captcha_open}}
+                        <div class="form-group">
+                            {{create_captcha}}
+                            <input name="captcha" class="form-control" placeholder="captcha" required=""
+                                   langtag="word-captcha">
+                        </div>
+                    {{end}}
+                    <button onclick="login()" class="btn btn-primary block full-width m-b"
+                            langtag="word-login" style="height:48px;font-size:17px;"></button>
+                    {{if eq true .register_allow}}
+                        <p class="text-muted text-center"><small langtag="info-noaccount"></small></p>
+                        <a class="btn btn-sm btn-white btn-block" href="{{.web_base_url}}/login/register"
+                           langtag="word-register"></a>
+                    {{end}}
+                </form>
+                <h2 class="text-center" style="color:#999;margin:22px 0 0;white-space:nowrap;font-size:17px;font-weight:400;">无公网设备管理-NatPunch</h2>
+            </div>
+        </div>
+
+    </div>
+    <div class="footer" style="position: fixed; bottom: 8px; left: 0; right: 0; z-index: 10; background: transparent; border-top: none;">
+        <div class="text-center text-muted">© 2026 无公网设备静默管理平台</div>
+    </div>
+</div>
+
+</body>
+</html>
+
+
+<script type="text/javascript">
+    window.natpunch = {"web_base_url": "{{.web_base_url}}", "version": "{{.version}}" }
+
+    // Login Page Flipbox control
+    function login() {
+        $.ajax({
+            type: "POST",
+            url: "{{.web_base_url}}/login/verify",
+            data: $("form").serializeArray(),
+            success: function (res) {
+                if (res.status) {
+                    window.location.href = "{{.web_base_url}}/index/index"
+                } else {
+                    alert(res.msg)
+                }
+            }
+        })
+        return false
+    }
+</script>
+</body>
+</html>
