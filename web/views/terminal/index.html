@@ -1,0 +1,229 @@
+<div class="wrapper wrapper-content animated fadeInRight">
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5 langtag="word-terminal"></h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
+                        <a class="close-link"><i class="fa fa-times"></i></a>
+                    </div>
+                </div>
+                <div class="ibox-content">
+                    <div class="row" style="margin-bottom:10px;">
+                        <div class="col-sm-4">
+                            <select id="term_client" class="form-control">
+                                <option value="" langtag="word-term-selectclient"></option>
+                            </select>
+                        </div>
+                        <div class="col-sm-8">
+                            <button id="term_connect" class="btn btn-primary dim"><i class="fa fa-plug"></i> <span langtag="word-term-connect"></span></button>
+                            <button id="term_disconnect" class="btn btn-danger dim" style="display:none;"><i class="fa fa-power-off"></i> <span langtag="word-term-disconnect"></span></button>
+                        </div>
+                    </div>
+                    <div id="term_cmds" style="margin-bottom:8px;"></div>
+                    <div id="term_status" style="margin-bottom:8px;color:#888;font-size:12px;"></div>
+                    <div id="term_box" style="height:520px;background:rgba(0,0,0,0.82);border-radius:4px;padding:6px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<link href="{{.web_base_url}}/static/terminal/xterm.min.css" rel="stylesheet">
+<script src="{{.web_base_url}}/static/terminal/xterm.min.js"></script>
+<script src="{{.web_base_url}}/static/terminal/xterm-addon-fit.min.js"></script>
+<script>
+(function () {
+    var webBase = '{{.web_base_url}}';
+    var initClientId = {{.client_id}};
+    var term = null, fitAddon = null, ws = null;
+    var statusEl = $('#term_status'), boxEl = $('#term_box');
+    var STAR_KEY = 'np_term_stars';
+    var QUICK_CMDS = [
+        {label: 'top', cmd: 'top'},
+        {label: 'df -h', cmd: 'df -h'},
+        {label: 'free -m', cmd: 'free -m'},
+        {label: 'ps', cmd: 'ps aux | head -20'},
+        {label: 'ip a', cmd: 'ip a'},
+        {label: 'netstat', cmd: 'netstat -tlnp | head -20'},
+        {label: 'ping', cmd: 'ping -c 4 baidu.com'},
+        {label: '重启网络', cmd: '/etc/init.d/network restart'},
+        {label: '跟踪日志', cmd: 'tail -f /var/log/syslog'}
+    ];
+
+    function getStars() {
+        try { return JSON.parse(localStorage.getItem(STAR_KEY) || '[]'); } catch (e) { return []; }
+    }
+    function setStars(list) {
+        try { localStorage.setItem(STAR_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+
+    function renderCmds() {
+        var html = '';
+        var stars = getStars();
+        function starred(cmd) {
+            for (var i = 0; i < stars.length; i++) { if (stars[i].cmd === cmd) return true; }
+            return false;
+        }
+        for (var i = 0; i < QUICK_CMDS.length; i++) {
+            var c = QUICK_CMDS[i];
+            var st = starred(c.cmd);
+            html += '<span style="white-space:nowrap;">'
+                + '<button type="button" class="btn btn-xs btn-outline btn-info term-cmd" data-cmd="' + c.cmd + '">' + c.label + '</button>'
+                + '<button type="button" class="btn btn-xs term-star" data-cmd="' + c.cmd + '" data-label="' + c.label + '" title="收藏">' + (st ? '★' : '☆') + '</button> '
+                + '</span>';
+        }
+        var stars2 = getStars();
+        if (stars2.length > 0) {
+            html += '<span style="color:#333;"> | </span>';
+            for (var j = 0; j < stars2.length; j++) {
+                var s = stars2[j];
+                html += '<button type="button" class="btn btn-xs btn-outline btn-warning term-cmd" data-cmd="' + s.cmd + '">★ ' + s.label + '</button> ';
+            }
+        }
+        html += '<span style="margin-left:10px;white-space:nowrap;">'
+            + '<input id="term_custom" type="text" placeholder="自定义命令" style="width:160px;height:22px;font-size:12px;border:1px solid rgba(51,51,51,0.4);background:transparent;color:#333;padding:0 6px;border-radius:2px;">'
+            + '<button type="button" id="term_custom_add" class="btn btn-xs btn-primary" style="margin-left:4px;">收藏</button></span>';
+        $('#term_cmds').html(html);
+        $('#term_cmds').find('.term-cmd').on('click', function () {
+            sendCmd($(this).data('cmd'));
+        });
+        $('#term_cmds').find('.term-star').on('click', function () {
+            var cmd = $(this).data('cmd'), label = $(this).data('label');
+            var list = getStars(), idx = -1;
+            for (var k = 0; k < list.length; k++) { if (list[k].cmd === cmd) { idx = k; break; } }
+            if (idx >= 0) { list.splice(idx, 1); } else { list.push({cmd: cmd, label: label}); }
+            setStars(list);
+            renderCmds();
+        });
+        $('#term_custom_add').on('click', function () {
+            var cmd = $('#term_custom').val().trim();
+            if (!cmd) { return; }
+            var label = cmd.split(' ')[0];
+            var list = getStars();
+            for (var k = 0; k < list.length; k++) { if (list[k].cmd === cmd) { renderCmds(); return; } }
+            list.push({cmd: cmd, label: label});
+            setStars(list);
+            renderCmds();
+        });
+        $('#term_custom').on('keydown', function (e) {
+            if (e.key === 'Enter') { $('#term_custom_add').click(); }
+        });
+    }
+
+    function sendCmd(cmd) {
+        if (ws && ws.readyState === 1) {
+            try { ws.send(new TextEncoder().encode(cmd + '\r')); } catch (e) {}
+        } else {
+            setStatus('not connected');
+        }
+    }
+
+    // 加载客户端列表
+    $.ajax({
+        url: webBase + '/terminal/getclients',
+        type: 'post',
+        dataType: 'json',
+        success: function (r) {
+            if (!r || r.code !== 1) { setStatus('load clients error'); return; }
+            var sel = $('#term_client');
+            $.each(r.data, function (i, c) {
+                var name = c.remark || ('client ' + c.id);
+                if (!c.is_connect) name += ' (offline)';
+                sel.append('<option value="' + c.id + '">' + name + '</option>');
+            });
+            if (initClientId > 0 && sel.find('option[value="' + initClientId + '"]').length > 0) {
+                sel.val(initClientId);
+                doConnect(initClientId);
+            }
+        },
+        error: function () { setStatus('load clients error'); }
+    });
+
+    function setStatus(msg) { statusEl.text(msg); }
+
+    function openTerm() {
+        if (term) { return; }
+        term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            rendererType: 'dom',
+            theme: {background: '#000000'}
+        });
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(boxEl[0]);
+        fitAddon.fit();
+        term.onData(function (data) {
+            if (ws && ws.readyState === 1) {
+                try { ws.send(new TextEncoder().encode(data)); } catch (e) {}
+            }
+        });
+    }
+
+    function doConnect(clientId) {
+        openTerm();
+        closeWs();
+        term.reset();
+        term.write('\x1b[33mconnecting...\x1b[0m\r\n');
+        setStatus('connecting...');
+        var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
+        var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
+        try { ws = new WebSocket(url); } catch (e) { setStatus('websocket error'); return; }
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = function () {
+            setStatus('connected');
+            $('#term_connect').hide();
+            $('#term_disconnect').show();
+            sendResize();
+            term.focus();
+        };
+        ws.onmessage = function (ev) {
+            if (ev.data instanceof ArrayBuffer) {
+                term.write(new Uint8Array(ev.data));
+            } else {
+                term.write(String(ev.data));
+            }
+        };
+        ws.onerror = function () { setStatus('websocket error'); };
+        ws.onclose = function () {
+            setStatus('disconnected');
+            $('#term_connect').show();
+            $('#term_disconnect').hide();
+        };
+    }
+
+    function sendResize() {
+        if (ws && ws.readyState === 1 && fitAddon) {
+            try {
+                ws.send(JSON.stringify({type: 'resize', cols: term.cols, rows: term.rows}));
+            } catch (e) {}
+        }
+    }
+
+    function closeWs() {
+        if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} ws = null; }
+        setStatus('');
+    }
+
+    $('#term_connect').click(function () {
+        var cid = parseInt($('#term_client').val(), 10);
+        if (!cid) { setStatus('select a client'); return; }
+        doConnect(cid);
+    });
+
+    $('#term_disconnect').click(function () {
+        closeWs();
+        $('#term_connect').show();
+        $('#term_disconnect').hide();
+    });
+
+    $(window).on('resize', function () {
+        if (fitAddon) { fitAddon.fit(); sendResize(); }
+    });
+
+    renderCmds();
+})();
+</script>
