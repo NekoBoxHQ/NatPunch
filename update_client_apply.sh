@@ -119,6 +119,8 @@ start_client() {
         PRT="${port:-$PORT}"
         VKY="${vkey:-$VKEY}"
         TLS="${tls_enable:-$TLS_ENABLE}"
+        # install.sh 写入配置的是 TLS_FLAG 键（值 -tls_enable=true 或空），兼容该形式
+        [ -z "$TLS" ] && [ "${TLS_FLAG:-}" = "-tls_enable=true" ] && TLS="true"
         [ -z "$PRT" ] && PRT=8024
         CMD="$CLIENT_BIN_1 -server=${SRV:-}:$PRT -vkey=${VKY:-} -type=tcp"
         [ "$TLS" = "true" ] && CMD="$CMD -tls_enable=true"

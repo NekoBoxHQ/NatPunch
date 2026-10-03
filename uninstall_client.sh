@@ -216,8 +216,8 @@ if [ -d /usr/local/etc/natpunch ]; then
 fi
 # 5. 删除客户端二进制
 rm -f "$CLIENT_BIN_1" "$CLIENT_BIN_2"
-# 6. 清理日志
-rm -f /tmp/natpunch.log /var/log/natpunch.log /tmp/natpunch-client.log /var/log/natpunch-client.log /tmp/natpunch 2>/dev/null || true
+# 6. 清理客户端日志（仅 natpunch-client 专属，不动服务端 natpunch 的 /tmp/natpunch.log 等）
+rm -f /tmp/natpunch-client.log /var/log/natpunch-client.log /tmp/natpunch_update.log /tmp/natpunch_apply.sh /tmp/natpunch_update.* 2>/dev/null || true
 # 7. 复查
 REMAIN=0
 if [ -d /proc ]; then
