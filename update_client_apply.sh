@@ -20,10 +20,19 @@ CLIENT_SYSTEMD_2="$NP_CLIENT_SYSTEMD_2"
 if command -v systemctl >/dev/null 2>&1; then
     for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
         if [ -f "$U" ]; then
-            sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
+            if grep -q '^KillMode=' "$U" 2>/dev/null; then
+                sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
+            else
+                # 旧模板 unit 没有 KillMode 行：在 RestartSec 后插入；失败则直接追加
+                sed -i '/^RestartSec=/a KillMode=process' "$U" 2>/dev/null || true
+                grep -q '^KillMode=process' "$U" || echo "KillMode=process" >> "$U"
+            fi
         fi
     done
-    systemctl daemon-reload 2>/dev/null || true
+    systemctl daemon-reload >/dev/null 2>&1 &
+    DR=$!
+    sleep 5
+    kill "$DR" 2>/dev/null || true
 fi
 # 停止客户端服务与残留进程（natpunch-client 专属名称，不影响同机服务端）
 if [ -f "$CLIENT_INIT" ]; then
