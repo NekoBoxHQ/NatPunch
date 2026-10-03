@@ -21,32 +21,6 @@ CLIENT_AGENT="${HOME:-}/Library/LaunchAgents/com.natpunch.client.plist"
 log() { echo "==> $*"; }
 warn() { echo "==> 警告: $*" >&2; }
 
-# ---------- 客户端进程精确识别（专属进程名 natpunch-client，服务端 natpunch 天然不受影响） ----------
-get_client_pids() {
-    PIDS=""
-    if [ -d /proc ]; then
-        for d in /proc/[0-9]*; do
-            p=${d#/proc/}
-            [ "$p" = "$$" ] && continue
-            exe=$(readlink "$d/exe" 2>/dev/null) || continue
-            case "$exe" in
-                */natpunch-client|*/natpunch-client\ \(deleted\)) PIDS="$PIDS $p" ;;
-            esac
-        done
-    else
-        PIDS=$(ps w 2>/dev/null | grep -v grep | grep 'natpunch-client' | awk '{print $1}')
-    fi
-    echo "$PIDS"
-}
-kill_client_pids() {
-    PIDS=$(get_client_pids)
-    [ -z "$PIDS" ] && return 0
-    for p in $PIDS; do kill "$p" 2>/dev/null || true; done
-    sleep 1
-    for p in $PIDS; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true; done
-    sleep 1
-}
-
 # ---------- 更新模式：保留配置，仅替换二进制并重启 ----------
 if [ "$ACTION" = "update" ]; then
     log "更新 NatPunch 客户端（保留配置）..."
@@ -149,90 +123,48 @@ if [ "$ACTION" != "uninstall" ]; then
 fi
 
 # ================= 卸载模式 =================
-# 1. 精确结束客户端进程（专属进程名 natpunch-client，不影响同机服务端）
-kill_client_pids
-# 2. 停止/删除客户端自启（natpunch-client 专属名称）
-if [ -f "$CLIENT_INIT" ]; then
-    "$CLIENT_INIT" stop 2>/dev/null || true
-    "$CLIENT_INIT" disable 2>/dev/null || true
-    rm -f "$CLIENT_INIT"
-fi
-rm -f /etc/rc.d/*natpunch-client 2>/dev/null
-for f in /etc/rc.d/S??natpunch-client /etc/rc.d/K??natpunch-client /etc/rc*.d/S??natpunch-client /etc/rc*.d/K??natpunch-client; do
-    [ -e "$f" ] || continue
-    rm -f "$f"
-done
+# 断连保护（与升级链路同一机制）：
+# 面板 SSH 会话在 natpunch-client.service 的 cgroup 内，systemd 默认 KillMode=control-group，
+# `systemctl stop` 会连带杀掉正在执行的卸载脚本 → 卸载中断、残留。
+# 因此：1) 先把 KillMode 改为 process（只杀主进程）；2) 卸载动作写成独立脚本 setsid 后台静默执行，
+# 与当前 SSH 会话完全解耦——杀客户端即断连，但后台清理照常跑完，完整无残留。
 if command -v systemctl >/dev/null 2>&1; then
     for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
         [ -f "$U" ] || continue
-        systemctl stop natpunch-client 2>/dev/null || true
-        systemctl disable natpunch-client 2>/dev/null || true
-        rm -f "$U"
+        if grep -q '^KillMode=' "$U" 2>/dev/null; then
+            sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
+        else
+            sed -i '/^RestartSec=/a KillMode=process' "$U" 2>/dev/null || true
+            grep -q '^KillMode=process' "$U" || echo "KillMode=process" >> "$U"
+        fi
     done
-    systemctl daemon-reload 2>/dev/null || true
+    systemctl daemon-reload >/dev/null 2>&1 &
+    DR=$!
+    sleep 3
+    kill "$DR" 2>/dev/null || true
 fi
-if command -v service >/dev/null 2>&1 && [ -d /usr/local/etc/rc.d ]; then
-    if [ -f /usr/local/etc/rc.d/natpunch-client ]; then
-        service natpunch-client stop 2>/dev/null || true
-        rm -f /usr/local/etc/rc.d/natpunch-client
-        command -v sysrc >/dev/null 2>&1 && sysrc -x natpunch_client_enable 2>/dev/null || true
-    fi
-fi
-if [ -d /Library/LaunchDaemons ]; then
-    if [ -f "$CLIENT_PLIST" ]; then
-        launchctl bootout system "$CLIENT_PLIST" 2>/dev/null || true
-        launchctl unload "$CLIENT_PLIST" 2>/dev/null || true
-        rm -f "$CLIENT_PLIST"
-    fi
-fi
-if [ -f "$CLIENT_AGENT" ]; then
-    launchctl unload "$CLIENT_AGENT" 2>/dev/null || true
-    rm -f "$CLIENT_AGENT"
-fi
-# 3. 清理 rc.local（仅 natpunch-client 行）
-if [ -f /etc/rc.local ]; then
-    cp -f /etc/rc.local /etc/rc.local.natpunch-client.bak 2>/dev/null || true
-    if sed --version >/dev/null 2>&1; then
-        sed -i '/natpunch-client -server=/d; /natpunch-client.*-vkey=/d' /etc/rc.local 2>/dev/null || true
+# 拉取卸载应用脚本（jsdelivr 优先，raw 兜底；内容校验避免 CDN 缓存返回非脚本内容）
+UN_URL="https://cdn.jsdelivr.net/gh/$REPO@master/uninstall_client_apply.sh"
+fetch_unapply() {
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O /tmp/natpunch_uninstall.sh "$1"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o /tmp/natpunch_uninstall.sh "$1"
     else
-        sed -i '' '/natpunch-client -server=/d; /natpunch-client.*-vkey=/d' /etc/rc.local 2>/dev/null || true
+        return 1
     fi
+}
+fetch_unapply "$UN_URL" || { warn "拉取卸载脚本失败"; exit 1; }
+if ! head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!'; then
+    UN_URL="https://raw.githubusercontent.com/$REPO/master/uninstall_client_apply.sh"
+    fetch_unapply "$UN_URL" || { warn "拉取卸载脚本失败"; exit 1; }
 fi
-# 4. 删除客户端配置
-rm -f "$CLIENT_CONF_1" "$CLIENT_CONF_2" "$CLIENT_CONF_3"
-if [ -d /etc/natpunch ]; then
-    if [ ! -f /etc/natpunch/natpunch ] && [ ! -f /etc/natpunch/conf/natpunch.conf ]; then
-        rm -rf /etc/natpunch
-    else
-        warn "/etc/natpunch 目录含服务端文件，跳过删除"
-    fi
+[ -s /tmp/natpunch_uninstall.sh ] || { warn "卸载脚本为空"; exit 1; }
+chmod 755 /tmp/natpunch_uninstall.sh
+# setsid 静默后台执行（输出仅写日志，不打扰终端）；SSH 断连不影响后续清理
+if command -v setsid >/dev/null 2>&1; then
+    setsid sh /tmp/natpunch_uninstall.sh >> /tmp/natpunch_uninstall.log 2>&1 < /dev/null &
+else
+    nohup sh /tmp/natpunch_uninstall.sh >> /tmp/natpunch_uninstall.log 2>&1 < /dev/null &
 fi
-if [ -d /usr/local/etc/natpunch ]; then
-    if [ ! -f /usr/local/etc/natpunch/natpunch ]; then
-        rm -rf /usr/local/etc/natpunch
-    else
-        warn "/usr/local/etc/natpunch 目录含服务端文件，跳过删除"
-    fi
-fi
-# 5. 删除客户端二进制
-rm -f "$CLIENT_BIN_1" "$CLIENT_BIN_2"
-# 6. 清理客户端日志（仅 natpunch-client 专属，不动服务端 natpunch 的 /tmp/natpunch.log 等）
-rm -f /tmp/natpunch-client.log /var/log/natpunch-client.log /tmp/natpunch_update.log /tmp/natpunch_apply.sh /tmp/natpunch_update.* 2>/dev/null || true
-# 7. 复查
-REMAIN=0
-if [ -d /proc ]; then
-    for d in /proc/[0-9]*; do
-        p=${d#/proc/}
-        [ "$p" = "$$" ] && continue
-        exe=$(readlink "$d/exe" 2>/dev/null) || continue
-        case "$exe" in
-            */natpunch-client) REMAIN=1; echo "残留 PID $p: $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" ;;
-        esac
-    done
-fi
-if [ "$REMAIN" = "1" ]; then
-    warn "仍检测到客户端进程，请手动检查"
-    exit 1
-fi
-log "客户端已卸载完成"
 exit 0
