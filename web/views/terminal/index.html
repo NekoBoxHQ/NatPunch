@@ -267,6 +267,14 @@
         if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} ws = null; }
     }
 
+    // 发送终端尺寸（resize 控制帧）：服务端带外下发给客户端 pty，保持窗口缩放/面板折叠后换行正确
+    function sendResize() {
+        if (fitAddon) { try { fitAddon.fit(); } catch (e) {} }
+        if (ws && ws.readyState === 1 && term) {
+            try { ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); } catch (e) {}
+        }
+    }
+
     // 右上角 × 关闭终端，返回客户端列表
     $('.close-link').on('click', function (e) {
         e.preventDefault();
@@ -285,7 +293,7 @@
             p.show();
             $('#cmd_panel_toggle_txt').text('≫');
         }
-        if (fitAddon) { try { fitAddon.fit(); } catch (e2) {} }
+        sendResize();
     });
 
     $('#term_input').on('keydown', function (e) {
@@ -300,8 +308,6 @@
         $('#term_input').val('');
     });
 
-    $(window).on('resize', function () {
-        if (fitAddon) { try { fitAddon.fit(); } catch (e) {} }
-    });
+    $(window).on('resize', sendResize);
 })();
 </script>

@@ -26,6 +26,9 @@ import (
 	"ehang.io/nps/lib/crypt"
 )
 
+// shellPtyMap：ShellID -> *os.File(pty)，供 shellresize 控制消息定位对应终端（带外控制，与数据零混流）
+var shellPtyMap sync.Map
+
 type TRPClient struct {
 	svrAddr        string
 	bridgeConnType string
@@ -287,6 +290,19 @@ func (s *TRPClient) handleChan(src net.Conn) {
 		s.logTrace("new %s connection with the goal of %s, remote address:%s", lk.ConnType, lk.Host, lk.RemoteAddr)
 		s.handleUdp(src)
 	}
+	// shellresize: 服务端下发的终端尺寸控制消息（带外通道，不经过数据流，零混流风险）
+	// 定位对应 pty 应用新尺寸；旧客户端不认识此类型会走默认分支忽略，不影响现有功能
+	if lk.ConnType == "shellresize" {
+		if pf, ok := shellPtyMap.Load(lk.ShellID); ok {
+			if f, ok2 := pf.(*os.File); ok2 {
+				if err := pty.Setsize(f, &pty.Winsize{Cols: uint16(lk.Cols), Rows: uint16(lk.Rows)}); err != nil {
+					s.logWarn("shell resize error %s", err.Error())
+				}
+			}
+		}
+		src.Close()
+		return
+	}
 	// shell: 本地启动 shell（面板终端，无需 SSH 凭据）
 	if lk.ConnType == "shell" {
 		s.logTrace("new shell connection, remote address:%s", lk.RemoteAddr)
@@ -313,12 +329,18 @@ func (s *TRPClient) handleChan(src net.Conn) {
 		cmd.Dir = home
 		// 注入 PS1 兜底：个别系统 profile/bash.bashrc 未设置 PS1 时，保证仍显示 root@host:~# 完整提示符
 		// 同时注入 HOME：bash 的 \w 需要 $HOME 判断家目录，否则显示 /root 而非 ~
-		cmd.Env = append(os.Environ(), "HOME="+home, "PS1=\\u@\\h:\\w\\$ ")
+		// TERM=xterm-256color：与电脑 SSH 一致的标准终端类型，vim/top/htop 颜色与全屏布局正常
+		cmd.Env = append(os.Environ(), "HOME="+home, "PS1=\\u@\\h:\\w\\$ ", "TERM=xterm-256color")
 		f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 		if err != nil {
 			s.logWarn("start shell error %s", err.Error())
 			src.Close()
 			return
+		}
+		// 记录 ShellID->pty，供 shellresize 控制消息定位；旧服务端无 ShellID 时不记录（resize 降级为空操作）
+		if lk.ShellID != "" {
+			shellPtyMap.Store(lk.ShellID, f)
+			defer shellPtyMap.Delete(lk.ShellID)
 		}
 		srcConn := conn.GetConn(src, lk.Crypt, lk.Compress, nil, false)
 		go func() {

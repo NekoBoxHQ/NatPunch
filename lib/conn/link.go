@@ -24,6 +24,7 @@ type Link struct {
 	ProtoVersion string
 	Cols         int //shell pty 列数
 	Rows         int //shell pty 行数
+	ShellID      string //shell 会话标识（服务端生成，用于 resize 定位 pty）
 	Option       Options
 }
 

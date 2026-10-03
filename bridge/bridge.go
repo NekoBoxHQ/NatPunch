@@ -460,6 +460,14 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 	return
 }
 
+// SendShellResize 向客户端下发 shell 终端尺寸（带外控制消息，经 mux 独立流发送，与终端数据零混流）。
+// 客户端旧版本不认识 shellresize 类型，会走默认分支忽略，不影响现有终端功能。
+func (s *Bridge) SendShellResize(clientId int, shellID string, cols, rows int) error {
+	link := &conn.Link{ConnType: "shellresize", ShellID: shellID, Cols: cols, Rows: rows}
+	_, err := s.SendLinkInfo(clientId, link, nil)
+	return err
+}
+
 func (s *Bridge) ping() {
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()

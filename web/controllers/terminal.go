@@ -2,8 +2,11 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"sync"
+	"time"
 
 	"ehang.io/nps/lib/conn"
 	"ehang.io/nps/lib/file"
@@ -11,6 +14,9 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// shellSessions：ShellID -> clientId，供 WS 收到 resize 控制帧时定位目标客户端
+var shellSessions sync.Map
 
 type TerminalController struct {
 	BaseController
@@ -121,9 +127,13 @@ func (s *TerminalController) Ws() {
 	}
 
 	// 经隧道请求客户端在本地启动 shell（零凭据）
+	shellID := fmt.Sprintf("%d-%d", clientId, time.Now().UnixNano())
+	shellSessions.Store(shellID, clientId)
+	defer shellSessions.Delete(shellID)
 	link := conn.NewLink("shell", "", client.Cnf.Crypt, client.Cnf.Compress, "", false, "")
 	link.Cols = cols
 	link.Rows = rows
+	link.ShellID = shellID
 	t, err := server.Bridge.SendLinkInfo(clientId, link, nil)
 	if err != nil {
 		ws.WriteMessage(websocket.TextMessage, []byte("tunnel error: "+err.Error()))
@@ -137,7 +147,7 @@ func (s *TerminalController) Ws() {
 		ws.Close()
 	}()
 
-	// 浏览器 -> 内网（二进制=数据，文本=控制）
+	// 浏览器 -> 内网：二进制帧=终端数据直接转发；文本帧=控制（resize 尺寸，带外下发客户端）
 	for {
 		mt, data, err := ws.ReadMessage()
 		if err != nil {
@@ -145,6 +155,17 @@ func (s *TerminalController) Ws() {
 		}
 		if mt == websocket.BinaryMessage {
 			t.Write(data)
+		} else if mt == websocket.TextMessage {
+			var r struct {
+				Type string `json:"type"`
+				Cols int    `json:"cols"`
+				Rows int    `json:"rows"`
+			}
+			if json.Unmarshal(data, &r) == nil && r.Type == "resize" && r.Cols > 0 && r.Rows > 0 {
+				if cid, ok := shellSessions.Load(shellID); ok {
+					_ = server.Bridge.SendShellResize(cid.(int), shellID, r.Cols, r.Rows)
+				}
+			}
 		}
 	}
 }
