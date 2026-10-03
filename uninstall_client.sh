@@ -114,6 +114,25 @@ if [ "$ACTION" = "update" ]; then
     echo "==> 升级文件已就绪，流程转入后台执行"
     echo "==> SSH 断开后自动完成替换与重启，日志: /tmp/natpunch_update.log"
     echo "==> 完成后客户端自动重启，隧道恢复后请重新连接"
+    # 关键保护（面板 SSH 升级场景）：更新子脚本由客户端派生，位于 natpunch-client.service 的 cgroup 内；
+    # systemd 默认 KillMode=control-group，stop 会连带杀掉更新子脚本 → 客户端停而不启。
+    # 必须在 detach 前（主脚本还活着、客户端还在跑时）先把 unit 改为 KillMode=process 并重载。
+    if command -v systemctl >/dev/null 2>&1; then
+        for U in /etc/systemd/system/natpunch-client.service /lib/systemd/system/natpunch-client.service; do
+            if [ -f "$U" ]; then
+                if grep -q '^KillMode=' "$U" 2>/dev/null; then
+                    sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
+                else
+                    sed -i '/^RestartSec=/a KillMode=process' "$U" 2>/dev/null || true
+                    grep -q '^KillMode=process' "$U" || echo "KillMode=process" >> "$U"
+                fi
+            fi
+        done
+        systemctl daemon-reload >/dev/null 2>&1 &
+        DR=$!
+        sleep 3
+        kill "$DR" 2>/dev/null || true
+    fi
     if command -v setsid >/dev/null 2>&1; then
         NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" NP_CLIENT_INIT="$CLIENT_INIT" NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" setsid sh /tmp/natpunch_apply.sh > /tmp/natpunch_update.log 2>&1 < /dev/null &
     else

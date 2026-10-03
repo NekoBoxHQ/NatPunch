@@ -14,16 +14,22 @@ CLIENT_BIN_2="$NP_CLIENT_BIN_2"
 CLIENT_INIT="$NP_CLIENT_INIT"
 CLIENT_SYSTEMD_1="$NP_CLIENT_SYSTEMD_1"
 CLIENT_SYSTEMD_2="$NP_CLIENT_SYSTEMD_2"
-# 关键：面板 SSH 的 shell 由客户端派生，本子脚本也位于 natpunch-client.service 的 cgroup 内。
-# systemd 默认 KillMode=control-group，stop 会连带杀掉整个 cgroup（包括本子脚本）→ 客户端停而不启。
-# 因此 stop 前先把 unit 改为 KillMode=process（只杀主进程），再 daemon-reload 生效。
-if command -v systemctl >/dev/null 2>&1; then
+
+# 1. 替换二进制（stop 前完成：运行中进程不受磁盘替换影响；先备份旧版用于失败回滚）
+[ -f "$CLIENT_BIN_1" ] && cp -f "$CLIENT_BIN_1" "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
+cp -f "$BIN_SRC" "$CLIENT_BIN_1" || { warn "写入 $CLIENT_BIN_1 失败"; exit 1; }
+chmod 755 "$CLIENT_BIN_1"
+[ -f "$CLIENT_BIN_2" ] && { cp -f "$BIN_SRC" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
+
+# 2. Linux systemd：用 systemd-run 在独立 cgroup 里执行"停止+启动"，
+#    彻底避免 systemctl stop 连带杀掉更新进程（面板 SSH 场景本脚本位于客户端服务 cgroup 内）。
+if command -v systemctl >/dev/null 2>&1 && command -v systemd-run >/dev/null 2>&1; then
+    # 尽力修正 KillMode=process（双保险，不依赖它）
     for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
         if [ -f "$U" ]; then
             if grep -q '^KillMode=' "$U" 2>/dev/null; then
                 sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
             else
-                # 旧模板 unit 没有 KillMode 行：在 RestartSec 后插入；失败则直接追加
                 sed -i '/^RestartSec=/a KillMode=process' "$U" 2>/dev/null || true
                 grep -q '^KillMode=process' "$U" || echo "KillMode=process" >> "$U"
             fi
@@ -31,10 +37,15 @@ if command -v systemctl >/dev/null 2>&1; then
     done
     systemctl daemon-reload >/dev/null 2>&1 &
     DR=$!
-    sleep 5
+    sleep 3
     kill "$DR" 2>/dev/null || true
+    # systemd-run 独立单元：stop → sleep 1 → start（独立 cgroup，stop 杀不到它；--collect 自动清理）
+    systemd-run --unit="natpunch-apply-$$" --collect --no-block /bin/sh -c "systemctl stop natpunch-client; sleep 1; systemctl start natpunch-client" >/dev/null 2>&1 \
+        && { log "更新完成（独立单元重启）"; rm -rf "$TMP_DIR"; exit 0; }
+    warn "systemd-run 提交失败，回退常规流程"
 fi
-# 停止客户端服务与残留进程（natpunch-client 专属名称，不影响同机服务端）
+
+# 3. 常规流程（OpenWrt init.d / 无 systemd-run 的 Linux）：停止 → 清理残留 → 启动（含兜底与回滚）
 if [ -f "$CLIENT_INIT" ]; then
     "$CLIENT_INIT" stop 2>/dev/null || true
 fi
@@ -65,11 +76,6 @@ else
     sleep 1
     ps w 2>/dev/null | grep -v grep | grep 'natpunch-client' | awk '{print $1}' | while read -r p; do kill -9 "$p" 2>/dev/null || true; done
 fi
-# 替换二进制（先备份旧版，用于启动失败自动回滚）
-[ -f "$CLIENT_BIN_1" ] && cp -f "$CLIENT_BIN_1" "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
-cp -f "$BIN_SRC" "$CLIENT_BIN_1" || { warn "写入 $CLIENT_BIN_1 失败"; exit 1; }
-chmod 755 "$CLIENT_BIN_1"
-[ -f "$CLIENT_BIN_2" ] && { cp -f "$BIN_SRC" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
 
 # 启动检测：/proc 遍历或 ps，识别 natpunch-client 进程
 client_running() {
@@ -85,7 +91,7 @@ client_running() {
     ps w 2>/dev/null | grep -v grep | grep -q 'natpunch-client'
 }
 
-# 启动客户端：init.d / systemd restart → start（restart 失败等 2 秒避开 systemd 竞态）
+# 启动客户端：init.d / systemd restart → start（后台执行 + 超时，卡住立即放弃）；最后 nohup 直接跑二进制兜底
 start_client() {
     if [ -f /etc/openwrt_release ]; then
         if [ -f "$CLIENT_INIT" ]; then
@@ -95,7 +101,6 @@ start_client() {
             "$CLIENT_INIT" start 2>/dev/null || true
         fi
     elif command -v systemctl >/dev/null 2>&1; then
-        # systemctl 偶发卡死（systemd 默认超时 ~90s），后台执行 + 8s 超时，卡住立即放弃走下一层
         systemctl restart natpunch-client >/dev/null 2>&1 &
         R=$!
         sleep 8
@@ -107,7 +112,7 @@ start_client() {
         client_running && return 0
         kill "$S" 2>/dev/null || true
     fi
-    # 兜底：直接后台运行二进制（配置在 /etc/natpunch.conf，字段为小写 server/port/vkey/tls_enable）
+    # 兜底：直接后台运行二进制（配置在 /etc/natpunch.conf，兼容大小写字段）
     if [ -f /etc/natpunch.conf ]; then
         . /etc/natpunch.conf 2>/dev/null
         SRV="${server:-$SERVER}"
