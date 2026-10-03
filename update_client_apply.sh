@@ -14,6 +14,17 @@ CLIENT_BIN_2="$NP_CLIENT_BIN_2"
 CLIENT_INIT="$NP_CLIENT_INIT"
 CLIENT_SYSTEMD_1="$NP_CLIENT_SYSTEMD_1"
 CLIENT_SYSTEMD_2="$NP_CLIENT_SYSTEMD_2"
+# 关键：面板 SSH 的 shell 由客户端派生，本子脚本也位于 natpunch-client.service 的 cgroup 内。
+# systemd 默认 KillMode=control-group，stop 会连带杀掉整个 cgroup（包括本子脚本）→ 客户端停而不启。
+# 因此 stop 前先把 unit 改为 KillMode=process（只杀主进程），再 daemon-reload 生效。
+if command -v systemctl >/dev/null 2>&1; then
+    for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
+        if [ -f "$U" ]; then
+            sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
+        fi
+    done
+    systemctl daemon-reload 2>/dev/null || true
+fi
 # 停止客户端服务与残留进程（natpunch-client 专属名称，不影响同机服务端）
 if [ -f "$CLIENT_INIT" ]; then
     "$CLIENT_INIT" stop 2>/dev/null || true

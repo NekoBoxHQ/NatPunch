@@ -312,7 +312,8 @@ func (s *TRPClient) handleChan(src net.Conn) {
 		}
 		cmd.Dir = home
 		// 注入 PS1 兜底：个别系统 profile/bash.bashrc 未设置 PS1 时，保证仍显示 root@host:~# 完整提示符
-		cmd.Env = append(os.Environ(), "PS1=\\u@\\h:\\w\\$ ")
+		// 同时注入 HOME：bash 的 \w 需要 $HOME 判断家目录，否则显示 /root 而非 ~
+		cmd.Env = append(os.Environ(), "HOME="+home, "PS1=\\u@\\h:\\w\\$ ")
 		f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 		if err != nil {
 			s.logWarn("start shell error %s", err.Error())

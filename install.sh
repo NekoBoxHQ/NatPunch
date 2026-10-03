@@ -147,6 +147,8 @@ EnvironmentFile=/etc/natpunch.conf
 ExecStart=/usr/bin/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}
 Restart=always
 RestartSec=3
+# KillMode=process：stop 只杀主进程，不连带杀面板 SSH 场景下的更新子脚本（子脚本位于服务 cgroup 内）
+KillMode=process
 [Install]
 WantedBy=multi-user.target
 SVC
