@@ -161,10 +161,23 @@ if ! head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!'; then
 fi
 [ -s /tmp/natpunch_uninstall.sh ] || { warn "卸载脚本为空"; exit 1; }
 chmod 755 /tmp/natpunch_uninstall.sh
-# setsid 静默后台执行（输出仅写日志，不打扰终端）；SSH 断连不影响后续清理
+# setsid 静默后台执行（与当前 SSH 会话解耦，断连不影响清理完整性）
 if command -v setsid >/dev/null 2>&1; then
     setsid sh /tmp/natpunch_uninstall.sh >> /tmp/natpunch_uninstall.log 2>&1 < /dev/null &
 else
     nohup sh /tmp/natpunch_uninstall.sh >> /tmp/natpunch_uninstall.log 2>&1 < /dev/null &
+fi
+UN_PID=$!
+# 等待卸载完成：正常 SSH（隧道未断）场景输出"客户端已卸载完成"；
+# 面板 SSH 卸载自身时隧道已断，用户看不到后续输出，但后台卸载照常完整执行（无残留）。
+i=0
+while kill -0 "$UN_PID" 2>/dev/null && [ "$i" -lt 60 ]; do
+    sleep 1
+    i=$((i+1))
+done
+if ! kill -0 "$UN_PID" 2>/dev/null; then
+    log "客户端已卸载完成"
+else
+    warn "卸载仍在后台进行（可能正通过隧道卸载自身），请稍后直连确认"
 fi
 exit 0
