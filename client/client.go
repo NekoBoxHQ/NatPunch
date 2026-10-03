@@ -3,6 +3,8 @@ package client
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -343,43 +345,13 @@ func (s *TRPClient) handleChan(src net.Conn) {
 			defer shellPtyMap.Delete(lk.ShellID)
 		}
 		srcConn := conn.GetConn(src, lk.Crypt, lk.Compress, nil, false)
+		// 系统信息先写入（模拟 SSH 客户端连接信息面板，客户端→服务端→前端），失败项自动跳过
+		if info := collectSysInfo(); info != "" {
+			srcConn.Write([]byte("连接主机成功\n" + info))
+		}
+		// 完整双向桥接：banner/motd（ASCII logo、系统版本、Last login 前的 profile 输出）正常显示，
+		// 与电脑 SSH 登录一致。TERM=xterm-256color 已注入，banner 的 ANSI 颜色/控制序列正常渲染。
 		go func() {
-			// 登录式 shell(-l) 由 /etc/profile 原生输出 banner（与电脑 SSH 同一机制），
-			// 此处丢弃启动横幅（BusyBox banner 等），保留完整提示符（从行首起）后开始桥接
-			buf := make([]byte, 256)
-			var acc []byte
-			deadline := time.Now().Add(5 * time.Second)
-			for time.Now().Before(deadline) {
-				n, err := f.Read(buf)
-				if n > 0 {
-					acc = append(acc, buf[:n]...)
-					idx := -1
-					if p := bytes.LastIndex(acc, []byte("# ")); p >= 0 {
-						idx = p
-					}
-					if p := bytes.LastIndex(acc, []byte("$ ")); p > idx {
-						idx = p
-					}
-					if idx < 0 {
-						// 提示符可能无尾空格（如 root@host:~#），匹配行尾 # 或 $
-						trimmed := bytes.TrimRight(acc, " \r\n\t")
-						if len(trimmed) > 0 && (trimmed[len(trimmed)-1] == '#' || trimmed[len(trimmed)-1] == '$') {
-							idx = len(trimmed) - 1
-						}
-					}
-					if idx >= 0 {
-						lineStart := bytes.LastIndex(acc[:idx], []byte("\n")) + 1
-						srcConn.Write(acc[lineStart:])
-						break
-					}
-				}
-				if err != nil {
-					break
-				}
-				if len(acc) > 4096 {
-					break
-				}
-			}
 			io.Copy(srcConn, f)
 			srcConn.Close()
 			f.Close()
@@ -541,4 +513,134 @@ func (s *TRPClient) closing() {
 	if s.signal != nil {
 		_ = s.signal.Close()
 	}
+}
+
+// runQuick 执行单个本地命令并返回输出（超时 2 秒），失败返回空串。
+// 仅使用通用命令，兼容 OpenWrt busybox / Linux（id/ps/df/free/hostname/uptime/uname/grep/cat）。
+func runQuick(args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, args[0], args[1:]...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// publicIP 查询客户端设备公网 IP（IPv4/IPv6）。仅当设备存在 curl/wget 时执行，超时 3 秒，失败返回空串。
+func publicIP(v6 bool) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	url := "https://api.ipify.org"
+	if v6 {
+		url = "https://ifconfig.co"
+	}
+	if _, err := exec.LookPath("curl"); err == nil {
+		args := []string{"curl", "-s", "--max-time", "2"}
+		if v6 {
+			args = append(args, "-6")
+		}
+		args = append(args, url)
+		if out, err := exec.CommandContext(ctx, args[0], args[1:]...).Output(); err == nil {
+			if s := strings.TrimSpace(string(out)); s != "" {
+				return s
+			}
+		}
+	}
+	if _, err := exec.LookPath("wget"); err == nil {
+		args := []string{"wget", "-qO-", "-T", "2"}
+		if v6 {
+			args = append(args, "-6")
+		}
+		args = append(args, url)
+		if out, err := exec.CommandContext(ctx, args[0], args[1:]...).Output(); err == nil {
+			if s := strings.TrimSpace(string(out)); s != "" {
+				// busybox wget 不支持 -6：拿不到真实 v6 时可能返回空或 IPv4 地址，校验过滤
+				if v6 && !strings.Contains(s, ":") {
+					return ""
+				}
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// collectSysInfo 采集设备系统信息（模拟 SSH 客户端连接信息面板），失败项自动跳过。
+// 由 shell 分支在桥接前写入连接流，前端显示在 shell banner 之前。
+func collectSysInfo() string {
+	var b strings.Builder
+	// 登录用户
+	if uid := runQuick("id", "-u"); uid != "" {
+		fmt.Fprintf(&b, "登录用户 : %s\n", uid)
+	}
+	// 运行进程（GNU ps 需 -e 显示全部；busybox ps 默认全量且不识别 -e，失败回退裸 ps）
+	ps := runQuick("ps", "-e")
+	if ps == "" {
+		ps = runQuick("ps")
+	}
+	if ps != "" {
+		fmt.Fprintf(&b, "运行进程 : %d\n", strings.Count(ps, "\n"))
+	}
+	// 磁盘使用（df -h / 第二行：Size Used）
+	if df := runQuick("df", "-h", "/"); df != "" {
+		lines := strings.Split(df, "\n")
+		if len(lines) >= 2 {
+			fs := strings.Fields(lines[1])
+			if len(fs) >= 3 {
+				fmt.Fprintf(&b, "磁盘使用 : %s/%s\n", fs[2], fs[1])
+			}
+		}
+	}
+	// 主机名称
+	if hn := runQuick("hostname"); hn != "" {
+		fmt.Fprintf(&b, "主机名称 : %s\n", hn)
+	}
+	// 内存使用（free -m 兼容 busybox，busybox 无 -h）
+	if free := runQuick("free", "-m"); free != "" {
+		for _, l := range strings.Split(free, "\n") {
+			if strings.HasPrefix(l, "Mem:") {
+				fs := strings.Fields(l)
+				if len(fs) >= 3 {
+					fmt.Fprintf(&b, "内存使用 : %sMi/%sMi\n", fs[2], fs[1])
+				}
+				break
+			}
+		}
+	}
+	// 公网 IPv4 / IPv6 并行查询（最慢项约 3 秒，串行会翻倍到 6 秒；查询失败自动跳过）
+	v4c := make(chan string, 1)
+	go func() { v4c <- publicIP(false) }()
+	v6 := publicIP(true)
+	v4 := <-v4c
+	if v4 != "" {
+		fmt.Fprintf(&b, "公网IPv4 : %s\n", v4)
+	}
+	if v6 != "" {
+		fmt.Fprintf(&b, "公网IPv6 : %s\n", v6)
+	}
+	// 运行时间（uptime -p；busybox 不支持 -p 时回退 /proc/uptime 换算）
+	if up := runQuick("uptime", "-p"); up != "" {
+		up = strings.TrimPrefix(up, "up ")
+		fmt.Fprintf(&b, "运行时间 : %s\n", up)
+	} else if ut := runQuick("cat", "/proc/uptime"); ut != "" {
+		secs := 0.0
+		fmt.Sscanf(ut, "%f", &secs)
+		if secs > 0 {
+			d := int(secs) / 86400
+			h := (int(secs) % 86400) / 3600
+			m := (int(secs) % 3600) / 60
+			fmt.Fprintf(&b, "运行时间 : %d days, %d hours, %d minutes\n", d, h, m)
+		}
+	}
+	// 操作系统（/etc/os-release PRETTY_NAME，失败回退 uname）
+	if osr := runQuick("sh", "-c", "grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'\"' -f2"); osr != "" {
+		fmt.Fprintf(&b, "操作系统 : %s\n", osr)
+	} else if un := runQuick("uname", "-sr"); un != "" {
+		fmt.Fprintf(&b, "操作系统 : %s\n", un)
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return b.String()
 }

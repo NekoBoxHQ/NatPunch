@@ -244,6 +244,7 @@
         openTerm();
         closeWs();
         term.reset();
+        term.write('\r\n连接主机...\r\n');
         var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
         var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
         var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
