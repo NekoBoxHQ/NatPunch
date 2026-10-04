@@ -238,10 +238,16 @@ func (s *DbUtils) DelClient(id int) error {
 	return nil
 }
 
-// GetClientCount 返回已注册客户端总数（F1-8：max_clients 限额用）
+// GetClientCount 返回计入 max_clients 配额的客户端数量（F1-8）。
+// 跳过 NoStore 条目（内置公共 vkey 客户端等合成条目，NewClient(vkey,true,true) 创建）：
+// 否则合成条目会占掉一个配额，导致 max_clients=1 时第一个真实客户端就被拒、
+// max_clients=N 时实际只能注册 N-1 个（复评🟠2）。
 func (s *DbUtils) GetClientCount() int {
 	cnt := 0
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
+		if c, ok := value.(*Client); ok && c.NoStore {
+			return true
+		}
 		cnt++
 		return true
 	})
@@ -262,7 +268,8 @@ func (s *DbUtils) GetTaskCountByClient(clientId int) int {
 
 func (s *DbUtils) NewClient(c *Client) error {
 	// 客户端注册上限（数据层统一校验，所有入口生效；0=不限）
-	if MaxClients > 0 && s.GetClientCount() >= MaxClients {
+	// 合成条目（NoStore：内置公共 vkey 客户端）不计入配额，也不受配额限制（复评🟠2）
+	if MaxClients > 0 && !c.NoStore && s.GetClientCount() >= MaxClients {
 		return errors.New(fmt.Sprintf("client count %d >= max_clients %d", s.GetClientCount(), MaxClients))
 	}
 	var isNotSet bool

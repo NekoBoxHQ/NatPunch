@@ -13,6 +13,11 @@ import (
 // provider 条目超过该时长未更新则视为失效并重建（F1-4：防 map 无限增长）
 const p2pEntryTTL = 60 * time.Second
 
+// p2pMaxEntries 并发 p2p 条目数硬上限。
+// TTL 清扫只能约束"闲置"条目，无法约束"新 key 的到达速率"：攻击者以连续不同 key
+// 发包时 map 仍会增长到 速率×TTL（例：10k key/s → 约 60 万条目）。此处直接封顶（复评🟠3）。
+const p2pMaxEntries = 4096
+
 type P2PServer struct {
 	BaseServer
 	p2pPort  int
@@ -115,6 +120,12 @@ func (s *P2PServer) handleP2P(addr *net.UDPAddr, str string) {
 	}
 	s.mu.Lock()
 	v, ok := s.p2p[arr[0]]
+	if !ok && len(s.p2p) >= p2pMaxEntries {
+		// 新 key 且已达硬上限：丢弃。防止"不同 key 高速发包"绕过 TTL 清扫（复评🟠3）
+		s.mu.Unlock()
+		logs.Warn("p2p entry table full (%d entries), drop packet from %s", p2pMaxEntries, addr.String())
+		return
+	}
 	if !ok || time.Since(v.lastSeen) > p2pEntryTTL {
 		// 新条目或条目已失效：重建，防止 provider 条目无限增长（F1-4）
 		v = &p2p{lastSeen: time.Now()}

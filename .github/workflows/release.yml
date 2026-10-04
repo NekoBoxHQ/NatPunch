@@ -184,9 +184,35 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          # 包与静态校验器一并入哈希清单：校验器由安装脚本下载后先比对 SHA256SUMS 再执行（防镜像替换校验器）
+          # 包与静态校验器一并入哈希清单（校验器哈希由脚本内嵌信任锚比对；SHA256SUMS 同时作为包哈希基线）
           sha256sum *.tar.gz minisign-check-linux-* > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Verify pinned checker hashes (install scripts)
+        run: |
+          # install.sh / install_server.sh 里的 MSC_SHA256_* 是内置校验器的信任锚（防镜像替换校验器）。
+          # 空值 → 给出可粘贴的哈希（提示该架构尚未启用锚定）；非空但与本次产物不符 → 直接失败，
+          # 避免发布出错误锚点（错误的锚只会导致降级告警，但会掩盖真实篡改信号）。
+          fail=0
+          for arch in amd64 arm64 arm mipsle; do
+            f="dist/minisign-check-linux-$arch"
+            if [ ! -f "$f" ]; then
+              echo "::error::缺少构建产物 $f"
+              fail=1
+              continue
+            fi
+            actual=$(sha256sum "$f" | awk '{print $1}')
+            for script in install.sh install_server.sh; do
+              pinned=$(grep -E "^MSC_SHA256_${arch}=" "$script" | head -1 | cut -d'"' -f2)
+              if [ -z "$pinned" ]; then
+                echo "::warning::$script 的 MSC_SHA256_${arch} 为空（该架构不启用内置校验器）。如需启用请填入: $actual"
+              elif [ "$pinned" != "$actual" ]; then
+                echo "::error::$script 的 MSC_SHA256_${arch} 与本次构建产物不符（锚点 $pinned / 实际 $actual），请更新后重新打 tag"
+                fail=1
+              fi
+            done
+          done
+          exit $fail
 
       - name: Sign checksums (minisign)
         env:

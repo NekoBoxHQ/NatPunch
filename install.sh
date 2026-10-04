@@ -126,6 +126,16 @@ log "sha256 校验通过"
 # 分级签名校验：系统 minisign → 内置静态校验器（minisign-check，OpenWrt 无 minisign 包场景）→ 降级 SHA256 兜底
 # 环境变量 MINISIGN_PUBKEY 可覆盖内置公钥（自建发布链场景）
 MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
+
+# 内置静态校验器（minisign-check）各架构 SHA256 信任锚，由发布方在打 tag 前填入。
+# 必须内嵌于本脚本：若改用「同渠道下载的 SHA256SUMS」去校验校验器，在镜像被控时
+# 攻击者可同时替换 包 / SHA256SUMS / 校验器 三者，构成循环信任，等于没有校验（复评⚠️1）。
+# 留空 = 不启用内置校验器（仅告警跳过，SHA256 仍强制校验）；填入 = 锚定后才执行。
+MSC_SHA256_amd64="431ff79c6b7dcee90b238eb6e12d929bada9f10c7f8c9549ed81ebed5444d24a"
+MSC_SHA256_arm64="51c37eec5fd52efed2e0f83001f6da45f26db15871982066cb7ac5419f604cfd"
+MSC_SHA256_arm="25d20c08ce0d8745c3b2df20f4fd61c849e455beee2fb99cb971b6e3bb2644b8"
+MSC_SHA256_mipsle="b67330a859ccb8040d04e0f0a3999e16db7c418f7a913b9203ebd928274ad5d6"
+
 sig_ok=0
 if [ -n "${MINISIGN_PUBKEY:-}" ]; then
     if fetch "$BASE_URL/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS.minisig"; then
@@ -135,7 +145,7 @@ if [ -n "${MINISIGN_PUBKEY:-}" ]; then
             log "minisign 签名校验通过"
             sig_ok=1
         fi
-        # 2) 内置静态校验器（与包同源下载；其哈希须在已签名的 SHA256SUMS 内，否则拒绝执行）
+        # 2) 内置静态校验器（与包同源下载；其哈希须与脚本内嵌信任锚一致，否则拒绝执行）
         if [ "$sig_ok" -eq 0 ]; then
             case "$ARCH" in
                 x86_64|amd64) MSC_ARCH="amd64";;
@@ -147,7 +157,14 @@ if [ -n "${MINISIGN_PUBKEY:-}" ]; then
             if [ -n "$MSC_ARCH" ]; then
                 MSC="minisign-check-linux-$MSC_ARCH"
                 if fetch "$BASE_URL/$MSC" "$TMP_DIR/$MSC"; then
-                    MSC_EXPECT="$(awk -v f="$MSC" '$2==f {print $1; exit}' "$TMP_DIR/SHA256SUMS")"
+                    # 信任锚取自脚本内嵌常量，而非同渠道下载的 SHA256SUMS（避免循环信任，复评⚠️1）
+                    case "$MSC_ARCH" in
+                        amd64)  MSC_EXPECT="$MSC_SHA256_amd64" ;;
+                        arm64)  MSC_EXPECT="$MSC_SHA256_arm64" ;;
+                        arm)    MSC_EXPECT="$MSC_SHA256_arm" ;;
+                        mipsle) MSC_EXPECT="$MSC_SHA256_mipsle" ;;
+                        *)      MSC_EXPECT="" ;;
+                    esac
                     if [ -n "$MSC_EXPECT" ]; then
                         if command -v sha256sum >/dev/null 2>&1; then
                             MSC_ACTUAL="$(sha256sum "$TMP_DIR/$MSC" | awk '{print $1}')"
@@ -166,10 +183,10 @@ if [ -n "${MINISIGN_PUBKEY:-}" ]; then
                                 die "minisign 签名校验失败（内置校验器）"
                             fi
                         else
-                            warn "内置校验器 $MSC 哈希不在已签名 SHA256SUMS 内，拒绝执行，跳过签名校验（SHA256 已强制校验）"
+                            warn "内置校验器 $MSC 哈希与内嵌信任锚不符，拒绝执行，跳过签名校验（SHA256 已强制校验）"
                         fi
                     else
-                        warn "SHA256SUMS 无 $MSC 条目，拒绝执行，跳过签名校验（SHA256 已强制校验）"
+                        warn "内置校验器 $MSC 未配置信任锚（本脚本 MSC_SHA256_* 为空），跳过签名校验（SHA256 已强制校验）"
                     fi
                 else
                     warn "无法下载内置校验器 $MSC，跳过签名校验（SHA256 已强制校验）"
