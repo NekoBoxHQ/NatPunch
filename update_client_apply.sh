@@ -202,4 +202,9 @@ else
     rm -f "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
 fi
 rm -rf "$TMP_DIR"
+# 自删唯一副本（延迟到 shell 退出后；只删当前运行的副本 $0）
+(
+    sleep 1
+    rm -f "$0"
+) &
 exit 0

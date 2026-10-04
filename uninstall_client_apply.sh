@@ -148,11 +148,11 @@ if [ "$REMAIN" = "1" ]; then
 else
     log "卸载完成，无残留"
 fi
-# 11. 自删（延迟到 shell 退出后）
-# 用 trap 在 EXIT 时删自己，避免 sh 还在读文件时被删
-# 注意：trap 已用于 finish，这里用子 shell 延迟删
+# 11. 自删（延迟到 shell 退出后；只删当前运行的唯一副本 $0，
+#      不碰固定路径 /tmp/natpunch_uninstall.sh，
+#      避免上一次卸载的自删子进程误删本次刚拉取的新脚本）
 (
     sleep 1
-    rm -f /tmp/natpunch_uninstall.sh
+    rm -f "$0"
 ) &
 exit 0
