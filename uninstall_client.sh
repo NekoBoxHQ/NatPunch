@@ -121,6 +121,8 @@ CLIENT_BIN_2="${NP_CLIENT_BIN_2:-/usr/local/bin/natpunch-client}"
 CLIENT_INIT="${NP_CLIENT_INIT:-/etc/init.d/natpunch-client}"
 CLIENT_SYSTEMD_1="${NP_CLIENT_SYSTEMD_1:-/etc/systemd/system/natpunch-client.service}"
 CLIENT_SYSTEMD_2="${NP_CLIENT_SYSTEMD_2:-/lib/systemd/system/natpunch-client.service}"
+# 任何退出路径都清理临时目录（正常路径已显式清理，此处兜底异常路径）
+trap 'rm -rf "$TMP_DIR" 2>/dev/null || true' EXIT INT TERM
 [ -n "$BIN_SRC" ] && [ -f "$BIN_SRC" ] || { warn "NP_BIN_SRC 无效: $BIN_SRC"; exit 1; }
 [ -n "$TMP_DIR" ] || { warn "NP_TMP_DIR 为空"; exit 1; }
 log "开始应用更新"
@@ -192,6 +194,7 @@ kill_client_pids() {
 if ! cp -f "$BIN_SRC" "$CLIENT_BIN_1"; then
     warn "写入 $CLIENT_BIN_1 失败，尝试回滚"
     [ -f "${CLIENT_BIN_1}.update_bak" ] && cp -f "${CLIENT_BIN_1}.update_bak" "$CLIENT_BIN_1"
+    rm -f "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
     exit 1
 fi
 chmod 755 "$CLIENT_BIN_1"
@@ -296,6 +299,7 @@ if ! start_client; then
         [ -f "$CLIENT_BIN_2" ] && { cp -f "${CLIENT_BIN_1}.update_bak" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
         if start_client; then
             log "更新完成（回滚后启动）"
+            rm -f "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
         else
             warn "回滚后仍无法启动，请检查 $CLIENT_BIN_1 与 /etc/natpunch.conf"
         fi
