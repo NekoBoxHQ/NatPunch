@@ -116,7 +116,7 @@
 | 配置项 | 说明 |
 |---|---|
 | `server` | 服务端地址 `host:port`（TLS 桥接用 `tls_bridge_port`） |
-| `vkey` | 客户端密钥（面板生成；128bit） |
+| `vkey` | 客户端密钥（面板生成；128bit，base62 22 位） |
 | `bridge_type` | `tcp` / `kcp` |
 | `tls_enable` | 是否启用 TLS 桥接 |
 | `tls_fingerprint` | 期望的服务端桥接证书 SHA-256 指纹（hex）。空 = 沿用旧行为并打印告警；非空 = 严格比对，不匹配即握手失败 |

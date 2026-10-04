@@ -38,7 +38,7 @@
 - 面板登录：bcrypt 密码 + 会话 Cookie（`SameSite=Strict`，HTTPS 下 `Secure`），登录后会话 ID 轮换（防固定）。
 - 变更操作一律 POST + 会话鉴权（GET 只做渲染，见 D11）。
 - 终端 SSH：仅管理员或本人客户端可开 shell；WebSocket Origin 白名单；**每次开 shell 记录审计日志** `TERMINAL AUDIT: user [x] opened shell on client id [y] ...`。
-- 客户端 VKEY 为 128bit（crypto/rand）。**存量 40bit vkey**：登录面板 → 客户端 → 重置 VKEY → 更新客户端配置（旧 vkey 立即失效）。
+- 客户端 VKEY 为 128bit（crypto/rand，base62 22 位）。**存量 40bit vkey**：登录面板 → 客户端 → 重置 VKEY → 更新客户端配置（旧 vkey 立即失效）。
 
 ## 3. 资源上限（防滥用/耗尽）
 

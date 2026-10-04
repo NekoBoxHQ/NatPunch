@@ -31,14 +31,27 @@ func GetRandomString(l int) string {
 	return string(result)
 }
 
-// GetVkey 生成 128 bit 十六进制验证密钥（32 hex，crypto/rand）。
-// 旧实现截取 UUID 前 10 位十六进制（40 bit）强度不足，且认证值为无盐 MD5（P1-4）。
+// GetVkey 生成 128 bit 验证密钥：base62（0-9A-Za-z）22 位，crypto/rand。
+// 旧实现截取 UUID 前 10 位十六进制（40 bit）强度不足（P1-4）；
+// 上一实现为 32 位小写 hex（128 bit）。当前格式大小写混合、更短易辨识，
+// 与旧风格明显区分（重置 VKEY 需求：不保持原风格）。
 func GetVkey() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+	const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	const size = 22 // 62^22 ≈ 2^131 > 2^128
+	// rejection sampling 消除模偏差（256 % 62 != 0）
+	const limit = 256 - (256 % len(alphabet)) // 248
+	buf := make([]byte, size)
+	tmp := make([]byte, 1)
+	for i := 0; i < size; {
+		if _, err := rand.Read(tmp); err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		if int(tmp[0]) < limit {
+			buf[i] = alphabet[int(tmp[0])%len(alphabet)]
+			i++
+		}
 	}
-	return hex.EncodeToString(buf)
+	return string(buf)
 }
 
 func Base64Decoding(encodedString string) (string, error) {
