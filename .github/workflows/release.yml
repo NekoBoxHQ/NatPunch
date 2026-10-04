@@ -45,6 +45,7 @@ jobs:
           if [ "${{ matrix.type }}" = "server" ]; then
             go build -ldflags "-s -w -extldflags -static -X ehang.io/nps/lib/version.VERSION=$TAG" \
               -o out/natpunch ./cmd/nps/nps.go
+            BIN="$(pwd)/out/natpunch"
             mkdir -p pkg
             cp out/natpunch pkg/natpunch
             cp -r conf pkg/conf
@@ -54,8 +55,19 @@ jobs:
           else
             go build -ldflags "-s -w -extldflags -static -X ehang.io/nps/lib/version.VERSION=$TAG" \
               -o out/natpunch-client ./cmd/npc/npc.go
+            BIN="$(pwd)/out/natpunch-client"
             tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch-client
           fi
+          # 架构自检：产物架构必须与矩阵声明一致，不一致立即失败，防止坏包发布
+          if file -b "$BIN" | grep -q "x86-64"; then
+            [ "${{ matrix.goarch }}" = "amd64" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 amd64"; exit 1; }
+          elif file -b "$BIN" | grep -q "aarch64"; then
+            [ "${{ matrix.goarch }}" = "arm64" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 arm64"; exit 1; }
+          else
+            echo "::error 架构校验失败: 无法识别产物架构 $BIN"
+            exit 1
+          fi
+          echo "架构校验通过: ${{ matrix.goarch }} -> $(file -b "$BIN")"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
