@@ -99,9 +99,11 @@ do_update() {
     BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client 2>/dev/null | head -n1)"
     [ -n "${BIN_SRC:-}" ] || die "压缩包内未找到 natpunch-client 二进制"
     # —— 拉取 apply 脚本（先就绪，再改 KillMode，避免副作用残留） ——
-    APPLY_URL="https://cdn.jsdelivr.net/gh/$REPO@master/update_client_apply.sh"
+    # raw 优先 + jsdelivr 兜底：主脚本本身从 raw 拉取，apply 脚本必须与主脚本同源，
+    # 避免 jsdelivr CDN 缓存旧版导致"新版主脚本 + 旧版 apply"混搭（卸载无 done 判定）
+    APPLY_URL="https://raw.githubusercontent.com/$REPO/master/update_client_apply.sh"
     if ! fetch_to "$APPLY_URL" /tmp/natpunch_apply.sh || ! head -1 /tmp/natpunch_apply.sh 2>/dev/null | grep -q '^#!'; then
-        APPLY_URL="https://raw.githubusercontent.com/$REPO/master/update_client_apply.sh"
+        APPLY_URL="https://cdn.jsdelivr.net/gh/$REPO@master/update_client_apply.sh"
         fetch_to "$APPLY_URL" /tmp/natpunch_apply.sh || die "拉取更新脚本失败"
         head -1 /tmp/natpunch_apply.sh 2>/dev/null | grep -q '^#!' || die "更新脚本内容非法"
     fi
@@ -138,9 +140,10 @@ do_uninstall() {
     log "卸载 NatPunch 客户端..."
     rm -f "$DONE_FILE"
     # —— 拉取 apply 脚本（先就绪，再改 KillMode） ——
-    UN_URL="https://cdn.jsdelivr.net/gh/$REPO@master/uninstall_client_apply.sh"
+    # raw 优先 + jsdelivr 兜底：与主脚本同源，避免 CDN 缓存旧版导致 done 判定失效
+    UN_URL="https://raw.githubusercontent.com/$REPO/master/uninstall_client_apply.sh"
     if ! fetch_to "$UN_URL" /tmp/natpunch_uninstall.sh || ! head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!'; then
-        UN_URL="https://raw.githubusercontent.com/$REPO/master/uninstall_client_apply.sh"
+        UN_URL="https://cdn.jsdelivr.net/gh/$REPO@master/uninstall_client_apply.sh"
         fetch_to "$UN_URL" /tmp/natpunch_uninstall.sh || die "拉取卸载脚本失败"
         head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!' || die "卸载脚本内容非法"
     fi
