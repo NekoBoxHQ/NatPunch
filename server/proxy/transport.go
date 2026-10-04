@@ -33,7 +33,8 @@ func getAddress(conn net.Conn) (string, error) {
 	}
 	var ip string
 	var port uint16
-	err = rawConn.Control(func(fd uintptr) {
+	// Control 的 err 忽略：SO_ORIGINAL_DST 读取失败时返回空地址（上游历史行为）
+	_ = rawConn.Control(func(fd uintptr) {
 		addr, err := syscall.GetsockoptIPv6Mreq(int(fd), syscall.IPPROTO_IP, SO_ORIGINAL_DST)
 		if err != nil {
 			return
