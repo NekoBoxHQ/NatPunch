@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +11,20 @@ import (
 	"ehang.io/nps/server"
 	"github.com/astaxie/beego"
 )
+
+// parseRateLimit 解析带宽限制输入（单位 Mbps，100M 宽带填 100）。
+// 留空 = 0（不限速）；非法输入（如 "100M"）返回错误，禁止静默按 0 处理。
+func (s *ClientController) parseRateLimit() (int, string) {
+	raw := s.GetString("rate_limit")
+	if raw == "" {
+		return 0, ""
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, "带宽限制必须是数字（Mbps，如 100M 宽带填 100）"
+	}
+	return n, ""
+}
 
 type ClientController struct {
 	BaseController
@@ -47,6 +62,11 @@ func (s *ClientController) Add() {
 		s.display()
 	} else {
 		id := int(file.GetDb().JsonDb.GetClientId())
+		rl, rlErr := s.parseRateLimit()
+		if rlErr != "" {
+			s.AjaxErr(rlErr)
+			return
+		}
 		t := &file.Client{
 			VerifyKey: s.getEscapeString("vkey"),
 			Id:        id,
@@ -59,7 +79,7 @@ func (s *ClientController) Add() {
 				Crypt:    s.GetBoolNoErr("crypt"),
 			},
 			ConfigConnAllow: s.GetBoolNoErr("config_conn_allow"),
-			RateLimit:       s.GetIntNoErr("rate_limit"),
+			RateLimit:       rl,
 			MaxConn:         s.GetIntNoErr("max_conn"),
 			WebUserName:     s.getEscapeString("web_username"),
 			WebPassword:     s.getEscapeString("web_password"),
@@ -130,7 +150,12 @@ func (s *ClientController) Edit() {
 				}
 				c.VerifyKey = s.getEscapeString("vkey")
 				c.Flow.FlowLimit = int64(s.GetIntNoErr("flow_limit"))
-				c.RateLimit = s.GetIntNoErr("rate_limit")
+				rl, rlErr := s.parseRateLimit()
+				if rlErr != "" {
+					s.AjaxErr(rlErr)
+					return
+				}
+				c.RateLimit = rl
 				c.MaxConn = s.GetIntNoErr("max_conn")
 				c.MaxTunnelNum = s.GetIntNoErr("max_tunnel")
 			}
