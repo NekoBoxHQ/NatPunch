@@ -39,7 +39,7 @@ WWW-Authenticate: Basic realm="easyProxy"
 	// Clients expect 407 + Proxy-Authenticate, not 401 + WWW-Authenticate.
 	ProxyAuthRequiredBytes = "HTTP/1.1 407 Proxy Authentication Required\r\n" +
 		"Content-Type: text/plain; charset=utf-8\r\n" +
-		"Proxy-Authenticate: Basic realm=\"nps\"\r\n" +
+		"Proxy-Authenticate: Basic realm=\"natpunch\"\r\n" +
 		"\r\n" +
 		"407 Proxy Authentication Required"
 	ConnectionFailBytes = `HTTP/1.1 404 Not Found

@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ehang.io/nps/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/astaxie/beego"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/load"

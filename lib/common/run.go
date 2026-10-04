@@ -9,8 +9,8 @@ import (
 var ConfPath string
 
 // Get the currently selected configuration file directory
-// For non-Windows systems, select the /etc/nps as config directory if exist, or select ./
-// windows system, select the C:\Program Files\nps as config directory if exist, or select ./
+// For non-Windows systems, select the /etc/natpunch as config directory if exist, or select ./
+// windows system, select the C:\Program Files\NatPunch as config directory if exist, or select ./
 func GetRunPath() string {
 	if ConfPath != "" {
 		return ConfPath
@@ -41,9 +41,9 @@ func GetInstallPath() string {
 	}
 
 	if IsWindows() {
-		path = `C:\Program Files\nps`
+		path = `C:\Program Files\NatPunch`
 	} else {
-		path = "/etc/nps"
+		path = "/etc/natpunch"
 	}
 
 	return path
@@ -69,16 +69,16 @@ func IsWindows() bool {
 func GetLogPath() string {
 	var path string
 	if IsWindows() {
-		path = filepath.Join(GetAppPath(), "nps.log")
+		path = filepath.Join(GetAppPath(), "natpunch.log")
 	} else {
-		path = "/var/log/nps.log"
+		path = "/var/log/natpunch.log"
 	}
 	return path
 }
 
 func GetLogPathCurrentPath() string {
 	var path string
-	path = filepath.Join(GetAppPath(), "nps.log")
+	path = filepath.Join(GetAppPath(), "natpunch.log")
 	return path
 }
 

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"ehang.io/nps/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"errors"
 	"math"
 	stdnet "net"
@@ -13,11 +13,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ehang.io/nps/bridge"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/server/proxy"
-	"ehang.io/nps/server/tool"
+	"github.com/NekoBoxHQ/NatPunch/bridge"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/server/proxy"
+	"github.com/NekoBoxHQ/NatPunch/server/tool"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 	"github.com/shirou/gopsutil/v3/cpu"

@@ -63,7 +63,7 @@ func TestExtractTarGzNormal(t *testing.T) {
 	if err := tw.WriteHeader(&tar.Header{Name: "natpunch/bin", Mode: 0755, Typeflag: tar.TypeDir}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tw.WriteHeader(&tar.Header{Name: "natpunch/bin/nps", Mode: 0755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: "natpunch/bin/natpunch", Mode: 0755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
 		t.Fatal(err)
 	}
 	tw.Write(body)
@@ -76,7 +76,7 @@ func TestExtractTarGzNormal(t *testing.T) {
 	if root != dest {
 		t.Fatalf("root = %q, want %q", root, dest)
 	}
-	b, err := os.ReadFile(filepath.Join(dest, "natpunch", "bin", "nps"))
+	b, err := os.ReadFile(filepath.Join(dest, "natpunch", "bin", "natpunch"))
 	if err != nil {
 		t.Fatal(err)
 	}

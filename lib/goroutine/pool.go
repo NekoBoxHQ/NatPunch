@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/web"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/web"
 	"github.com/astaxie/beego/logs"
 	"github.com/panjf2000/ants/v2"
 )
@@ -196,7 +196,7 @@ func copyConnGroup(group interface{}) {
 	if err != nil {
 		cg.src.Close()
 		cg.dst.Close()
-		//logs.Warn("close npc by copy from nps", err, c.connId)
+		//logs.Warn("close npc by copy from natpunch", err, c.connId)
 	}
 
 	//if conns.flow != nil {

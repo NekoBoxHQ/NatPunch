@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"ehang.io/nps/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"strings"
 )
 

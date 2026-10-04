@@ -8,9 +8,9 @@ package main
 
 import (
 	"C"
-	"ehang.io/nps/client"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/client"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/astaxie/beego/logs"
 )
 

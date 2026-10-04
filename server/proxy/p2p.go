@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"ehang.io/nps/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/astaxie/beego/logs"
 )
 

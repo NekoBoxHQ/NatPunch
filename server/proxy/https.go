@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"ehang.io/nps/lib/cache"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/conn"
-	"ehang.io/nps/lib/crypt"
-	"ehang.io/nps/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/cache"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/astaxie/beego/logs"
 	"github.com/pkg/errors"
 )
@@ -90,7 +90,7 @@ func (https *HttpsServer) Start() error {
 
 	//var err error
 	//if https.errorContent, err = common.ReadAllFromFile(filepath.Join(common.GetRunPath(), "web", "static", "page", "error.html")); err != nil {
-	//	https.errorContent = []byte("nps 404")
+	//	https.errorContent = []byte("natpunch 404")
 	//}
 	//if b, err := beego.AppConfig.Bool("https_just_proxy"); err == nil && b {
 	//	conn.Accept(https.listener, func(c net.Conn) {

@@ -6,8 +6,8 @@ package proxy
 import (
 	"errors"
 
-	"ehang.io/nps/lib/conn"
-	"ehang.io/nps/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
 )
 
 // GUI 客户端构建（-tags npcgui）不包含 tcp.go 中的完整隧道服务，

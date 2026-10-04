@@ -14,17 +14,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ehang.io/nps/lib/nps_mux"
+	"github.com/NekoBoxHQ/NatPunch/lib/nps_mux"
 	"github.com/pires/go-proxyproto"
 
 	"github.com/astaxie/beego/logs"
 	"github.com/creack/pty"
 	"github.com/xtaci/kcp-go"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/config"
-	"ehang.io/nps/lib/conn"
-	"ehang.io/nps/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/config"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 )
 
 // shellPtyMap：ShellID -> *os.File(pty)，供 shellresize 控制消息定位对应终端（带外控制，与数据零混流）
@@ -165,7 +165,7 @@ mainLoop:
 		}
 		switch flags {
 		case common.REPORT_LOCAL_IP:
-			// server requests private/LAN IPs (new nps); ignore failures so main loop continues
+			// server requests private/LAN IPs (new natpunch); ignore failures so main loop continues
 			localIPs := common.GetLocalIPs(s.signal.Conn)
 			if err := s.signal.WriteLenContent([]byte(localIPs)); err != nil {
 				s.logWarn("report local ip failed: %s", err.Error())

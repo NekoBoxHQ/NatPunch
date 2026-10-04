@@ -377,7 +377,7 @@ func TestNewMux2(t *testing.T) {
 		m1 := NewMux(conn1, "tcp", 60)
 		tmpCpnn, err := m1.NewConn()
 		if err != nil {
-			log.Println("nps new conn err ", err)
+			log.Println("natpunch new conn err ", err)
 			return
 		}
 		buf := make([]byte, 1024*1024)
@@ -428,7 +428,7 @@ func TestNewMux(t *testing.T) {
 					buf := make([]byte, 32<<10)
 					_, err = io.CopyBuffer(c2, c, buf)
 					//if err != nil {
-					//	log.Println("close npc by copy from nps", err, c.connId)
+					//	log.Println("close npc by copy from natpunch", err, c.connId)
 					//}
 					_ = c2.Close()
 					_ = c.Close()
@@ -451,7 +451,7 @@ func TestNewMux(t *testing.T) {
 			log.Println(err)
 		}
 		for {
-			//log.Println("nps starting accept")
+			//log.Println("natpunch starting accept")
 			conns, err := l.Accept()
 			if err != nil {
 				log.Println(err)
@@ -459,19 +459,19 @@ func TestNewMux(t *testing.T) {
 			}
 			//conns.(*net.TCPConn).SetReadBuffer(0)
 			//conns.(*net.TCPConn).SetReadBuffer(0)
-			//log.Println("nps accept success starting New conn")
+			//log.Println("natpunch accept success starting New conn")
 			tmpCpnn, err := m1.NewConn()
 			if err != nil {
-				log.Println("nps New conn err ", err)
+				log.Println("natpunch New conn err ", err)
 				continue
 			}
-			//logs.Warn("nps New conn success ", tmpCpnn.connId)
+			//logs.Warn("natpunch New conn success ", tmpCpnn.connId)
 			go func(tmpCpnn *conn, conns net.Conn) {
 				go func() {
 					buf := make([]byte, 32<<10)
 					_, _ = io.CopyBuffer(tmpCpnn, conns, buf)
 					//if err != nil {
-					//	log.Println("close nps by copy from user", tmpCpnn.connId, err)
+					//	log.Println("close natpunch by copy from user", tmpCpnn.connId, err)
 					//}
 					_ = conns.Close()
 					_ = tmpCpnn.Close()
@@ -480,7 +480,7 @@ func TestNewMux(t *testing.T) {
 				buf := make([]byte, 32<<10)
 				_, err = io.CopyBuffer(conns, tmpCpnn, buf)
 				//if err != nil {
-				//	log.Println("close nps by copy from npc ", tmpCpnn.connId, err)
+				//	log.Println("close natpunch by copy from npc ", tmpCpnn.connId, err)
 				//}
 				_ = conns.Close()
 				_ = tmpCpnn.Close()

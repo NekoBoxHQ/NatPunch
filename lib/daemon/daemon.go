@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ehang.io/nps/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
 )
 
 func InitDaemon(f string, runPath string, pidPath string) {
@@ -67,7 +67,7 @@ func killByPid(pid int, sig string) error {
 }
 
 func reload(f string, pidPath string) {
-	if f == "nps" && !common.IsWindows() && !status(f, pidPath) {
+	if f == "natpunch" && !common.IsWindows() && !status(f, pidPath) {
 		log.Println("reload fail")
 		return
 	}

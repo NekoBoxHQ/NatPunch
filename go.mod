@@ -1,4 +1,4 @@
-module ehang.io/nps
+module github.com/NekoBoxHQ/NatPunch
 
 go 1.26.0
 

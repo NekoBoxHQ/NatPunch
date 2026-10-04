@@ -10,12 +10,12 @@ import (
 	"net/http"
 	"strconv"
 
-	"ehang.io/nps/bridge"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/conn"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/server/connection"
-	"ehang.io/nps/web"
+	"github.com/NekoBoxHQ/NatPunch/bridge"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/server/connection"
+	"github.com/NekoBoxHQ/NatPunch/web"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 )

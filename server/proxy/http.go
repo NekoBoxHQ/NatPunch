@@ -3,14 +3,14 @@ package proxy
 import (
 	"bufio"
 	"crypto/tls"
-	"ehang.io/nps/bridge"
-	"ehang.io/nps/lib/cache"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/conn"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/lib/goroutine"
-	"ehang.io/nps/server/connection"
-	"ehang.io/nps/web"
+	"github.com/NekoBoxHQ/NatPunch/bridge"
+	"github.com/NekoBoxHQ/NatPunch/lib/cache"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/goroutine"
+	"github.com/NekoBoxHQ/NatPunch/server/connection"
+	"github.com/NekoBoxHQ/NatPunch/web"
 	"encoding/json"
 	"fmt"
 	"github.com/astaxie/beego"
@@ -59,7 +59,7 @@ func NewHttp(bridge *bridge.Bridge, c *file.Tunnel, httpPort, httpsPort int, use
 func (s *httpServer) Start() error {
 	var err error
 	if s.errorContent, err = web.ReadStaticFile("page/error.html"); err != nil {
-		s.errorContent = []byte("nps 404")
+		s.errorContent = []byte("natpunch 404")
 	}
 	if s.httpPort > 0 {
 		s.httpServer = s.NewServer(s.httpPort, "http")

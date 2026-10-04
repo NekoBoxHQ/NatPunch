@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/crypt"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/lib/rate"
-	"ehang.io/nps/server"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/rate"
+	"github.com/NekoBoxHQ/NatPunch/server"
 	"github.com/astaxie/beego"
 )
 

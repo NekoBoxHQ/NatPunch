@@ -5,7 +5,7 @@ import (
 	"html"
 	"time"
 
-	"ehang.io/nps/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
 
 	"github.com/astaxie/beego"
 )

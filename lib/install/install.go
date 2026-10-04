@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -142,21 +142,21 @@ RestartSec=120
 WantedBy=multi-user.target
 `
 
-func UpdateNps() {
+func UpdateNatpunch() {
 	destPath, err := downloadLatest("server")
 	if err != nil {
 		log.Println("下载更新失败：", err)
 		return
 	}
 	//复制文件到对应目录
-	if _, err := copyStaticFile(destPath, "nps"); err != nil {
+	if _, err := copyStaticFile(destPath, "natpunch"); err != nil {
 		log.Println("替换服务端文件失败：", err)
 		return
 	}
 	fmt.Println("Update completed, please restart")
 }
 
-func UpdateNpsNew() {
+func UpdateNatpunchNew() {
 	latest, err := fetchLatestVersion()
 	if err != nil {
 		log.Println("获取最新版本失败：", err)
@@ -174,7 +174,7 @@ func UpdateNpsNew() {
 		return
 	}
 	//复制文件到对应目录
-	if err := copyStaticFileReplaceNps(destPath, common.GetAppPath()); err != nil {
+	if err := copyStaticFileReplaceNatpunch(destPath, common.GetAppPath()); err != nil {
 		log.Println("替换服务端文件失败：", err)
 		return
 	}
@@ -448,7 +448,7 @@ func extractTarGz(r io.Reader, dest string) (string, error) {
 }
 
 func copyStaticFile(srcPath, bin string) (string, error) {
-	// nps web UI is embedded in the binary; no web/ files to copy.
+	// natpunch web UI is embedded in the binary; no web/ files to copy.
 	srcBin := filepath.Join(srcPath, bin)
 	if common.IsWindows() {
 		srcBin += ".exe"
@@ -477,9 +477,9 @@ func copyStaticFile(srcPath, bin string) (string, error) {
 	return binPath, nil
 }
 
-func copyStaticFileReplaceNps(srcPath, descPath string) error {
+func copyStaticFileReplaceNatpunch(srcPath, descPath string) error {
 	// Web UI is embedded in the binary; only replace the executable.
-	return replaceBinFromPackage(srcPath, descPath, "nps")
+	return replaceBinFromPackage(srcPath, descPath, "natpunch")
 }
 
 func copyStaticFileReplaceNpc(srcPath, descPath string) error {
@@ -592,7 +592,7 @@ func InstallNpc() {
 	}
 }
 
-func InstallNps() string {
+func InstallNatpunch() string {
 	path := common.GetInstallPath()
 	log.Println("install path:" + path)
 	if !common.FileExists(path) {
@@ -603,36 +603,36 @@ func InstallNps() string {
 		}
 		chMod(filepath.Join(path, "conf"), 0755)
 	}
-	binPath, err := copyStaticFile(common.GetAppPath(), "nps")
+	binPath, err := copyStaticFile(common.GetAppPath(), "natpunch")
 	if err != nil {
 		log.Fatalln(err)
 	}
 	log.Println("install ok!")
-	log.Println("Web UI is embedded in the nps binary; no web/ directory is required")
+	log.Println("Web UI is embedded in the natpunch binary; no web/ directory is required")
 	log.Println("The new configuration file is located in", path, "you can edit them")
 	if !common.IsWindows() {
 		log.Println(`You can start with:
-nps start|stop|restart|uninstall|update
+natpunch start|stop|restart|uninstall|update
 anywhere!`)
 	} else {
 		log.Println(`You can copy executable files to any directory and start working with:
-nps.exe start|stop|restart|uninstall|update
+natpunch.exe start|stop|restart|uninstall|update
 now!`)
 	}
 	chMod(common.GetLogPath(), 0640)
 	return binPath
 }
 
-func InstallNpsToCurrentDir() string {
+func InstallNatpunchToCurrentDir() string {
 	path := common.GetAppPath()
 	log.Println("install path:" + path)
 	log.Println("install ok!")
-	chMod(filepath.Join(path, "nps.log"), 0640)
+	chMod(filepath.Join(path, "natpunch.log"), 0640)
 
 	if !common.IsWindows() {
-		path = filepath.Join(path, "nps")
+		path = filepath.Join(path, "natpunch")
 	} else {
-		path = filepath.Join(path, "nps.exe")
+		path = filepath.Join(path, "natpunch.exe")
 	}
 	return path
 }

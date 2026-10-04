@@ -4,9 +4,9 @@ import (
 	"errors"
 	"strings"
 
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/server"
-	"ehang.io/nps/server/tool"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/server"
+	"github.com/NekoBoxHQ/NatPunch/server/tool"
 
 	"github.com/astaxie/beego"
 )

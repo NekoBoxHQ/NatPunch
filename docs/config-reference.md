@@ -43,7 +43,7 @@
 |---|---|---|
 | `flow_store_interval` | `1` | 流量数据持久化间隔（分钟）；留空 = 不持久化 |
 | `log_level` | `6` | 日志级别：0 Emergency … 6 Informational … 7 Debug |
-| `log_path` | `nps.log` | 日志文件路径 |
+| `log_path` | `natpunch.log` | 日志文件路径 |
 
 ### IP 限制 / P2P
 
@@ -61,7 +61,7 @@
 | `web_password` | 首次启动随机 | 管理员密码（bcrypt 存储；存量明文登录时在线迁移） |
 | `web_port` | `8081` | 面板端口 |
 | `web_ip` | `0.0.0.0` | 面板监听地址 |
-| `web_base_url` | 空 | 反代子路径，如 `/nps` |
+| `web_base_url` | 空 | 反代子路径，如 `/natpunch` |
 | `web_open_ssl` | `false` | 面板 HTTPS（证书 `web_cert_file`/`web_key_file`） |
 | `web_cert_file` / `web_key_file` | `conf/server.pem` / `conf/server.key` | 面板证书（**与桥接证书 `conf/bridge.pem|key` 隔离**，见安全加固） |
 | `allow_ports` | 注释 | 允许客户端开放的端口范围，如 `9001-9009,10001,11000-12000` |

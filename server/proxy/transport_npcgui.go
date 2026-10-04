@@ -4,7 +4,7 @@
 package proxy
 
 import (
-	"ehang.io/nps/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
 )
 
 func HandleTrans(c *conn.Conn, s *TunnelModeServer) error {

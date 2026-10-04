@@ -2,7 +2,7 @@ package bridge
 
 import (
 	"crypto/tls"
-	"ehang.io/nps/lib/nps_mux"
+	"github.com/NekoBoxHQ/NatPunch/lib/nps_mux"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,13 +13,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/conn"
-	"ehang.io/nps/lib/crypt"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/lib/version"
-	"ehang.io/nps/server/connection"
-	"ehang.io/nps/server/tool"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/server/connection"
+	"github.com/NekoBoxHQ/NatPunch/server/tool"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 )

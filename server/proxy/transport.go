@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"syscall"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/conn"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/conn"
 )
 
 func HandleTrans(c *conn.Conn, s *TunnelModeServer) error {

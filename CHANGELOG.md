@@ -2,12 +2,20 @@
 
 本项目为 ehang-io/nps 的修改版，所有版本均为对上游代码的增量修改（详见 NOTICE）。
 
-## [未发布]（v26.9.96 候选）
+## v26.9.96（已发布）
 
 ### 变更
 - 客户端列表页移除服务端桥接证书指纹展示条（TLS 一键命令仍自动携带指纹，功能不变）。
 - install.sh：TLS_FLAG 写入 /etc/natpunch.conf 时整体加单引号——init.d 用 `. /etc/natpunch.conf` source 配置，值含空格时无引号会被拆成多条命令执行（多参数 TLS_FLAG 安装崩溃修复）。
 - minisign 签名启用：CI 签名改 apt C 版 minisign（原 go-minisign `@v0.1.0` 子目录版本不存在，是未验证的死代码路径，密钥一配必炸）；发布方公钥内置 `install.sh` / `install_server.sh`（`MINISIGN_PUBKEY` 环境变量可覆盖），目标机有 minisign 工具即强制校验签名。
+
+## [未发布]（v26.9.97 候选）
+
+### 变更
+- **项目完全 NatPunch 化**：module path 由 `ehang.io/nps` 全面改为 `github.com/NekoBoxHQ/NatPunch`（go.mod + 全部 import）；`cmd/nps` 目录改名 `cmd/natpunch`。
+- 清理代码/配置/界面残留 nps 标识：Windows 服务名、服务安装/卸载/启停菜单、HTTP 代理 404 页、桥接证书 CN、日志路径与文件名（`nps.log`→`natpunch.log`）、`/etc/nps` 兼容路径、默认配置模板等。
+- **legacy 保留**：`lib/crypt` 对旧版 "nps "/"nps:" 前缀快速命令的解析兼容（读取存量客户端配置，删除会导致旧配置失效）。
+- GPLv3 合规声明保留：README/NOTICE/LICENSE 仍注明基于 ehang-io/nps（法律义务），docs/comparison 保留与 nps/frp/ngrok 的对比章节。
 
 ### 工程化 / 依赖 / 合规 / 文档
 - CI 门禁：`check`（vet / go test / govulncheck / golangci-lint）→ `integration`（mux，Docker+tc，缺失自动跳过）→ `build`（linux amd64/arm64/armv7/mipsle × server/client 共 8 组合，产物架构自检）→ `release`（SHA256SUMS + minisign 签名 + 发布说明带 GPL 声明）。go-version 1.26。

@@ -17,7 +17,7 @@
 
 - 不引入无必要新依赖；新增依赖需说明理由并在 SECURITY.md 更新漏洞状态。
 - 安全默认 fail-closed，但不破坏存量升级（0=不限、空=旧行为+告警 等兼容语义保持）。
-- 配置新增：同步 `conf/natpunch.conf`、`cmd/nps/nps.go` 默认模板、`docs/config-reference.md`。
+- 配置新增：同步 `conf/natpunch.conf`、`cmd/natpunch/natpunch.go` 默认模板、`docs/config-reference.md`。
 - 库代码禁止 `os.Exit`；错误处理不忽略（`err.Error()` 只在 err 非 nil 时调用）。
 - 并发共享状态必须加锁/原子；新增 map 并发访问需带 `-race` 验证。
 - 敏感信息（密码、vkey、VerifyKey）不落日志、不下发接口（DTO 脱敏）。

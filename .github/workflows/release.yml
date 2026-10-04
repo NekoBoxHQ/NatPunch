@@ -105,8 +105,8 @@ jobs:
           TAG=${GITHUB_REF_NAME}
           mkdir -p out
           if [ "${{ matrix.type }}" = "server" ]; then
-            go build -ldflags "-s -w -extldflags -static -X ehang.io/nps/lib/version.VERSION=$TAG" \
-              -o out/natpunch ./cmd/nps/nps.go
+            go build -ldflags "-s -w -extldflags -static -X github.com/NekoBoxHQ/NatPunch/lib/version.VERSION=$TAG" \
+              -o out/natpunch ./cmd/natpunch/natpunch.go
             BIN="$(pwd)/out/natpunch"
             mkdir -p pkg
             cp out/natpunch pkg/natpunch
@@ -115,7 +115,7 @@ jobs:
             cd pkg
             tar -czf ../linux_${{ matrix.goarch }}_server.tar.gz .
           else
-            go build -ldflags "-s -w -extldflags -static -X ehang.io/nps/lib/version.VERSION=$TAG" \
+            go build -ldflags "-s -w -extldflags -static -X github.com/NekoBoxHQ/NatPunch/lib/version.VERSION=$TAG" \
               -o out/natpunch-client ./cmd/npc/npc.go
             BIN="$(pwd)/out/natpunch-client"
             tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch-client

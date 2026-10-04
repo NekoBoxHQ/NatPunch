@@ -42,7 +42,7 @@ func GetVkey() string {
 }
 
 func Base64Decoding(encodedString string) (string, error) {
-	// 先尝试 base64 解码，兼容原先的 "nps " 前缀
+	// legacy 兼容：旧版（nps 时代）快速命令带 "nps " base64 前缀，为不破坏存量客户端配置保留解析
 	decodedBytes, err := base64.StdEncoding.DecodeString(encodedString)
 	decodedString := string(decodedBytes)
 
@@ -51,8 +51,7 @@ func Base64Decoding(encodedString string) (string, error) {
 			return decodedString[4:], nil
 		}
 	}
-	// 兼容直接以 "nps:" 开头的旧格式：
-	// nps:name|addr|key|tls[|fp]
+	// legacy 兼容：旧版快速命令 "nps:name|addr|key|tls[|fp]" 前缀格式
 	if len(decodedString) >= 4 && strings.HasPrefix(decodedString, "nps:") {
 		return joinQuickCmd(decodedString[4:])
 	}

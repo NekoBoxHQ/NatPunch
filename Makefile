@@ -1,7 +1,7 @@
 # NatPunch Makefile —— 本地开发 / 发布前全链路自查（阶段四 F4-4）
 GO      ?= go
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo "(dev)")
-LDFLAGS := -s -w -X ehang.io/nps/lib/version.VERSION=$(VERSION)
+LDFLAGS := -s -w -X github.com/NekoBoxHQ/NatPunch/lib/version.VERSION=$(VERSION)
 
 .PHONY: all build build-server build-client vet test test-race integration lint vuln cross smoke clean
 
@@ -10,7 +10,7 @@ all: vet test build
 build: build-server build-client
 
 build-server:
-	$(GO) build -ldflags "$(LDFLAGS)" -o natpunch ./cmd/nps/nps.go
+	$(GO) build -ldflags "$(LDFLAGS)" -o natpunch ./cmd/natpunch/natpunch.go
 
 build-client:
 	$(GO) build -ldflags "$(LDFLAGS)" -o natpunch-client ./cmd/npc/npc.go
@@ -42,7 +42,7 @@ cross: cross-server cross-client
 cross-server:
 	@for a in $(CROSS_ARCHS); do \
 		echo "==> server linux/$$a"; \
-		GOOS=linux GOARCH=$$a CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o /tmp/natpunch-$$a ./cmd/nps/nps.go || exit 1; \
+		GOOS=linux GOARCH=$$a CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o /tmp/natpunch-$$a ./cmd/natpunch/natpunch.go || exit 1; \
 	done
 
 cross-client:
@@ -57,9 +57,9 @@ smoke:
 	@if [ -z "$(DIR)" ]; then echo "usage: make smoke DIR=<tempdir>"; exit 1; fi
 	mkdir -p "$(DIR)/conf"
 	cp conf/natpunch.conf "$(DIR)/conf/"
-	$(GO) build -ldflags "$(LDFLAGS)" -o "$(DIR)/natpunch" ./cmd/nps/nps.go
+	$(GO) build -ldflags "$(LDFLAGS)" -o "$(DIR)/natpunch" ./cmd/natpunch/natpunch.go
 	cd "$(DIR)" && ./natpunch -conf_path="$(DIR)"
-	@echo "smoke: 检查 $${DIR}/nps.log 中端口监听日志；确认仓库 conf/ 未被修改"
+	@echo "smoke: 检查 $${DIR}/natpunch.log 中端口监听日志；确认仓库 conf/ 未被修改"
 
 clean:
 	rm -f natpunch natpunch-client

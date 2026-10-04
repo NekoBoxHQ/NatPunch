@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"ehang.io/nps/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
 )
 
 func RegisterLocalIp(server string, vKey string, tp string, proxyUrl string, hour int) {

@@ -3,7 +3,7 @@ package common
 import (
 	"bytes"
 	"crypto/subtle"
-	"ehang.io/nps/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"ehang.io/nps/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 )
 
 // Check if the Request request is validated
@@ -517,7 +517,7 @@ func ipFromAddr(addr net.Addr) net.IP {
 }
 
 // GetLocalIPs returns IPv4 addresses useful for identifying the npc host.
-// Prefers the local IP of conn (path toward nps). Falls back to the outbound
+// Prefers the local IP of conn (path toward natpunch). Falls back to the outbound
 // interface and finally an interface scan.
 // The connection path and outbound interface IPs are trusted as-is (only
 // loopback/link-local/etc. excluded), so non-standard private ranges such as
@@ -542,7 +542,7 @@ func GetLocalIPs(conn net.Conn) string {
 		ips = append(ips, s)
 	}
 
-	// 1) Local endpoint of the bridge connection — usually the real LAN IP used to reach nps.
+	// 1) Local endpoint of the bridge connection — usually the real LAN IP used to reach natpunch.
 	//    仅接受内网地址；有公网 IP 的设备连接源是公网出口，不属于内网地址，跳过继续找。
 	if conn != nil {
 		if ip := ipFromAddr(conn.LocalAddr()); ip != nil && isUsefulLocalIPv4(ip) && !IsPublicIP(ip) {

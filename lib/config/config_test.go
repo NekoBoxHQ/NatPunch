@@ -1,7 +1,7 @@
 package config
 
 import (
-	"ehang.io/nps/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"log"
 	"reflect"
 	"regexp"

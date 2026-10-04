@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
-	"ehang.io/nps/bridge"
-	"ehang.io/nps/lib/daemon"
-	"ehang.io/nps/server"
+	"github.com/NekoBoxHQ/NatPunch/bridge"
+	"github.com/NekoBoxHQ/NatPunch/lib/daemon"
+	"github.com/NekoBoxHQ/NatPunch/server"
 	"flag"
 	"fmt"
 	"github.com/fatih/color"
@@ -17,16 +17,16 @@ import (
 	"strings"
 	"sync"
 
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/lib/install"
-	"ehang.io/nps/lib/version"
-	"ehang.io/nps/server/connection"
-	"ehang.io/nps/server/proxy"
-	"ehang.io/nps/server/tool"
-	"ehang.io/nps/web/routers"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/install"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/server/connection"
+	"github.com/NekoBoxHQ/NatPunch/server/proxy"
+	"github.com/NekoBoxHQ/NatPunch/server/tool"
+	"github.com/NekoBoxHQ/NatPunch/web/routers"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 
@@ -37,8 +37,8 @@ var (
 	level      string
 	ver        = flag.Bool("version", false, "show current version")
 	confPath   = flag.String("conf_path", "", "set current confPath")
-	serverCmd  = flag.Bool("server", false, "NPS管理脚本")
-	npsLogPath = flag.String("log_path", "", "nps log path")
+	serverCmd  = flag.Bool("server", false, "NatPunch管理脚本")
+	npsLogPath = flag.String("log_path", "", "natpunch log path")
 )
 
 func main() {
@@ -131,7 +131,7 @@ func main() {
 		svcConfig.Option["SystemdScript"] = install.SystemdScript
 		svcConfig.Option["SysvScript"] = install.SysvScript
 	}
-	prg := &nps{}
+	prg := &natpunch{}
 	prg.exit = make(chan struct{})
 	s, err := service.New(prg, svcConfig)
 	if err != nil {
@@ -147,14 +147,14 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] != "service" {
 		switch os.Args[1] {
 		case "reload":
-			daemon.InitDaemon("nps", common.GetRunPath(), common.GetTmpPath())
+			daemon.InitDaemon("natpunch", common.GetRunPath(), common.GetTmpPath())
 			return
 		case "install":
 			// uninstall before
 			_ = service.Control(s, "stop")
 			_ = service.Control(s, "uninstall")
 
-			binPath := install.InstallNps()
+			binPath := install.InstallNatpunch()
 			svcConfig.Executable = binPath
 			s, err := service.New(prg, svcConfig)
 			if err != nil {
@@ -199,7 +199,7 @@ func main() {
 			}
 			return
 		case "update":
-			install.UpdateNps()
+			install.UpdateNatpunch()
 			return
 			//default:
 			//	logs.Error("command is not support")
@@ -221,15 +221,15 @@ func printSlogan() {
 
 	fmt.Printf("\n")
 
-	fmt.Printf("\u001B[32m输入[1]\u001B[0m - 安装 NPS\n")
-	fmt.Printf("\u001B[32m输入[2]\u001B[0m - 卸载 NPS\n")
-	fmt.Printf("\u001B[32m输入[3]\u001B[0m - 更新 NPS\n")
+	fmt.Printf("\u001B[32m输入[1]\u001B[0m - 安装 NatPunch\n")
+	fmt.Printf("\u001B[32m输入[2]\u001B[0m - 卸载 NatPunch\n")
+	fmt.Printf("\u001B[32m输入[3]\u001B[0m - 更新 NatPunch\n")
 	fmt.Printf("---------------------\n")
 	fmt.Printf("\u001B[32m输入[4]\u001B[0m - 查看状态\n")
 	fmt.Printf("---------------------\n")
-	fmt.Printf("\u001B[32m输入[5]\u001B[0m - 启动 NPS\n")
-	fmt.Printf("\u001B[32m输入[6]\u001B[0m - 停止 NPS\n")
-	fmt.Printf("\u001B[32m输入[7]\u001B[0m - 重启 NPS\n")
+	fmt.Printf("\u001B[32m输入[5]\u001B[0m - 启动 NatPunch\n")
+	fmt.Printf("\u001B[32m输入[6]\u001B[0m - 停止 NatPunch\n")
+	fmt.Printf("\u001B[32m输入[7]\u001B[0m - 重启 NatPunch\n")
 	fmt.Printf("---------------------\n")
 	fmt.Printf("\u001B[32m输入[0]\u001B[0m - 退出脚本\n")
 	fmt.Printf("---------------------\n")
@@ -252,7 +252,7 @@ func inputCmd() {
 
 		// init service
 
-		prg := &nps{
+		prg := &natpunch{
 			exit: make(chan struct{}),
 		}
 		options := make(service.KeyValue)
@@ -269,7 +269,7 @@ func inputCmd() {
 			// uninstall before
 			_ = service.Control(s, "stop")
 			_ = service.Control(s, "uninstall")
-			binPath := install.InstallNpsToCurrentDir()
+			binPath := install.InstallNatpunchToCurrentDir()
 
 			// Ensure conf exists (same as normal startup), then load it for display.
 			// Previously LoadAppConfig error was ignored and web_port could be empty,
@@ -281,7 +281,7 @@ func inputCmd() {
 				break
 			}
 
-			logPath := filepath.Join(common.GetAppPath(), "nps.log")
+			logPath := filepath.Join(common.GetAppPath(), "natpunch.log")
 			if common.IsWindows() {
 				logPath = strings.Replace(logPath, "\\", "\\\\", -1)
 			}
@@ -309,22 +309,22 @@ func inputCmd() {
 			if err != nil {
 				logs.Error("Valid actions: %q\n%s", service.ControlAction, err.Error())
 			} else {
-				fmt.Println("NPS服务安装成功")
+				fmt.Println("NatPunch服务安装成功")
 			}
 
 			err = service.Control(s, "start")
 			if err != nil {
-				fmt.Println("启动NPS服务失败", err)
+				fmt.Println("启动NatPunch服务失败", err)
 			} else {
 				webPort := beego.AppConfig.String("web_port")
 				if webPort == "" {
-					fmt.Println("NPS服务已启动（未配置 web_port，管理面板已关闭）")
+					fmt.Println("NatPunch服务已启动（未配置 web_port，管理面板已关闭）")
 				} else {
 					scheme := "http"
 					if beego.AppConfig.DefaultBool("web_open_ssl", false) {
 						scheme = "https"
 					}
-					fmt.Println("NPS服务已启动，管理面板访问地址：" + scheme + "://127.0.0.1:" + webPort)
+					fmt.Println("NatPunch服务已启动，管理面板访问地址：" + scheme + "://127.0.0.1:" + webPort)
 				}
 			}
 
@@ -333,14 +333,14 @@ func inputCmd() {
 			// 卸载系统服务
 			err := service.Control(s, "stop")
 			if err != nil {
-				fmt.Println("NPS服务停止失败", err)
+				fmt.Println("NatPunch服务停止失败", err)
 			} else {
-				fmt.Println("NPS服务已停止")
+				fmt.Println("NatPunch服务已停止")
 			}
 
 			err = service.Control(s, "uninstall")
 			if err != nil {
-				logs.Error("NPS服务卸载失败")
+				logs.Error("NatPunch服务卸载失败")
 			}
 			if service.Platform() == "unix-systemv" {
 				logs.Info("unix-systemv service")
@@ -349,11 +349,11 @@ func inputCmd() {
 			}
 
 			if err == nil {
-				fmt.Println("NPS服务已卸载成功")
+				fmt.Println("NatPunch服务已卸载成功")
 			}
 			break
 		case "3":
-			install.UpdateNpsNew()
+			install.UpdateNatpunchNew()
 			break
 		case "4":
 			// 查看状态
@@ -368,35 +368,35 @@ func inputCmd() {
 					statusMsg = "\u001B[31m未运行\u001B[0m"
 				}
 			}
-			fmt.Println("NPS服务状态：" + statusMsg)
+			fmt.Println("NatPunch服务状态：" + statusMsg)
 			break
 		case "5":
-			// 启动 NPS
+			// 启动 NatPunch
 			err := service.Control(s, "start")
 			if err != nil {
-				fmt.Println("NPS服务启动失败", err)
+				fmt.Println("NatPunch服务启动失败", err)
 			} else {
-				fmt.Println("NPS服务启动成功")
+				fmt.Println("NatPunch服务启动成功")
 			}
 
 			break
 		case "6":
-			// 停止 NPS
+			// 停止 NatPunch
 			err := service.Control(s, "stop")
 			if err != nil {
-				fmt.Println("NPS服务停止失败", err)
+				fmt.Println("NatPunch服务停止失败", err)
 			} else {
-				fmt.Println("NPS服务停止成功")
+				fmt.Println("NatPunch服务停止成功")
 			}
 
 			break
 		case "7":
-			// 重启 NPS
+			// 重启 NatPunch
 			err := service.Control(s, "restart")
 			if err != nil {
-				fmt.Println("NPS服务重启失败", err)
+				fmt.Println("NatPunch服务重启失败", err)
 			} else {
-				fmt.Println("NPS服务重启成功")
+				fmt.Println("NatPunch服务重启成功")
 			}
 
 			break
@@ -406,16 +406,16 @@ func inputCmd() {
 	inputCmd()
 }
 
-type nps struct {
+type natpunch struct {
 	exit chan struct{}
 }
 
-func (p *nps) Start(s service.Service) error {
+func (p *natpunch) Start(s service.Service) error {
 	_, _ = s.Status()
 	go p.run()
 	return nil
 }
-func (p *nps) Stop(s service.Service) error {
+func (p *natpunch) Stop(s service.Service) error {
 	_, _ = s.Status()
 	close(p.exit)
 	if service.Interactive() {
@@ -424,13 +424,13 @@ func (p *nps) Stop(s service.Service) error {
 	return nil
 }
 
-func (p *nps) run() error {
+func (p *natpunch) run() error {
 	defer func() {
 		if err := recover(); err != nil {
 			const size = 64 << 10
 			buf := make([]byte, size)
 			buf = buf[:runtime.Stack(buf, false)]
-			logs.Warning("nps: panic serving %v: %v\n%s", err, string(buf))
+			logs.Warning("natpunch: panic serving %v: %v\n%s", err, string(buf))
 		}
 	}()
 	run()
@@ -515,7 +515,7 @@ max_global_conn=0
 flow_store_interval=1
 
 log_level=6
-log_path=nps.log
+log_path=natpunch.log
 
 web_host=a.o.com
 web_username=admin

@@ -35,7 +35,7 @@ func InitTls(certPath, keyPath string) error {
 			return setCert(c)
 		}
 	}
-	c, k, err := generateKeyPair("NPS Bridge")
+	c, k, err := generateKeyPair("NatPunch Bridge")
 	if err != nil {
 		return err
 	}

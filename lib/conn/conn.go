@@ -3,7 +3,7 @@ package conn
 import (
 	"bufio"
 	"bytes"
-	"ehang.io/nps/lib/goroutine"
+	"github.com/NekoBoxHQ/NatPunch/lib/goroutine"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -17,11 +17,11 @@ import (
 	"sync"
 	"time"
 
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/crypt"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/lib/pmux"
-	"ehang.io/nps/lib/rate"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/pmux"
+	"github.com/NekoBoxHQ/NatPunch/lib/rate"
 	"github.com/xtaci/kcp-go"
 )
 

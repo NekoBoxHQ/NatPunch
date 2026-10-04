@@ -5,7 +5,7 @@ import (
 	"net"
 	"strconv"
 
-	"ehang.io/nps/lib/pmux"
+	"github.com/NekoBoxHQ/NatPunch/lib/pmux"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 )

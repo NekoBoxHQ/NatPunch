@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"ehang.io/nps/lib/crypt"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"flag"
 	"fmt"
 	"os"
@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"ehang.io/nps/client"
-	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/config"
-	"ehang.io/nps/lib/file"
-	"ehang.io/nps/lib/install"
-	"ehang.io/nps/lib/version"
+	"github.com/NekoBoxHQ/NatPunch/client"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/config"
+	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/install"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/astaxie/beego/logs"
 	"github.com/ccding/go-stun/stun"
 	"github.com/fatih/color"
@@ -466,9 +466,9 @@ func systemPro(flag string, serAddr string, vkey string, tls bool) {
 	}
 	options := make(service.KeyValue)
 	svcConfig := &service.Config{
-		Name:        "nps-client-" + vkey,
-		DisplayName: "nps-client-" + vkey,
-		Description: "NPS内网穿透客户端，支持tcp、udp流量转发，支持内网http代理",
+		Name:        "natpunch-client-" + vkey,
+		DisplayName: "natpunch-client-" + vkey,
+		Description: "NatPunch内网穿透客户端，支持tcp、udp流量转发，支持内网http代理",
 		Option:      options,
 	}
 	s, _ := service.New(prg, svcConfig)
