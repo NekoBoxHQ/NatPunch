@@ -142,8 +142,13 @@ func (s *TerminalController) Ws() {
 	defer t.Close()
 
 	// 双向桥接：内网 -> 浏览器（二进制帧）
+	// 与标准隧道路径同语义：隧道侧数据流出 = 入口流量（InletFlow），同时投喂网速
 	go func() {
-		io.Copy(wsBinaryWriter{ws}, t)
+		n, _ := io.Copy(wsBinaryWriter{ws}, t)
+		if n > 0 {
+			client.Flow.Add(n, 0)
+			client.Rate.Get(n)
+		}
 		ws.Close()
 	}()
 
@@ -154,7 +159,14 @@ func (s *TerminalController) Ws() {
 			break
 		}
 		if mt == websocket.BinaryMessage {
-			t.Write(data)
+			n, werr := t.Write(data)
+			if n > 0 {
+				client.Flow.Add(0, int64(n))
+				client.Rate.Get(int64(n))
+			}
+			if werr != nil {
+				break
+			}
 		} else if mt == websocket.TextMessage {
 			var r struct {
 				Type string `json:"type"`
