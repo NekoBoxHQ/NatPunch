@@ -22,6 +22,15 @@ type HTTPError struct {
 	HTTPCode int
 }
 
+// ctxKey 用于 context.WithValue 的键类型（SA1029：避免用内置 string 作 key 造成碰撞）
+type ctxKey string
+
+const (
+	ctxKeyHost   ctxKey = "host"
+	ctxKeyTarget ctxKey = "target"
+	ctxKeyReq    ctxKey = "req"
+)
+
 type HttpReverseProxy struct {
 	proxy                 *ReverseProxy
 	responseHeaderTimeout time.Duration
@@ -58,9 +67,9 @@ func (rp *HttpReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request)
 	}
 	host.Client.CutConn()
 
-	req = req.WithContext(context.WithValue(req.Context(), "host", host))
-	req = req.WithContext(context.WithValue(req.Context(), "target", targetAddr))
-	req = req.WithContext(context.WithValue(req.Context(), "req", req))
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeyHost, host))
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeyTarget, targetAddr))
+	req = req.WithContext(context.WithValue(req.Context(), ctxKeyReq, req))
 
 	rp.proxy.ServeHTTP(rw, req, host)
 
@@ -115,9 +124,9 @@ func NewHttpReverseProxy(s *httpServer) *HttpReverseProxy {
 					lk         *conn.Link
 				)
 
-				r := ctx.Value("req").(*http.Request)
-				host = ctx.Value("host").(*file.Host)
-				targetAddr = ctx.Value("target").(string)
+				r := ctx.Value(ctxKeyReq).(*http.Request)
+				host = ctx.Value(ctxKeyHost).(*file.Host)
+				targetAddr = ctx.Value(ctxKeyTarget).(string)
 
 				lk = conn.NewLink("http", targetAddr, host.Client.Cnf.Crypt, host.Client.Cnf.Compress, r.RemoteAddr, host.Target.LocalProxy, "")
 				if target, err = s.bridge.SendLinkInfo(host.Client.Id, lk, nil); err != nil {
@@ -146,9 +155,9 @@ func NewHttpReverseProxy(s *httpServer) *HttpReverseProxy {
 			targetAddr string
 			lk         *conn.Link
 		)
-		r := ctx.Value("req").(*http.Request)
-		host = ctx.Value("host").(*file.Host)
-		targetAddr = ctx.Value("target").(string)
+		r := ctx.Value(ctxKeyReq).(*http.Request)
+		host = ctx.Value(ctxKeyHost).(*file.Host)
+		targetAddr = ctx.Value(ctxKeyTarget).(string)
 
 		lk = conn.NewLink("tcp", targetAddr, host.Client.Cnf.Crypt, host.Client.Cnf.Compress, r.RemoteAddr, host.Target.LocalProxy, "")
 		if target, err = s.bridge.SendLinkInfo(host.Client.Id, lk, nil); err != nil {

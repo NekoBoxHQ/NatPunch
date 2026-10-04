@@ -13,7 +13,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"html/template"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -134,7 +133,7 @@ func ReadAllFromFile(filePath string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return ioutil.ReadAll(f)
+	return io.ReadAll(f)
 }
 
 // FileExists reports whether the named file or directory exists.
@@ -451,7 +450,7 @@ func GetExternalIp() string {
 			if err != nil {
 				continue
 			}
-			content, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 1024))
+			content, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 			resp.Body.Close()
 			if ip := strings.TrimSpace(string(content)); ip != "" {
 				externalIp = ip

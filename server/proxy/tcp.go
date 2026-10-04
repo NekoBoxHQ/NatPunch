@@ -96,8 +96,10 @@ func (s *WebServer) Start() error {
 	beego.BConfig.WebConfig.Session.SessionOn = true
 	// Serve management UI from embedded assets only (no disk web/ directory).
 	web.InitBeegoAssets()
-	err := errors.New("Web management startup failure ")
-	var l net.Listener
+	var (
+		l   net.Listener
+		err error
+	)
 	if l, err = connection.GetWebManagerListener(); err == nil {
 		beego.InitBeforeHTTPRun()
 		secure := beego.AppConfig.String("web_open_ssl") == "true"

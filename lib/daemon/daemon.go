@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -50,7 +49,7 @@ func InitDaemon(f string, runPath string, pidPath string) {
 // readPidFile 统一读取并校验 pid 文件：TrimSpace → Atoi → 正整数校验。
 // 之后的所有 kill/status 均以纯数字参数直传 exec（不经 shell 拼接），杜绝命令注入（阶段三 #14）。
 func readPidFile(pidPath, f string) (int, error) {
-	b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
+	b, err := os.ReadFile(filepath.Join(pidPath, f+".pid"))
 	if err != nil {
 		return 0, fmt.Errorf("pid file does not exist: %w", err)
 	}
@@ -88,7 +87,7 @@ func reload(f string, pidPath string) {
 
 func status(f string, pidPath string) bool {
 	if common.IsWindows() {
-		b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
+		b, err := os.ReadFile(filepath.Join(pidPath, f+".pid"))
 		if err != nil {
 			return false
 		}
@@ -116,7 +115,7 @@ func start(osArgs []string, f string, pidPath, runPath string) {
 	if cmd.Process.Pid > 0 {
 		log.Println("start ok , pid:", cmd.Process.Pid, "config path:", runPath)
 		d1 := []byte(strconv.Itoa(cmd.Process.Pid))
-		ioutil.WriteFile(filepath.Join(pidPath, f+".pid"), d1, 0600)
+		os.WriteFile(filepath.Join(pidPath, f+".pid"), d1, 0600)
 	} else {
 		log.Println("start error")
 	}

@@ -303,8 +303,8 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 		return nil, err
 	}
 	if crypt.Md5(version.GetVersion()) != string(b) {
-		//logs.Error("The client does not match the server version. The current core version of the client is", version.GetVersion())
-		//return nil, err
+		// 版本握手不匹配不阻止连接（上游历史行为），记录日志便于排障
+		logs.Notice("客户端核心版本与服务器期望版本不匹配（client %s），继续连接", version.GetVersion())
 	}
 	if _, err := c.Write([]byte(common.Getverifyval(vkey))); err != nil {
 		return nil, err

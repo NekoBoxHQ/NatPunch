@@ -32,7 +32,9 @@ jobs:
       - name: Golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.61
+          # v1.61 无法解析 Go 1.26 项目的 export data（运行崩溃 exit 3），
+          # 需与 Go 1.26 兼容的 v1.64.8+（本地同版本验证 lint 全绿）
+          version: v1.64.8
           args: --timeout=10m
 
   integration:

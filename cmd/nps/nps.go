@@ -90,7 +90,7 @@ func main() {
 	logs.SetLogFuncCallDepth(3)
 
 	if logPath == "" {
-		logPath := beego.AppConfig.String("log_path")
+		logPath = beego.AppConfig.String("log_path")
 		if logPath == "" {
 			logPath = common.GetLogPath()
 		}
@@ -293,6 +293,10 @@ func inputCmd() {
 
 			svcConfig.Executable = binPath
 			s, err := service.New(prg, svcConfig)
+			if err != nil {
+				logs.Error("创建服务失败: %v", err)
+				return
+			}
 
 			if service.Platform() == "unix-systemv" {
 				logs.Info("unix-systemv service")

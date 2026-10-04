@@ -23,12 +23,7 @@ func (Self *basePackager) Set(content []byte) (err error) {
 	Self.reset()
 	if content != nil {
 		n := len(content)
-		//fmt.Println(content)
-		if n == 0 {
-			// 长度为0的包，不应该向上抛，不然客户端会EOF，这里暂时没解决空包的问题 TODO
-			//logs.Error("mux:packer: newpack content is zero length")
-			//err = errors.New("mux:packer: newpack content is zero length")
-		}
+		// 长度为0的包，不应该向上抛，不然客户端会EOF，这里暂时没解决空包的问题 TODO
 		if n > maximumSegmentSize {
 			logs.Error("mux:packer: newpack content segment too large")
 			//err = errors.New("mux:packer: newpack content segment too large")

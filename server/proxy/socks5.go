@@ -191,8 +191,8 @@ func (s *Sock5ModeServer) sendUdpReply(writeConn net.Conn, c net.Conn, rep uint8
 		0,
 		1,
 	}
-	localHost, localPort, _ := net.SplitHostPort(c.LocalAddr().String())
-	localHost = serverIp
+	_, localPort, _ := net.SplitHostPort(c.LocalAddr().String())
+	localHost := serverIp
 	ipBytes := net.ParseIP(localHost).To4()
 	nPort, _ := strconv.Atoi(localPort)
 	reply = append(reply, ipBytes...)

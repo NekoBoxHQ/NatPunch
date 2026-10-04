@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -191,7 +190,7 @@ func fetchLatestVersion() (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -291,7 +290,7 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	if data.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("获取版本信息失败: HTTP %d", data.StatusCode)
 	}
-	b, err := ioutil.ReadAll(data.Body)
+	b, err := io.ReadAll(data.Body)
 	if err != nil {
 		return "", err
 	}
@@ -364,7 +363,7 @@ func fetchReleaseFile(ver, asset string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
 	}
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -422,7 +421,7 @@ func extractTarGz(r io.Reader, dest string) (string, error) {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return "", err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if hdr.Size > maxFileSize {
 				return "", fmt.Errorf("tar 条目过大: %s (%d bytes)", hdr.Name, hdr.Size)
 			}
@@ -450,7 +449,6 @@ func extractTarGz(r io.Reader, dest string) (string, error) {
 
 func copyStaticFile(srcPath, bin string) (string, error) {
 	// nps web UI is embedded in the binary; no web/ files to copy.
-	binPath, _ := filepath.Abs(os.Args[0])
 	srcBin := filepath.Join(srcPath, bin)
 	if common.IsWindows() {
 		srcBin += ".exe"
@@ -458,6 +456,7 @@ func copyStaticFile(srcPath, bin string) (string, error) {
 	if _, err := os.Stat(srcBin); err != nil {
 		return "", fmt.Errorf("更新包中未找到可执行文件 %s: %w", srcBin, err)
 	}
+	var binPath string
 	if !common.IsWindows() {
 		if _, err := copyFile(srcBin, "/usr/bin/"+bin); err != nil {
 			if _, err := copyFile(srcBin, "/usr/local/bin/"+bin); err != nil {

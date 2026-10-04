@@ -226,15 +226,15 @@ reset:
 						host.Client.IpWhiteList = append(host.Client.IpWhiteList, ip)
 						file.GetDb().UpdateClient(host.Client)
 						logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
-						jsonBytes, err = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
 					} else {
 						// 不打印密码（阶段三 #18 日志脱敏）
 						logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
-						jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
+						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
 					}
 				} else {
 					logs.Error("客户端IP白名单认证授权参数错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
-					jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "参数错误"})
+					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "参数错误"})
 				}
 				s.errorContent = jsonBytes
 				s.errorCode = 200
