@@ -27,7 +27,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 # ---------- 参数解析 ----------
-# 兼容两种写法：带 --openwrt 前缀 或 不带
+# 兼容三种写法：带 -- 分隔、带 --openwrt 前缀、或都不带（推荐）
+# --openwrt 仅为历史兼容标记，安装时自动检测 /etc/openwrt_release，带不带行为完全一致
+if [ "${1:-}" = "--" ]; then
+    shift
+fi
 if [ "${1:-}" = "--openwrt" ]; then
     shift
 fi
