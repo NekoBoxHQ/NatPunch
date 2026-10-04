@@ -86,19 +86,23 @@ fetch() {
         curl -fsSL --max-time 60 --retry 2 -o "$2" "$1"
     fi
 }
-# ---------- 获取版本（仅用于显示） ----------
+# ---------- 获取版本（按版本号取最高，latest 按发布时间排序会指向旧版） ----------
 log "获取最新版本..."
 VER=""
+VER_LIST=""
 if [ "$HAS_WGET" -eq 1 ]; then
-    VER="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-        | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+    VER_LIST="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
 else
-    VER="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-        | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+    VER_LIST="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
 fi
+VER="$(echo "$VER_LIST" | grep '"tag_name"' | sed 's/.*: *"\([^"]*\)".*/\1/' | grep -E '^v[0-9]' | sort -V | tail -n1)"
 echo "    ${VER:-最新发布}"
 # ---------- 下载 ----------
-BASE_URL="https://github.com/$REPO/releases/latest/download"
+if [ -n "$VER" ]; then
+    BASE_URL="https://github.com/$REPO/releases/download/$VER"
+else
+    BASE_URL="https://github.com/$REPO/releases/latest/download"
+fi
 URL="$BASE_URL/$PKG"
 log "下载 $PKG ..."
 mkdir -p "$TMP_DIR" || die "无法创建临时目录 $TMP_DIR"

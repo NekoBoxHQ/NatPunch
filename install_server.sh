@@ -9,10 +9,9 @@ WEB="$DIR/web"
 PID_FILE="$DIR/natpunch.pid"
 LOCK_DIR="$DIR/natpunch.lock.d"
 LOG="$DIR/natpunch.log"
-# 版本号不写死：下载始终走 releases/latest/download（自动指向最新发布），
-# 仅需展示版本号时才探测（get_latest_ver），探测失败也不影响安装/升级。
+# 版本号不写死：下载优先走 get_latest_ver 探测到的最高版本 tag（releases/download/$VER），
+# 探测失败才回退 releases/latest/download（自动指向最新发布）。
 REPO="NekoBoxHQ/NatPunch"
-API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SELF="$(basename "$0")"
 SERVICE_NAME="natpunch"
 # 发布方 minisign 公钥（内置默认，环境变量 MINISIGN_PUBKEY 可覆盖：自建发布链场景）
@@ -341,21 +340,17 @@ fetch() {
     esac
 }
 get_latest_ver() {
-    # 多源探测：优先 GitHub API，失败后回退 GitHub 网页重定向（github.com 通常更稳定）。
-    # 仅用于展示版本号；两者都失败返回空，下载仍走 releases/latest/download 自动取最新。
+    # 按版本号取最高：GitHub releases/latest 按【发布时间】排序，并行/连续发版时
+    # 会指向后发布但版本号更低的 tag（如 98 晚于 99 发布 → latest=98）。
+    # 故改用 releases 列表按 tag 版本排序；失败回退 tags API（最近推送在前）。
     V=""
-    RESP=$(fetch "$API_URL") || RESP=""
+    RESP=$(fetch "https://api.github.com/repos/$REPO/releases?per_page=20") || RESP=""
     if [ -n "${RESP:-}" ]; then
-        V=$(echo "$RESP" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+        V=$(echo "$RESP" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]' | sort -V | tail -n1)
     fi
     if [ -z "${V:-}" ]; then
-        LOC=""
-        if command -v curl >/dev/null 2>&1; then
-            LOC=$(curl -sI --max-time 10 "https://github.com/$REPO/releases/latest" 2>/dev/null | tr -d '\r' | grep -i '^location:' | head -n1)
-        else
-            LOC=$(wget -qO- --timeout=10 --server-response "https://github.com/$REPO/releases/latest" 2>&1 | tr -d '\r' | grep -i 'location:' | head -n1)
-        fi
-        V=$(echo "$LOC" | sed 's/.*tag\///' | tr -d '[:space:]')
+        RESP=$(fetch "https://api.github.com/repos/$REPO/tags?per_page=10") || RESP=""
+        V=$(echo "$RESP" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]' | head -n1)
     fi
     [ -n "${V:-}" ] && echo "$V" && return 0
     return 1
@@ -382,8 +377,15 @@ install() {
         *) die "不支持的架构: $ARCH（支持 amd64/arm64/armv7/mipsle）；请手动下载对应安装包";;
     esac
     info "下载最新发布 ($SERVER_PKG) ..."
-    dl "https://github.com/$REPO/releases/latest/download/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
-    verify_package "$SERVER_PKG" "https://github.com/$REPO/releases/latest/download"
+    VER=$(get_latest_ver) || VER=""
+    if [ -n "$VER" ]; then
+        BASE_URL="https://github.com/$REPO/releases/download/$VER"
+        info "最新版本: $VER"
+    else
+        BASE_URL="https://github.com/$REPO/releases/latest/download"
+    fi
+    dl "$BASE_URL/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
+    verify_package "$SERVER_PKG" "$BASE_URL"
     info "解压安装包 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
     rm -f natpunch.tar.gz
@@ -422,9 +424,17 @@ upgrade() {
         BASE_URL="https://github.com/$REPO/releases/download/$TARGET_VER"
         info "下载 $TARGET_VER ..."
     else
-        TARGET_URL="https://github.com/$REPO/releases/latest/download/$SERVER_PKG"
-        BASE_URL="https://github.com/$REPO/releases/latest/download"
-        info "下载最新发布 ..."
+        # 按版本号取最高（latest 按发布时间排序，并行发版会指向旧版）
+        VER=$(get_latest_ver) || VER=""
+        if [ -n "$VER" ]; then
+            TARGET_URL="https://github.com/$REPO/releases/download/$VER/$SERVER_PKG"
+            BASE_URL="https://github.com/$REPO/releases/download/$VER"
+            info "下载最新发布 $VER ..."
+        else
+            TARGET_URL="https://github.com/$REPO/releases/latest/download/$SERVER_PKG"
+            BASE_URL="https://github.com/$REPO/releases/latest/download"
+            info "下载最新发布 ..."
+        fi
     fi
     TMP="$DIR/.upgrade.$$"; rm -rf "$TMP"; mkdir -p "$TMP" || die "无法创建临时目录"
     cd "$TMP" || die "无法进入临时目录"
