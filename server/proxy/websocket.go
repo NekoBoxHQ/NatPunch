@@ -253,18 +253,20 @@ func (p *ReverseProxy) serveWebSocket(rw http.ResponseWriter, req *http.Request,
 
 func Join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser, host *file.Host) (inCount int64, outCount int64) {
 	var wait sync.WaitGroup
-	pipe := func(to io.ReadWriteCloser, from io.ReadWriteCloser, count *int64) {
+	pipe := func(to io.ReadWriteCloser, from io.ReadWriteCloser, count *int64, dir int) {
 		defer to.Close()
 		defer from.Close()
 		defer wait.Done()
-		goroutine.CopyBuffer(to, from, host.Client.Flow, nil, host, "")
+		goroutine.CopyBuffer(to, from, host.Client.Flow, nil, host, "", dir)
 		//*count, _ = io.Copy(to, from)
 	}
 
 	wait.Add(2)
 
-	go pipe(c1, c2, &inCount)
-	go pipe(c2, c1, &outCount)
+	// c1=公网用户连接, c2=隧道连接：隧道->公网 = 出口流量
+	go pipe(c1, c2, &inCount, goroutine.DirMuxToOutside)
+	// c2=隧道连接, c1=公网用户连接：公网->隧道 = 入口流量
+	go pipe(c2, c1, &outCount, goroutine.DirOutsideToMux)
 	wait.Wait()
 	return
 }

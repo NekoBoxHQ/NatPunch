@@ -24,7 +24,16 @@ type connGroup struct {
 	task   *file.Tunnel
 	host   *file.Host
 	remote string
+	dir    int
 }
+
+// 拷贝方向常量（流量记账方向语义）：
+//   DirMuxToOutside：隧道(mux) -> 公网侧 —— 内网数据返回公网 = 出口流量(ExportFlow)
+//   DirOutsideToMux：公网侧 -> 隧道(mux) —— 公网请求进入内网 = 入口流量(InletFlow)
+const (
+	DirMuxToOutside = 1
+	DirOutsideToMux = 2
+)
 
 //func newConnGroup(dst, src io.ReadWriteCloser, wg *sync.WaitGroup, n *int64) connGroup {
 //	return connGroup{
@@ -35,7 +44,7 @@ type connGroup struct {
 //	}
 //}
 
-func newConnGroup(dst, src io.ReadWriteCloser, wg *sync.WaitGroup, n *int64, flow *file.Flow, task *file.Tunnel, host *file.Host, remote string) connGroup {
+func newConnGroup(dst, src io.ReadWriteCloser, wg *sync.WaitGroup, n *int64, flow *file.Flow, task *file.Tunnel, host *file.Host, remote string, dir int) connGroup {
 	return connGroup{
 		src:    src,
 		dst:    dst,
@@ -45,10 +54,11 @@ func newConnGroup(dst, src io.ReadWriteCloser, wg *sync.WaitGroup, n *int64, flo
 		task:   task,
 		host:   host,
 		remote: remote,
+		dir:    dir,
 	}
 }
 
-func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel, host *file.Host, remote string) (err error) {
+func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel, host *file.Host, remote string, dir int) (err error) {
 	buf := common.CopyBuff.Get()
 	defer common.CopyBuff.Put(buf)
 	for {
@@ -124,7 +134,12 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 			if nw > 0 {
 				//written += int64(nw)
 				if flow != nil {
-					flow.Add(int64(nw), int64(nw))
+					// 按方向记账：隧道->公网=出口，公网->隧道=入口
+					if dir == DirMuxToOutside {
+						flow.Add(0, int64(nw))
+					} else {
+						flow.Add(int64(nw), 0)
+					}
 					// <<20 = 1024 * 1024
 					if flow.FlowLimit > 0 && (flow.FlowLimit<<20) < (flow.ExportFlow+flow.InletFlow) {
 						logs.Error("隧道[%s]流量已经超出", task.Client.VerifyKey)
@@ -132,10 +147,18 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 					}
 				}
 				if task != nil && task.Flow != nil && task.Flow != flow {
-					task.Flow.Add(int64(nw), int64(nw))
+					if dir == DirMuxToOutside {
+						task.Flow.Add(0, int64(nw))
+					} else {
+						task.Flow.Add(int64(nw), 0)
+					}
 				}
 				if host != nil && host.Flow != nil && host.Flow != flow {
-					host.Flow.Add(int64(nw), int64(nw))
+					if dir == DirMuxToOutside {
+						host.Flow.Add(0, int64(nw))
+					} else {
+						host.Flow.Add(int64(nw), 0)
+					}
 				}
 			}
 			if ew != nil {
@@ -163,7 +186,7 @@ func copyConnGroup(group interface{}) {
 	}
 
 	var err error
-	err = CopyBuffer(cg.dst, cg.src, cg.flow, cg.task, cg.host, cg.remote)
+	err = CopyBuffer(cg.dst, cg.src, cg.flow, cg.task, cg.host, cg.remote, cg.dir)
 	if err != nil {
 		cg.src.Close()
 		cg.dst.Close()
@@ -203,10 +226,10 @@ func copyConns(group interface{}) {
 	wg.Add(2)
 	var in, out int64
 	remoteAddr := conns.conn2.RemoteAddr().String()
-	_ = connCopyPool.Invoke(newConnGroup(conns.conn1, conns.conn2, wg, &in, conns.flow, conns.task, conns.host, remoteAddr))
-	// outside to mux : incoming
-	_ = connCopyPool.Invoke(newConnGroup(conns.conn2, conns.conn1, wg, &out, conns.flow, conns.task, conns.host, remoteAddr))
-	// mux to outside : outgoing
+	// mux to outside : outgoing —— 隧道->公网 = 出口流量
+	_ = connCopyPool.Invoke(newConnGroup(conns.conn1, conns.conn2, wg, &in, conns.flow, conns.task, conns.host, remoteAddr, DirMuxToOutside))
+	// outside to mux : incoming —— 公网->隧道 = 入口流量
+	_ = connCopyPool.Invoke(newConnGroup(conns.conn2, conns.conn1, wg, &out, conns.flow, conns.task, conns.host, remoteAddr, DirOutsideToMux))
 	wg.Wait()
 	//if conns.flow != nil {
 	//	conns.flow.Add(in, out)
