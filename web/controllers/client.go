@@ -158,7 +158,8 @@ func (s *ClientController) Edit() {
 				c.Rate.Stop()
 			}
 			if c.RateLimit > 0 {
-				c.Rate = rate.NewRate(int64(c.RateLimit * 1024))
+				// RateLimit 单位 Kb/s（比特，1024 进制）：Kb * 1024bit / 8bit/byte = 字节/秒
+				c.Rate = rate.NewRate(int64(c.RateLimit * 1024 / 8))
 				c.Rate.Start()
 			} else {
 				c.Rate = rate.NewRate((2 << 23) * 1024)

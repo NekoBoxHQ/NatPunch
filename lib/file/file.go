@@ -79,7 +79,8 @@ func (s *JsonDb) LoadClientFromJsonFile() {
 			return
 		}
 		if post.RateLimit > 0 {
-			post.Rate = rate.NewRate(int64(post.RateLimit * 1024))
+			// RateLimit 单位 Kb/s（比特，1024 进制）：Kb * 1024bit / 8bit/byte = 字节/秒
+			post.Rate = rate.NewRate(int64(post.RateLimit * 1024 / 8))
 		} else {
 			post.Rate = rate.NewRate((2 << 23) * 1024)
 		}
