@@ -26,6 +26,20 @@ func (s *ClientController) parseRateLimit() (int, string) {
 	return n, ""
 }
 
+// parseFlowLimit 解析流量限制输入（单位 MB，1024 进制，1GB 填 1024）。
+// 留空 = 0（不限）；非法输入（如 "100G"）返回错误，禁止静默按 0 处理。
+func (s *ClientController) parseFlowLimit() (int64, string) {
+	raw := s.GetString("flow_limit")
+	if raw == "" {
+		return 0, ""
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, "流量限制必须是数字（MB，如 1GB 填 1024）"
+	}
+	return int64(n), ""
+}
+
 type ClientController struct {
 	BaseController
 }
@@ -67,6 +81,11 @@ func (s *ClientController) Add() {
 			s.AjaxErr(rlErr)
 			return
 		}
+		fl, flErr := s.parseFlowLimit()
+		if flErr != "" {
+			s.AjaxErr(flErr)
+			return
+		}
 		t := &file.Client{
 			VerifyKey: s.getEscapeString("vkey"),
 			Id:        id,
@@ -87,7 +106,7 @@ func (s *ClientController) Add() {
 			Flow: &file.Flow{
 				ExportFlow: 0,
 				InletFlow:  0,
-				FlowLimit:  int64(s.GetIntNoErr("flow_limit")),
+				FlowLimit:  fl,
 			},
 			BlackIpList: RemoveRepeatedElement(strings.Split(s.getEscapeString("blackiplist"), "\r\n")),
 			IpWhite:     s.GetBoolNoErr("ipwhite"),
@@ -149,7 +168,12 @@ func (s *ClientController) Edit() {
 					return
 				}
 				c.VerifyKey = s.getEscapeString("vkey")
-				c.Flow.FlowLimit = int64(s.GetIntNoErr("flow_limit"))
+				fl, flErr := s.parseFlowLimit()
+				if flErr != "" {
+					s.AjaxErr(flErr)
+					return
+				}
+				c.Flow.FlowLimit = fl
 				rl, rlErr := s.parseRateLimit()
 				if rlErr != "" {
 					s.AjaxErr(rlErr)

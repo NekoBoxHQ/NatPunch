@@ -18,8 +18,8 @@
                         <label class="control-label font-bold" langtag="word-flowlimit"></label>
                         <div class="col-sm-10">
                             <input class="form-control" value="{{.c.Flow.FlowLimit}}" type="text" name="flow_limit"
-                                placeholder="" langtag="info-unrestricted">
-                            <span class="help-block m-b-none" langtag="word-unit"></span>: M
+                                placeholder="如：1024" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+                            <span class="help-block m-b-none" langtag="word-unit"></span>: MB
                         </div>
                     </div>
                     {{end}}
