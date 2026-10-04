@@ -23,6 +23,20 @@
                         </div>
                     </div>
                     {{end}}
+                    <div class="form-group" id="flow_inlet">
+                        <label class="control-label font-bold" langtag="word-flowinlet"></label>
+                        <div class="col-sm-10">
+                            <input class="form-control" value="{{.c.Flow.InletFlow}}" type="text" name="flow_inlet"
+                                placeholder="0">
+                        </div>
+                    </div>
+                    <div class="form-group" id="flow_export">
+                        <label class="control-label font-bold" langtag="word-flowexport"></label>
+                        <div class="col-sm-10">
+                            <input class="form-control" value="{{.c.Flow.ExportFlow}}" type="text" name="flow_export"
+                                placeholder="0">
+                        </div>
+                    </div>
                     {{if eq true .allow_rate_limit}}
 
                     <div class="form-group" id="rate_limit">

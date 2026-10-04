@@ -322,6 +322,14 @@
 		<zh-CN>流量限制</zh-CN>
 		<en-US>Flow limit</en-US>
 	</lang>
+	<lang id="word-flowinlet">
+		<zh-CN>入口流量</zh-CN>
+		<en-US>Inlet flow</en-US>
+	</lang>
+	<lang id="word-flowexport">
+		<zh-CN>出口流量</zh-CN>
+		<en-US>Export flow</en-US>
+	</lang>
 	<lang id="word-go">
 		<zh-CN>进入</zh-CN>
 		<en-US>go</en-US>
