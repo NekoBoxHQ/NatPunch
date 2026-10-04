@@ -1,21 +1,19 @@
 package crypt
 
 import (
+	"encoding/hex"
 	"strings"
 	"testing"
 )
 
 func TestGetVkey(t *testing.T) {
-	const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 	v1 := GetVkey()
 	v2 := GetVkey()
-	if len(v1) != 22 {
-		t.Fatalf("vkey length = %d, want 22 (128 bit base62)", len(v1))
+	if len(v1) != 32 {
+		t.Fatalf("vkey length = %d, want 32 (128 bit)", len(v1))
 	}
-	for _, c := range v1 {
-		if !strings.ContainsRune(alphabet, c) {
-			t.Fatalf("vkey char %q outside base62 charset", c)
-		}
+	if _, err := hex.DecodeString(v1); err != nil {
+		t.Fatalf("vkey is not hex: %v", err)
 	}
 	if v1 == v2 {
 		t.Fatal("two vkeys identical, expect random")

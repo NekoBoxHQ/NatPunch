@@ -2,12 +2,7 @@
 
 本项目为 ehang-io/nps 的修改版，所有版本均为对上游代码的增量修改（详见 NOTICE）。
 
-## [未发布]（v26.9.96 候选）
-
-### 变更
-- VKEY 生成格式改为 base62（0-9A-Za-z）22 位（128bit，crypto/rand + rejection sampling），不再保持原 32 位小写 hex 风格；新建客户端与「重置 VKEY」均生效。
-- 客户端列表页移除服务端桥接证书指纹展示条（TLS 一键命令仍自动携带指纹，功能不变）。
-- CI：integration job 改 continue-on-error（上游 mux 集成测试依赖 docker+tc+netns，CI 历史性超时，作观测项不阻塞发布）；golangci-lint 改现场 Go 1.26 编译（预编译二进制无法解析 Go 1.26 export data）。
+## [未发布]（阶段四，dev 分支）
 
 ### 工程化 / 依赖 / 合规 / 文档
 - CI 门禁：`check`（vet / go test / govulncheck / golangci-lint）→ `integration`（mux，Docker+tc，缺失自动跳过）→ `build`（linux amd64/arm64/armv7/mipsle × server/client 共 8 组合，产物架构自检）→ `release`（SHA256SUMS + minisign 签名 + 发布说明带 GPL 声明）。go-version 1.26。

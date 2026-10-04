@@ -60,7 +60,7 @@ NatPunch 是基于 [ehang-io/nps](https://github.com/ehang-io/nps) 的内网穿�
 | 面板登录 | bcrypt 密码 + 会话（SameSite=Strict / HTTPS Secure / 登录后 RegenerateID） | 存量明文登录时在线迁移 |
 | 隧道传输 | 可选 TLS（`tls_enable=true`），ECDSA P-256 自签证书持久化于 `conf/bridge.pem|key` | 与面板证书 `server.pem|key` 隔离 |
 | 防中间人 | 客户端 `tls_fingerprint`（SHA-256 指纹严格比对）/ `tls_strict`（强制） | 空值 = 沿用旧行为 + 启动告警 |
-| 客户端鉴权 | vkey（128bit，crypto/rand，base62 22 位） | 支持面板「重置 VKEY」处理存量 40bit |
+| 客户端鉴权 | vkey（128bit，crypto/rand） | 支持面板「重置 VKEY」处理存量 40bit |
 | 管理 API | 无 query 参数认证（F1-1 已删除）；变更一律 POST + 会话鉴权 | 机器 API 预留 `/api/v1/*`（HMAC，未实施） |
 
 ## 5. 资源与限流
