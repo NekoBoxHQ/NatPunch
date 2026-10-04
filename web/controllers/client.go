@@ -97,8 +97,21 @@ func (s *ClientController) Add() {
 				return
 			}
 		}
+		// vkey 防呆：留空自动生成 32 位 hex；手填必须 ≥8 位，杜绝短 key 导致
+		// 服务端/客户端不一致（升级掉线）的误操作。
+		vkey := s.getEscapeString("vkey")
+		if vkey == "" {
+			vkey = crypt.GetVkey()
+		} else if len(vkey) < 8 {
+			s.AjaxErr("验证密钥至少 8 位（建议留空自动生成 32 位）")
+			return
+		}
+		if !file.GetDb().VerifyVkey(vkey, 0) {
+			s.AjaxErr("验证密钥已存在，请更换")
+			return
+		}
 		t := &file.Client{
-			VerifyKey: s.getEscapeString("vkey"),
+			VerifyKey: vkey,
 			Id:        id,
 			Status:    true,
 			Remark:    s.getEscapeString("remark"),
@@ -214,11 +227,19 @@ func (s *ClientController) Edit() {
 				}
 			}
 			if s.GetSession("isAdmin").(bool) {
-				if !file.GetDb().VerifyVkey(s.getEscapeString("vkey"), c.Id) {
+				// vkey 防呆：留空 = 保持原值（绝不因编辑覆盖成空/变短导致客户端掉线）
+				nv := s.getEscapeString("vkey")
+				if nv == "" {
+					nv = c.VerifyKey
+				} else if len(nv) < 8 {
+					s.AjaxErr("验证密钥至少 8 位（留空保持原值）")
+					return
+				}
+				if !file.GetDb().VerifyVkey(nv, c.Id) {
 					s.AjaxErr("Vkey duplicate, please reset")
 					return
 				}
-				c.VerifyKey = s.getEscapeString("vkey")
+				c.VerifyKey = nv
 				fl, flErr := s.parseFlowLimit()
 				if flErr != "" {
 					s.AjaxErr(flErr)
@@ -352,34 +373,4 @@ func (s *ClientController) Del() {
 	server.DelTunnelAndHostByClientId(id, false)
 	server.DelClientConnect(id)
 	s.AjaxOk("delete success")
-}
-
-// ResetVkey 重新生成客户端 VKEY（F2-4）：存量 40bit vkey 迁移 / 泄漏处置用。
-// 仅管理员、POST-only；返回新 vkey，需同步更新客户端配置。
-func (s *ClientController) ResetVkey() {
-	if s.Ctx.Request.Method != "POST" {
-		s.AjaxErr("only POST allowed")
-		return
-	}
-	if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
-		s.AjaxErr("admin only")
-		return
-	}
-	id := s.GetIntNoErr("id")
-	c, err := file.GetDb().GetClient(id)
-	if err != nil {
-		s.AjaxErr("client not found")
-		return
-	}
-	for i := 0; i < 3; i++ {
-		nv := crypt.GetVkey()
-		if file.GetDb().VerifyVkey(nv, c.Id) {
-			c.VerifyKey = nv
-			file.GetDb().UpdateClient(c)
-			s.Data["json"] = map[string]interface{}{"status": 1, "msg": "vkey reset success", "vkey": nv}
-			s.ServeJSON()
-			return
-		}
-	}
-	s.AjaxErr("generate vkey duplicate, please retry")
 }

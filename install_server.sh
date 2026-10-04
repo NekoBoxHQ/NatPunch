@@ -410,6 +410,14 @@ install() {
 upgrade() {
     safe_dir; need tar; choose_downloader
     [ -x "$BIN" ] || die "NatPunch 未安装，请先安装"
+    # 升级前备份配置目录（clients.json 等含全部客户端 vkey）——vkey 升级不可变，
+    # 异常覆盖时可用备份恢复，杜绝客户端批量掉线
+    CONF_BAK=""
+    if [ -d "$CONF_DIR" ]; then
+        CONF_BAK="$DIR/conf.bak.$(date +%Y%m%d%H%M%S)"
+        mkdir -p "$CONF_BAK" && cp -a "$CONF_DIR/." "$CONF_BAK/" 2>/dev/null \
+            && info "已备份配置目录: $CONF_BAK" || CONF_BAK=""
+    fi
     TARGET_VER="${1:-}"
     ARCH=$(uname -m)
     case "$ARCH" in
@@ -468,6 +476,11 @@ upgrade() {
     fi
     cd /; rm -rf "$TMP"
     [ -f "$CONF" ] || die "缺少配置文件 $CONF"
+    # 升级后自检：客户端数据（clients.json）缺失/为空则从备份恢复，vkey 不可变
+    if [ ! -s "$CONF_DIR/clients.json" ] && [ -n "$CONF_BAK" ] && [ -s "$CONF_BAK/clients.json" ]; then
+        warn "检测到客户端数据缺失，从备份恢复: $CONF_BAK"
+        cp -a "$CONF_BAK/." "$CONF_DIR/" || warn "备份恢复失败，请手动检查 $CONF_BAK"
+    fi
     set_kv http_proxy_port  0
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
