@@ -25,7 +25,7 @@
 
 ### 指纹迁移步骤（存量部署）
 
-1. 服务端启动后，面板「客户端」页展示当前服务端指纹，或执行：
+1. 服务端启动后，面板「客户端」页的 **TLS 一键命令已自动携带当前服务端指纹**（`-tls_fingerprint=...`）；存量客户端手工补配时可执行：
    `./natpunch -conf_path=<dir>` 后从日志读取指纹（也可直接 `openssl x509 -in conf/bridge.pem -noout -fingerprint -sha256` 换算）。
 2. 客户端配置 `tls_fingerprint=<hex>`，先保持旧版本连接正常（告警仍打印）。
 3. 全量客户端补配指纹后，服务端/客户端设置 `tls_strict=true`，此后指纹不符即拒绝连接。
