@@ -215,6 +215,29 @@ function changeunit(limit) {
     return size;
 }
 
+// 网速专用：字节/秒 -> 比特/秒（1024 进制），1MB/s = 8Mb/s
+function changeunitBit(limit) {
+    var bps = limit * 8;
+    var size = "";
+    if (bps < 1024) {
+        size = bps.toFixed(2) + "b";
+    } else if (bps < 1024 * 1024) {
+        size = (bps / 1024).toFixed(2) + "Kb";
+    } else if (bps < 1024 * 1024 * 1024) {
+        size = (bps / (1024 * 1024)).toFixed(2) + "Mb";
+    } else {
+        size = (bps / (1024 * 1024 * 1024)).toFixed(2) + "Gb";
+    }
+
+    var sizeStr = size + "";
+    var index = sizeStr.indexOf(".");
+    var dou = sizeStr.substr(index + 1, 2);
+    if (dou == "00") {
+        return sizeStr.substring(0, index) + sizeStr.substr(index + 3, 2);
+    }
+    return size;
+}
+
 function batchDelete(url) {
     var rows = $('#table').bootstrapTable('getSelections');
     if (rows.length === 0) {
