@@ -108,7 +108,7 @@ func (s *Bridge) StartTunnel() error {
 					return
 				}
 				conn.Accept(tlsListener, func(c net.Conn) {
-					s.cliProcess(conn.NewConn(tls.Server(c, &tls.Config{Certificates: []tls.Certificate{crypt.GetCert()}})))
+					s.cliProcess(conn.NewConn(tls.Server(c, crypt.BuildTlsServerConfig())))
 				})
 			}()
 		}

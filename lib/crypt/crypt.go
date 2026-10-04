@@ -1,64 +1,13 @@
 package crypt
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/md5"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"math/rand"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 )
-
-// en
-func AesEncrypt(origData, key []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	blockSize := block.BlockSize()
-	origData = PKCS5Padding(origData, blockSize)
-	blockMode := cipher.NewCBCEncrypter(block, key[:blockSize])
-	crypted := make([]byte, len(origData))
-	blockMode.CryptBlocks(crypted, origData)
-	return crypted, nil
-}
-
-// de
-func AesDecrypt(crypted, key []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	blockSize := block.BlockSize()
-	blockMode := cipher.NewCBCDecrypter(block, key[:blockSize])
-	origData := make([]byte, len(crypted))
-	blockMode.CryptBlocks(origData, crypted)
-	err, origData = PKCS5UnPadding(origData)
-	return origData, err
-}
-
-// Completion when the length is insufficient
-func PKCS5Padding(ciphertext []byte, blockSize int) []byte {
-	padding := blockSize - len(ciphertext)%blockSize
-	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(ciphertext, padtext...)
-}
-
-// Remove excess
-func PKCS5UnPadding(origData []byte) (error, []byte) {
-	length := len(origData)
-	unpadding := int(origData[length-1])
-	if (length - unpadding) < 0 {
-		return errors.New("len error"), nil
-	}
-	return nil, origData[:(length - unpadding)]
-}
 
 // Generate 32-bit MD5 strings
 func Md5(s string) string {
@@ -70,23 +19,26 @@ func Md5(s string) string {
 // Generating Random Verification Key
 func GetRandomString(l int) string {
 	str := "0123456789abcdefghijklmnopqrstuvwxyz"
-	bytes := []byte(str)
-	result := []byte{}
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	result := make([]byte, l)
+	buf := make([]byte, l)
+	if _, err := rand.Read(buf); err != nil {
+		// crypto/rand 失败属于系统性故障，绝不用可预测源兜底
+		panic("crypto/rand failed: " + err.Error())
+	}
 	for i := 0; i < l; i++ {
-		result = append(result, bytes[r.Intn(len(bytes))])
+		result[i] = str[int(buf[i])%len(str)]
 	}
 	return string(result)
 }
 
+// GetVkey 生成 128 bit 十六进制验证密钥（32 hex，crypto/rand）。
+// 旧实现截取 UUID 前 10 位十六进制（40 bit）强度不足，且认证值为无盐 MD5（P1-4）。
 func GetVkey() string {
-	// 生成UUID
-	u, _ := uuid.NewRandom()
-	// 将UUID转换为字符串
-	uuidStr := u.String()
-	uuidStr = strings.ReplaceAll(uuidStr, "-", "")
-	// 截取前10位
-	return uuidStr[:10]
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func Base64Decoding(encodedString string) (string, error) {
@@ -100,18 +52,30 @@ func Base64Decoding(encodedString string) (string, error) {
 		}
 	}
 	// 兼容直接以 "nps:" 开头的旧格式：
-	// nps:name|addr|key|tls
+	// nps:name|addr|key|tls[|fp]
 	if len(decodedString) >= 4 && strings.HasPrefix(decodedString, "nps:") {
-		parts := strings.Split(decodedString[4:], "|")
-		if len(parts) < 4 {
-			return "", errors.New("快捷启动命令格式错误，请检查")
-		}
-		addr := strings.TrimSpace(parts[1])
-		key := strings.TrimSpace(parts[2])
-		tls := strings.TrimSpace(parts[3])
-		// 返回兼容老服务端的格式："addr key tls"，不修改端口或 TLS 标志
-		return addr + " " + key + " " + tls, nil
+		return joinQuickCmd(decodedString[4:])
+	}
+	// 面板当前生成的格式：name|addr|key|tls[|fp]（无前缀，F2-2 快速命令携带指纹）
+	if strings.Contains(decodedString, "|") {
+		return joinQuickCmd(decodedString)
 	}
 
 	return "", errors.New("快捷启动命令错误，请检查")
+}
+
+// joinQuickCmd 把 "name|addr|vkey|tls[|fp]" 拼成 "addr vkey tls[ fp]"（startNpcServer 用 Fields 解析）
+func joinQuickCmd(s string) (string, error) {
+	parts := strings.Split(s, "|")
+	if len(parts) < 4 {
+		return "", errors.New("快捷启动命令格式错误，请检查")
+	}
+	addr := strings.TrimSpace(parts[1])
+	key := strings.TrimSpace(parts[2])
+	tls := strings.TrimSpace(parts[3])
+	ret := addr + " " + key + " " + tls
+	if len(parts) > 4 && strings.TrimSpace(parts[4]) != "" {
+		ret += " " + strings.TrimSpace(parts[4])
+	}
+	return ret, nil
 }

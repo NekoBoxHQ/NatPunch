@@ -96,29 +96,34 @@ else
 fi
 echo "    ${VER:-最新发布}"
 # ---------- 下载 ----------
-URL="https://github.com/$REPO/releases/latest/download/$PKG"
-URL_SHA="https://github.com/$REPO/releases/latest/download/$PKG.sha256"
+BASE_URL="https://github.com/$REPO/releases/latest/download"
+URL="$BASE_URL/$PKG"
 log "下载 $PKG ..."
 mkdir -p "$TMP_DIR" || die "无法创建临时目录 $TMP_DIR"
 fetch "$URL" "$TMP_DIR/pkg.tar.gz" || die "下载失败: $URL"
 [ -s "$TMP_DIR/pkg.tar.gz" ] || die "下载文件为空: $URL"
-# 可选 sha256 校验（release 里若带 .sha256 就校验）
-if fetch "$URL_SHA" "$TMP_DIR/pkg.sha256" 2>/dev/null && [ -s "$TMP_DIR/pkg.sha256" ]; then
-    log "校验 sha256..."
-    EXPECT="$(awk '{print $1}' "$TMP_DIR/pkg.sha256" | head -n1)"
-    if command -v sha256sum >/dev/null 2>&1; then
-        ACTUAL="$(sha256sum "$TMP_DIR/pkg.tar.gz" | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-        ACTUAL="$(shasum -a 256 "$TMP_DIR/pkg.tar.gz" | awk '{print $1}')"
-    else
-        warn "未找到 sha256sum/shasum，跳过校验"
-        EXPECT=""
-    fi
-    if [ -n "$EXPECT" ] && [ "$EXPECT" != "$ACTUAL" ]; then
-        die "sha256 校验失败（期望 $EXPECT，实际 $ACTUAL）"
-    fi
+# 强制 SHA256 校验（F2-8）：校验失败即中止
+log "校验 sha256..."
+fetch "$BASE_URL/SHA256SUMS" "$TMP_DIR/SHA256SUMS" || die "获取 SHA256SUMS 失败"
+[ -s "$TMP_DIR/SHA256SUMS" ] || die "SHA256SUMS 为空"
+EXPECT="$(awk -v f="$PKG" '$2==f {print $1; exit}' "$TMP_DIR/SHA256SUMS")"
+[ -n "$EXPECT" ] || die "SHA256SUMS 中无 $PKG 条目"
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL="$(sha256sum "$TMP_DIR/pkg.tar.gz" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL="$(shasum -a 256 "$TMP_DIR/pkg.tar.gz" | awk '{print $1}')"
 else
-    warn "release 未提供 .sha256，跳过校验"
+    die "未找到 sha256sum/shasum 工具，无法校验"
+fi
+[ "$EXPECT" = "$ACTUAL" ] || die "sha256 校验失败（期望 $EXPECT，实际 $ACTUAL）"
+log "sha256 校验通过"
+# 分级签名校验（F2-8）：minisign + 公钥存在则强制，否则警告跳过（SHA256 已强制）
+if command -v minisign >/dev/null 2>&1 && [ -n "${MINISIGN_PUBKEY:-}" ]; then
+    fetch "$BASE_URL/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS.minisig" || die "获取签名失败"
+    minisign -Vm "$TMP_DIR/SHA256SUMS" -P "$MINISIGN_PUBKEY" -x "$TMP_DIR/SHA256SUMS.minisig" || die "minisign 签名校验失败"
+    log "minisign 签名校验通过"
+else
+    warn "未找到 minisign 或未配置 MINISIGN_PUBKEY，跳过签名校验（SHA256 已强制校验）"
 fi
 # ---------- 解压 ----------
 log "解压..."

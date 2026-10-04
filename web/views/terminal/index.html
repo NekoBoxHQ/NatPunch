@@ -93,7 +93,7 @@
     }
 
     function esc(s) {
-        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
     }
 
     function renderCmdPanel() {
@@ -112,7 +112,7 @@
         for (var k = 0; k < cmds.length; k++) {
             var c = cmds[k];
             html += '<div class="cmd-row" data-cmd="' + esc(c.cmd) + '" data-label="' + esc(c.label) + '" style="display:flex;align-items:center;margin:0;border-bottom:1px solid rgba(51,51,51,0.08);">'
-                + '<button type="button" class="cmd-run" data-cmd="' + esc(c.cmd) + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:6px 3px;">' + c.label + '</button>'
+                + '<button type="button" class="cmd-run" data-cmd="' + esc(c.cmd) + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:6px 3px;">' + esc(c.label) + '</button>'
                 + '<button type="button" class="cmd-edit" data-cmd="' + esc(c.cmd) + '" data-label="' + esc(c.label) + '" onclick="npCmdEdit(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:13px;cursor:pointer;padding:6px 4px;line-height:1;" title="编辑">✎</button>'
                 + '<button type="button" class="cmd-del" data-cmd="' + esc(c.cmd) + '" onclick="npCmdDel(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;padding:6px 6px;line-height:1;" title="删除">×</button>'
                 + '</div>';

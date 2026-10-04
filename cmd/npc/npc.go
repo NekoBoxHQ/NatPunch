@@ -44,6 +44,8 @@ var (
 	ver            = flag.Bool("version", false, "show current version")
 	disconnectTime = flag.Int("disconnect_timeout", 60, "not receiving check packet times, until timeout will disconnect the client")
 	tlsEnable      = flag.Bool("tls_enable", false, "enable tls")
+	tlsFingerprint = flag.String("tls_fingerprint", "", "server bridge cert SHA-256 fingerprint (F2-2); empty = legacy behavior with warning")
+	tlsStrict      = flag.Bool("tls_strict", false, "require tls_fingerprint when tls_enable, refuse to start otherwise (F2-2)")
 )
 
 func main() {
@@ -214,6 +216,11 @@ func run() {
 	//p2p or secret command
 	if *password != "" {
 		client.SetTlsEnable(*tlsEnable)
+		client.SetTlsFingerprint(*tlsFingerprint)
+		if *tlsEnable && *tlsStrict && *tlsFingerprint == "" {
+			logs.Error("tls_strict=true 但未配置 tls_fingerprint，拒绝启动（F2-2）")
+			os.Exit(0)
+		}
 		logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), client.GetTlsEnable())
 		commonConfig := new(config.CommonConfig)
 		commonConfig.Server = *serverAddr
@@ -238,6 +245,11 @@ func run() {
 	}
 	if *verifyKey != "" && *serverAddr != "" && *configPath == "" {
 		client.SetTlsEnable(*tlsEnable)
+		client.SetTlsFingerprint(*tlsFingerprint)
+		if *tlsEnable && *tlsStrict && *tlsFingerprint == "" {
+			logs.Error("tls_strict=true 但未配置 tls_fingerprint，拒绝启动（F2-2）")
+			os.Exit(0)
+		}
 		logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), client.GetTlsEnable())
 
 		vkeys := strings.Split(*verifyKey, `,`)
@@ -354,16 +366,21 @@ func startNpcServer(startCmd string) {
 	var serAddr string
 	var vkey string
 	var tls string
+	var fp string
 	array := strings.Fields(startCmd)
 	serAddr = array[0]
 	vkey = array[1]
 	if len(array) > 2 {
 		tls = array[2]
 	}
+	if len(array) > 3 {
+		fp = array[3] // 可选：服务端桥接证书指纹（F2-2）
+	}
 	go func() {
 		for {
 			if tls == "-tls_enable=true" || tls == "true" {
 				client.SetTlsEnable(true)
+				client.SetTlsFingerprint(fp)
 				logs.Info("start cmd:-server=" + serAddr + " -vkey=" + vkey + " " + tls)
 				logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), client.GetTlsEnable())
 			} else {

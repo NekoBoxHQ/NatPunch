@@ -18,6 +18,11 @@
             <div class="content">
             {{if eq true .isAdmin}}
 
+                <div class="alert alert-info" style="margin-bottom:10px;">
+                    <b langtag="word-bridgefingerprint"></b>: <code>{{if .bridge_fingerprint}}{{.bridge_fingerprint}}{{else}}<span langtag="word-bridgefingerprint-empty"></span>{{end}}</code>
+                    <button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button>
+                </div>
+
                 <div class="table-responsive">
                     <div id="toolbar">
                         <a href="{{.web_base_url}}/client/add" class="btn btn-primary dim">
@@ -87,9 +92,9 @@
                 + '<b langtag="word-lastonlinetime"></b>: ' + row.LastOnlineTime + '&emsp;<br/>'
                 + '<b langtag="word-expiretime"></b>: ' + (row.ExpireTime || '<span langtag="info-unrestricted"></span>') + '&emsp;<br/><br/>'
                 + '<b langtag="word-quicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.p}}|' + row.VerifyKey + '|false')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
-                + '<b langtag="word-tlsquicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.tls_p}}|' + row.VerifyKey + '|true')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
+                + '<b langtag="word-tlsquicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.tls_p}}|' + row.VerifyKey + '|true{{if .bridge_fingerprint}}|{{.bridge_fingerprint}}{{end}}')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
                 + '<b langtag="word-commandclient"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.VerifyKey + " -type=" +{{.bridgeType}} +"</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button><br/>"
-                + '<b langtag="word-commandclient-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.VerifyKey + " -tls_enable=true</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button>"
+                + '<b langtag="word-commandclient-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.VerifyKey + " -tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button>"
         },
         //表格的列
         columns: [
@@ -226,6 +231,7 @@
                     }
                     btn_group += '<a onclick="submitform(\'delete\', \'{{.web_base_url}}/client/del\', {\'id\':' + row.Id
                     btn_group += '})" class="btn btn-outline btn-danger"><i class="fa fa-trash"></i></a>'
+                    btn_group += '<a onclick="resetVkey(' + row.Id + ')" class="btn btn-outline btn-info" title="重置 VKEY"><i class="fa fa-key"></i></a>'
                     {{end}}
 
                     btn_group += '<a href="{{.web_base_url}}/client/edit?id=' + row.Id
@@ -264,6 +270,19 @@
 
     function copyCommand(data) {
         data.setAttribute("data-clipboard-text", data.previousElementSibling.innerHTML)
+    }
+
+    // F2-4 重置 VKEY：旧值立即失效，需同步更新客户端配置
+    function resetVkey(id) {
+        if (!confirm('重置后旧 VKEY 立即失效，需要同步更新客户端配置，确定重置？')) return;
+        $.post('{{.web_base_url}}/client/resetvkey', {id: id}, function (res) {
+            if (res.status === 1) {
+                toastr.success('新 VKEY: ' + res.vkey);
+                $('#table').bootstrapTable('refresh');
+            } else {
+                toastr.error(res.msg || '重置失败');
+            }
+        });
     }
 
     var clipboard = new ClipboardJS('.copy, .deploy-copy');

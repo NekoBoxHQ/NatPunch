@@ -272,6 +272,34 @@ dl() {
         curl) curl -fsSL --max-time 60 --retry 2 -o "$2" "$1" ;;
     esac
 }
+verify_package() {
+    # verify_package <pkg_name> <base_url>：强制 SHA256 校验（F2-8），失败即中止；
+    # 存在 minisign + MINISIGN_PUBKEY 时再做签名校验（失败即中止），否则警告跳过。
+    # 调用前需已在临时目录内（$TMP）。
+    local f="$1" base="$2"
+    dl "$base/SHA256SUMS" SHA256SUMS || { cd /; rm -rf "$TMP"; die "获取 SHA256SUMS 失败"; }
+    [ -s SHA256SUMS ] || { cd /; rm -rf "$TMP"; die "SHA256SUMS 为空"; }
+    local EXPECT
+    EXPECT=$(awk -v f="$f" '$2==f {print $1; exit}' SHA256SUMS)
+    [ -n "$EXPECT" ] || { cd /; rm -rf "$TMP"; die "SHA256SUMS 中无 $f 条目"; }
+    local ACTUAL
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL=$(sha256sum natpunch.tar.gz | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL=$(shasum -a 256 natpunch.tar.gz | awk '{print $1}')
+    else
+        cd /; rm -rf "$TMP"; die "未找到 sha256sum/shasum 工具，无法校验"
+    fi
+    [ "$EXPECT" = "$ACTUAL" ] || { cd /; rm -rf "$TMP"; die "sha256 校验失败（期望 $EXPECT 实际 $ACTUAL）"; }
+    info "sha256 校验通过 ($f)"
+    if command -v minisign >/dev/null 2>&1 && [ -n "${MINISIGN_PUBKEY:-}" ]; then
+        dl "$base/SHA256SUMS.minisig" SHA256SUMS.minisig || { cd /; rm -rf "$TMP"; die "获取签名失败"; }
+        minisign -Vm SHA256SUMS -P "$MINISIGN_PUBKEY" -x SHA256SUMS.minisig || { cd /; rm -rf "$TMP"; die "minisign 签名校验失败"; }
+        info "minisign 签名校验通过"
+    else
+        warn "未找到 minisign 或未配置 MINISIGN_PUBKEY，跳过签名校验（SHA256 已强制校验）"
+    fi
+}
 fetch() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
@@ -320,6 +348,7 @@ install() {
     esac
     info "下载最新发布 ($SERVER_PKG) ..."
     dl "https://github.com/$REPO/releases/latest/download/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
+    verify_package "$SERVER_PKG" "https://github.com/$REPO/releases/latest/download"
     info "解压安装包 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
     rm -f natpunch.tar.gz
@@ -353,14 +382,17 @@ upgrade() {
     esac
     if [ -n "$TARGET_VER" ]; then
         TARGET_URL="https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"
+        BASE_URL="https://github.com/$REPO/releases/download/$TARGET_VER"
         info "下载 $TARGET_VER ..."
     else
         TARGET_URL="https://github.com/$REPO/releases/latest/download/$SERVER_PKG"
+        BASE_URL="https://github.com/$REPO/releases/latest/download"
         info "下载最新发布 ..."
     fi
     TMP="$DIR/.upgrade.$$"; rm -rf "$TMP"; mkdir -p "$TMP" || die "无法创建临时目录"
     cd "$TMP" || die "无法进入临时目录"
     dl "$TARGET_URL" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
+    verify_package "$SERVER_PKG" "$BASE_URL"
     info "解压安装包 ..."
     tar -zxf natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "解压失败"; }
     rm -f natpunch.tar.gz

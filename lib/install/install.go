@@ -1,12 +1,16 @@
 package install
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"ehang.io/nps/lib/common"
 	"ehang.io/nps/lib/version"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/c4milo/unpackit"
 	"io"
 	"io/ioutil"
 	"log"
@@ -201,14 +205,25 @@ func fetchLatestVersion() (string, error) {
 	return rl.TagName, nil
 }
 
+// compareVersion 按数字段逐段比较语义版本（G7 修复，F2-8 前置）：
+// "v1.10.0" > "v2.0.0" 依赖逐段比较，不能"去点拼接 Atoi"（1.10.0→1100 vs 2.0.0→200 会误判）。
 func compareVersion(a, b string) int {
-	ai, _ := strconv.Atoi(strings.ReplaceAll(strings.TrimPrefix(a, "v"), ".", ""))
-	bi, _ := strconv.Atoi(strings.ReplaceAll(strings.TrimPrefix(b, "v"), ".", ""))
-	if ai < bi {
-		return -1
-	}
-	if ai > bi {
-		return 1
+	as := strings.Split(strings.TrimPrefix(a, "v"), ".")
+	bs := strings.Split(strings.TrimPrefix(b, "v"), ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		var ai, bi int
+		if i < len(as) {
+			ai, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			bi, _ = strconv.Atoi(bs[i])
+		}
+		if ai < bi {
+			return -1
+		}
+		if ai > bi {
+			return 1
+		}
 	}
 	return 0
 }
@@ -265,6 +280,8 @@ func downloadLatest2(bin string, path string) (string, error) {
 
 // downloadAndUnpack fetches the latest release package for the current OS/arch.
 // Releases ship as .tar.gz (see build.assets.sh / release.yml).
+// F2-8：强制校验 SHA256SUMS（同一 release 资产），校验失败即中止；解包弃用 unpackit，
+// 改用标准库 archive/tar + gzip，并拒绝路径逃逸条目。
 func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	data, err := http.Get("https://api.github.com/repos/" + repo + "/releases/latest")
 	if err != nil {
@@ -290,6 +307,17 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	filename := runtime.GOOS + "_" + runtime.GOARCH + "_" + bin + ".tar.gz"
 	downloadUrl := fmt.Sprintf("https://github.com/"+repo+"/releases/download/%s/%s", ver, filename)
 	fmt.Println("download package from ", downloadUrl)
+
+	// 强制 SHA256 校验（F2-8）：先取 SHA256SUMS，再下载并比对
+	sumsRaw, err := fetchReleaseFile(ver, "SHA256SUMS")
+	if err != nil {
+		return "", fmt.Errorf("获取 SHA256SUMS 失败: %w", err)
+	}
+	sums := parseSha256Sums(sumsRaw)
+	want, ok := sums[filename]
+	if !ok {
+		return "", fmt.Errorf("SHA256SUMS 中未找到 %s 条目", filename)
+	}
 	resp, err := http.Get(downloadUrl)
 	if err != nil {
 		return "", err
@@ -298,7 +326,18 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("下载失败: HTTP %d %s", resp.StatusCode, downloadUrl)
 	}
-	destPath, err := unpackit.Unpack(resp.Body, unpackPath)
+	buf := &bytes.Buffer{}
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(buf, h), resp.Body); err != nil {
+		return "", err
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(got, want) {
+		return "", fmt.Errorf("SHA256 校验失败: 期望 %s 实际 %s", want, got)
+	}
+	fmt.Println("sha256 verified:", filename)
+
+	destPath, err := extractTarGz(buf, unpackPath)
 	if err != nil {
 		return "", err
 	}
@@ -312,6 +351,101 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 		destPath = strings.Replace(destPath, "/conf", "", -1)
 	}
 	return destPath, nil
+}
+
+// fetchReleaseFile 从指定 release 下载资产并返回内容
+func fetchReleaseFile(ver, asset string) (string, error) {
+	url := fmt.Sprintf("https://github.com/"+repo+"/releases/download/%s/%s", ver, asset)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
+	}
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// parseSha256Sums 解析 sha256sum 格式："<hash>  <filename>"（忽略空行与 # 注释）
+func parseSha256Sums(s string) map[string]string {
+	m := map[string]string{}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) >= 2 {
+			m[filepath.Base(f[len(f)-1])] = strings.ToLower(f[0])
+		}
+	}
+	return m
+}
+
+// extractTarGz 用标准库解包 tar.gz，逐条目拒绝绝对路径 / ".." 逃逸 / 符号链接（F2-8）。
+// 单文件上限 512MB 防止恶意条目撑爆磁盘。
+func extractTarGz(r io.Reader, dest string) (string, error) {
+	if dest == "" {
+		var err error
+		dest, err = os.MkdirTemp("", "natpunch-update-")
+		if err != nil {
+			return "", err
+		}
+	}
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return "", err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	const maxFileSize = 512 << 20
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		name := filepath.Clean(hdr.Name)
+		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("tar 条目路径越界，已拒绝: %s", hdr.Name)
+		}
+		target := filepath.Join(dest, name)
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return "", err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if hdr.Size > maxFileSize {
+				return "", fmt.Errorf("tar 条目过大: %s (%d bytes)", hdr.Name, hdr.Size)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return "", err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0777|0600)
+			if err != nil {
+				return "", err
+			}
+			if _, err := io.Copy(f, io.LimitReader(tr, maxFileSize+1)); err != nil {
+				f.Close()
+				return "", err
+			}
+			if err := f.Close(); err != nil {
+				return "", err
+			}
+		default:
+			// 符号链接 / 硬链接 / 设备文件一律拒绝（防路径逃逸与恶意条目）
+			return "", fmt.Errorf("tar 含不受支持的条目类型 (%d)，已拒绝: %s", hdr.Typeflag, hdr.Name)
+		}
+	}
+	return dest, nil
 }
 
 func copyStaticFile(srcPath, bin string) (string, error) {

@@ -40,6 +40,15 @@ func GetTlsEnable() bool {
 	return tlsEnable1
 }
 
+// SetTlsFingerprint 透传期望的服务端桥接证书指纹（F2-2，三态见 lib/crypt/tls.go）
+func SetTlsFingerprint(fp string) {
+	crypt.SetTlsFingerprint(fp)
+}
+
+func GetTlsFingerprint() string {
+	return crypt.GetTlsFingerprint()
+}
+
 func GetTaskStatus(path string) {
 	cnf, err := config.NewConfig(path)
 	if err != nil {
@@ -108,6 +117,11 @@ func StartFromFile(path string) {
 	logs.Info("Loading configuration file %s successfully", path)
 
 	SetTlsEnable(cnf.CommonConfig.TlsEnable)
+	SetTlsFingerprint(cnf.CommonConfig.TlsFingerprint)
+	if cnf.CommonConfig.TlsEnable && cnf.CommonConfig.TlsStrict && cnf.CommonConfig.TlsFingerprint == "" {
+		logs.Error("tls_strict=true 但未配置 tls_fingerprint，拒绝启动（F2-2）")
+		os.Exit(0)
+	}
 	logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), GetTlsEnable())
 re:
 	if first || cnf.CommonConfig.AutoReconnection {
@@ -216,11 +230,11 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 			}
 		} else {
 			if GetTlsEnable() {
-				//tls 流量加密
-				conf := &tls.Config{
-					InsecureSkipVerify: true,
+				// tls 流量加密（F2-2 三态：配置指纹则严格校验，否则沿用旧行为并告警）
+				if crypt.GetTlsFingerprint() == "" {
+					logs.Warn("TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，不防中间人；建议配置服务端指纹（F2-2）")
 				}
-				connection, err = tls.Dial("tcp", server, conf)
+				connection, err = tls.Dial("tcp", server, crypt.TlsDialConfig())
 			} else {
 				connection, err = net.Dial("tcp", server)
 			}

@@ -16,6 +16,8 @@ type CommonConfig struct {
 	Tp               string //bridgeType kcp or tcp
 	AutoReconnection bool
 	TlsEnable        bool
+	TlsFingerprint   string // 期望的服务端桥接证书 SHA-256（F2-2）；空 = 沿用旧行为+告警
+	TlsStrict        bool   // true 时强制要求 TlsFingerprint 非空（F2-2）
 	ProxyUrl         string
 	Client           *file.Client
 	DisconnectTime   int
@@ -153,6 +155,10 @@ func dealCommon(s string) *CommonConfig {
 			c.DisconnectTime = common.GetIntNoErrByStr(item[1])
 		case "tls_enable":
 			c.TlsEnable = common.GetBoolByStr(item[1])
+		case "tls_fingerprint":
+			c.TlsFingerprint = item[1]
+		case "tls_strict":
+			c.TlsStrict = common.GetBoolByStr(item[1])
 		}
 	}
 	return c

@@ -91,6 +91,14 @@ func (s *IndexController) GetTunnel() {
 	start, length := s.GetAjaxParams()
 	taskType := s.getEscapeString("type")
 	clientId := s.GetIntNoErr("client_id")
+	// 非管理员仅可查看自己的隧道（F2-9 IDOR）
+	if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
+		if cid, ok := s.GetSession("clientId").(int); ok {
+			clientId = cid
+		} else {
+			clientId = 0
+		}
+	}
 	list, cnt := server.GetTunnel(start, length, taskType, clientId, s.getEscapeString("search"), s.getEscapeString("sort"), s.getEscapeString("order"))
 	s.AjaxTable(list, cnt, cnt, nil)
 }
@@ -118,6 +126,16 @@ func (s *IndexController) Add() {
 		username := s.getEscapeString("username")
 		password := s.getEscapeString("password")
 
+		// 非管理员仅可为自己的客户端创建隧道（F2-9 IDOR）
+		clientId := s.GetIntNoErr("client_id")
+		if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
+			if cid, ok := s.GetSession("clientId").(int); ok {
+				clientId = cid
+			} else {
+				clientId = 0
+			}
+		}
+
 		// 创建单条隧道；type=tcp+udp 时按 tcp / udp 各建一条（同端口双协议监听）
 		createOne := func(m string, remark string) (int, error) {
 			id := int(file.GetDb().JsonDb.GetTaskId())
@@ -144,7 +162,7 @@ func (s *IndexController) Add() {
 				return 0, errors.New("The port cannot be opened because it may has been occupied or is no longer allowed.")
 			}
 			var err error
-			if t.Client, err = file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+			if t.Client, err = file.GetDb().GetClient(clientId); err != nil {
 				return 0, err
 			}
 			if t.Client.MaxTunnelNum != 0 && t.Client.GetTunnelNum() >= t.Client.MaxTunnelNum {
@@ -250,7 +268,16 @@ func (s *IndexController) Edit() {
 		if t, err := file.GetDb().GetTask(id); err != nil {
 			s.error()
 		} else {
-			if client, err := file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+			// 非管理员编辑时 client 强制为本人的（F2-9 IDOR）
+			editClientId := s.GetIntNoErr("client_id")
+			if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
+				if cid, ok := s.GetSession("clientId").(int); ok {
+					editClientId = cid
+				} else {
+					editClientId = 0
+				}
+			}
+			if client, err := file.GetDb().GetClient(editClientId); err != nil {
 				s.AjaxErr("modified error,the client is not exist")
 				return
 			} else {

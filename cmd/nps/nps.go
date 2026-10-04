@@ -451,8 +451,10 @@ func run() {
 	logs.Info("the config path is:" + common.GetRunPath())
 	logs.Info("the version of server is %s ,allow client core version to be %s,tls enable is %t", version.VERSION, version.GetVersion(), bridge.ServerTlsEnable)
 	connection.InitConnectionService()
-	//crypt.InitTls(filepath.Join(common.GetRunPath(), "conf", "server.pem"), filepath.Join(common.GetRunPath(), "conf", "server.key"))
-	crypt.InitTls()
+	// 桥接证书持久化到 conf/bridge.pem|key（0600），与面板 HTTPS 证书（server.pem|key）路径隔离（F2-2）
+	if err := crypt.InitTls(filepath.Join(common.GetRunPath(), "conf", "bridge.pem"), filepath.Join(common.GetRunPath(), "conf", "bridge.key")); err != nil {
+		logs.Error("init bridge tls cert error: %v", err)
+	}
 	tool.InitAllowPort()
 	tool.StartSystemInfo()
 	timeout, err := beego.AppConfig.Int("disconnect_timeout")

@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"ehang.io/nps/lib/version"
 	"encoding/base64"
 	"encoding/binary"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
+	"golang.org/x/crypto/bcrypt"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -42,7 +44,13 @@ func CheckAuth(r *http.Request, user, passwd string) bool {
 	if len(pair) != 2 {
 		return false
 	}
-	return pair[0] == user && pair[1] == passwd
+	// 常量时间比较，避免用户名/密码时序侧信道（F2-1 / G3）
+	u, p := []byte(pair[0]), []byte(pair[1])
+	us, ps := []byte(user), []byte(passwd)
+	if len(u) != len(us) || len(p) != len(ps) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(u, us) == 1 && subtle.ConstantTimeCompare(p, ps) == 1
 }
 
 // get bool by str
@@ -52,6 +60,31 @@ func GetBoolByStr(s string) bool {
 		return true
 	}
 	return false
+}
+
+// HashPassword bcrypt 哈希面板密码（F2-3）
+func HashPassword(plain string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	return string(b), err
+}
+
+// VerifyPassword 兼容 bcrypt 与存量明文的面板密码校验（F2-3）：
+//   - 存值为 $2 开头（bcrypt）→ bcrypt.CompareHashAndPassword（自带常量时间）
+//   - 存值为明文（存量）→ subtle.ConstantTimeCompare
+//
+// 任何错误一律返回 false。
+func VerifyPassword(stored, plain string) bool {
+	if stored == "" {
+		return plain == ""
+	}
+	if strings.HasPrefix(stored, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(plain)) == nil
+	}
+	u, p := []byte(stored), []byte(plain)
+	if len(u) != len(p) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(u, p) == 1
 }
 
 // int

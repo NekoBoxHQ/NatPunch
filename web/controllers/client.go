@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ehang.io/nps/lib/common"
+	"ehang.io/nps/lib/crypt"
 	"ehang.io/nps/lib/file"
 	"ehang.io/nps/lib/rate"
 	"ehang.io/nps/server"
@@ -86,6 +87,16 @@ func (s *ClientController) Add() {
 			s.AjaxErr(flErr)
 			return
 		}
+		// 客户端 web 密码 bcrypt 落库（F2-3）；空值保持空（不启用用户登录）
+		webPasswordHash := ""
+		if wp := s.getEscapeString("web_password"); wp != "" {
+			var err error
+			webPasswordHash, err = common.HashPassword(wp)
+			if err != nil {
+				s.AjaxErr("密码哈希失败: " + err.Error())
+				return
+			}
+		}
 		t := &file.Client{
 			VerifyKey: s.getEscapeString("vkey"),
 			Id:        id,
@@ -101,7 +112,7 @@ func (s *ClientController) Add() {
 			RateLimit:       rl,
 			MaxConn:         s.GetIntNoErr("max_conn"),
 			WebUserName:     s.getEscapeString("web_username"),
-			WebPassword:     s.getEscapeString("web_password"),
+			WebPassword:     webPasswordHash,
 			MaxTunnelNum:    s.GetIntNoErr("max_tunnel"),
 			Flow: &file.Flow{
 				ExportFlow: 0,
@@ -151,6 +162,16 @@ func (s *ClientController) Edit() {
 		s.SetInfo("edit client")
 		s.display()
 	} else {
+		// 客户端 web 密码 bcrypt 落库（F2-3）；空值保持原状（不清空）
+		webPasswordHash := ""
+		if wp := s.getEscapeString("web_password"); wp != "" {
+			var err error
+			webPasswordHash, err = common.HashPassword(wp)
+			if err != nil {
+				s.AjaxErr("密码哈希失败: " + err.Error())
+				return
+			}
+		}
 		if c, err := file.GetDb().GetClient(id); err != nil {
 			s.error()
 			s.AjaxErr("client ID not found")
@@ -198,7 +219,9 @@ func (s *ClientController) Edit() {
 			if s.GetSession("isAdmin").(bool) || (err == nil && b) {
 				c.WebUserName = s.getEscapeString("web_username")
 			}
-			c.WebPassword = s.getEscapeString("web_password")
+			if webPasswordHash != "" {
+				c.WebPassword = webPasswordHash
+			}
 			c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
 			c.IpWhite = s.GetBoolNoErr("ipwhite")
 			c.IpWhitePass = s.getEscapeString("ipwhitepass")
@@ -299,4 +322,34 @@ func (s *ClientController) Del() {
 	server.DelTunnelAndHostByClientId(id, false)
 	server.DelClientConnect(id)
 	s.AjaxOk("delete success")
+}
+
+// ResetVkey 重新生成客户端 VKEY（F2-4）：存量 40bit vkey 迁移 / 泄漏处置用。
+// 仅管理员、POST-only；返回新 vkey，需同步更新客户端配置。
+func (s *ClientController) ResetVkey() {
+	if s.Ctx.Request.Method != "POST" {
+		s.AjaxErr("only POST allowed")
+		return
+	}
+	if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
+		s.AjaxErr("admin only")
+		return
+	}
+	id := s.GetIntNoErr("id")
+	c, err := file.GetDb().GetClient(id)
+	if err != nil {
+		s.AjaxErr("client not found")
+		return
+	}
+	for i := 0; i < 3; i++ {
+		nv := crypt.GetVkey()
+		if file.GetDb().VerifyVkey(nv, c.Id) {
+			c.VerifyKey = nv
+			file.GetDb().UpdateClient(c)
+			s.Data["json"] = map[string]interface{}{"status": 1, "msg": "vkey reset success", "vkey": nv}
+			s.ServeJSON()
+			return
+		}
+	}
+	s.AjaxErr("generate vkey duplicate, please retry")
 }

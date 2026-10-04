@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -76,7 +78,7 @@ func (s *TerminalController) SaveCmds() {
 	s.ServeJSON()
 }
 
-// GetClients 返回客户端列表（终端选择用）
+// GetClients 返回客户端列表（终端选择用）；非管理员仅返回自己的客户端（F2-6）
 func (s *TerminalController) GetClients() {
 	list, _ := server.GetClientList(0, 1000, "", "", "id", 0)
 	type item struct {
@@ -90,17 +92,49 @@ func (s *TerminalController) GetClients() {
 		if !c.Status {
 			continue
 		}
+		if !s.canOperateClient(c.Id) {
+			continue
+		}
 		items = append(items, item{Id: c.Id, Remark: c.Remark, IsConnect: c.IsConnect, LocalAddr: c.LocalAddr})
 	}
 	s.Data["json"] = map[string]interface{}{"code": 1, "data": items}
 	s.ServeJSON()
 }
 
+// canOperateClient 终端归属校验：管理员可操作任意客户端；普通登录用户仅可操作自己的客户端（F2-6）
+func (s *TerminalController) canOperateClient(cid int) bool {
+	if admin, ok := s.GetSession("isAdmin").(bool); ok && admin {
+		return true
+	}
+	mine, ok := s.GetSession("clientId").(int)
+	return ok && mine == cid
+}
+
+// checkWsOrigin 跨站 WebSocket 劫持防护（F2-6）：允许无 Origin 的非浏览器客户端；
+// 浏览器 Origin 必须为 localhost/回环，或与页面所在 Host 同源。
+func (s *TerminalController) checkWsOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return u.Host == r.Host
+}
+
 // Ws 终端 WebSocket：
 // 浏览器 <-> 服务端 <-> 隧道(shell link) <-> 客户端本地 shell（PTY）
 // 文本帧=控制(JSON resize)，二进制帧=终端数据
 func (s *TerminalController) Ws() {
-	clientId := s.GetIntNoErr("client_id")
+	// 注意：BaseController.Prepare 会把会话 clientId 写入 Ctx.Input 参数（base.go SetParam），
+	// 覆盖 URL 的 client_id；这里必须读原始 URL query，否则归属校验永远比对到会话自身（F2-6）
+	clientId, _ := strconv.Atoi(s.Ctx.Request.URL.Query().Get("client_id"))
 	cols := s.GetIntNoErr("cols")
 	rows := s.GetIntNoErr("rows")
 	if cols <= 0 {
@@ -109,9 +143,16 @@ func (s *TerminalController) Ws() {
 	if rows <= 0 {
 		rows = 24
 	}
-	up := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	// 归属校验必须在 Upgrade 之前：非管理员仅可连接自己的客户端（F2-6）
+	if clientId <= 0 || !s.canOperateClient(clientId) {
+		s.Ctx.Output.SetStatus(403)
+		return
+	}
+	up := websocket.Upgrader{CheckOrigin: s.checkWsOrigin}
 	ws, err := up.Upgrade(s.Ctx.ResponseWriter, s.Ctx.Request, nil)
 	if err != nil {
+		// 不设置状态码会让 beego 尝试渲染 terminalcontroller/ws.tpl（不存在）→ 请求级 panic
+		s.Ctx.Output.SetStatus(400)
 		return
 	}
 	defer ws.Close()

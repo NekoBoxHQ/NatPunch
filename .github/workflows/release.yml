@@ -96,12 +96,29 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
+      - name: Sign checksums (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          cd dist
+          if [ -n "$MINISIGN_SECRET_KEY" ]; then
+            go install github.com/jedisct1/go-minisign/cmd/minisign@v0.1.0
+            printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+            chmod 600 /tmp/minisign.key
+            "$(go env GOPATH)/bin/minisign" -Sm SHA256SUMS -s /tmp/minisign.key
+            rm -f /tmp/minisign.key
+            ls -la SHA256SUMS.minisig
+          else
+            echo "::warning::MINISIGN_SECRET_KEY 未配置，跳过 minisign 签名（仅发布 SHA256SUMS）"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+            dist/SHA256SUMS.minisig
           generate_release_notes: true
 
       - name: Notify Telegram Group

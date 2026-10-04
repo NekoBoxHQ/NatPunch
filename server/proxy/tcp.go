@@ -96,12 +96,13 @@ func (s *WebServer) Start() error {
 	var l net.Listener
 	if l, err = connection.GetWebManagerListener(); err == nil {
 		beego.InitBeforeHTTPRun()
-		if beego.AppConfig.String("web_open_ssl") == "true" {
+		secure := beego.AppConfig.String("web_open_ssl") == "true"
+		if secure {
 			keyPath := beego.AppConfig.String("web_key_file")
 			certPath := beego.AppConfig.String("web_cert_file")
-			err = http.ServeTLS(l, beego.BeeApp.Handlers, certPath, keyPath)
+			err = http.ServeTLS(l, newSameSiteHandler(beego.BeeApp.Handlers, true), certPath, keyPath)
 		} else {
-			err = http.Serve(l, beego.BeeApp.Handlers)
+			err = http.Serve(l, newSameSiteHandler(beego.BeeApp.Handlers, false))
 		}
 	} else {
 		logs.Error(err)

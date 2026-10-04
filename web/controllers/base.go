@@ -2,17 +2,18 @@ package controllers
 
 import (
 	"html"
+	"os"
 	"strconv"
 	"strings"
 
 	"ehang.io/nps/bridge"
 
 	"ehang.io/nps/lib/common"
+	"ehang.io/nps/lib/crypt"
 	"ehang.io/nps/lib/file"
 	"ehang.io/nps/lib/version"
 	"ehang.io/nps/server"
 	"github.com/astaxie/beego"
-	"os"
 )
 
 type BaseController struct {
@@ -108,6 +109,8 @@ func (s *BaseController) display(tpl ...string) {
 	s.Data["tls_p"] = tlsPort
 	s.Data["tls_enable"] = useTls
 	s.Data["p1"] = strconv.Itoa(server.Bridge.TunnelPort) + " / " + tlsPort
+	// 桥接证书指纹：客户端「一键安装命令」下发 + 页面展示，供存量客户端手工补配（F2-2）
+	s.Data["bridge_fingerprint"] = crypt.GetCertFingerprint()
 
 	s.Data["proxyPort"] = beego.AppConfig.String("hostPort")
 	s.Layout = "public/layout.html"
@@ -214,40 +217,61 @@ func (s *BaseController) SetType(name string) {
 	s.Data["type"] = name
 }
 
+// CheckUserAuth 普通登录用户（非管理员）的归属校验（F2-9）：
+//   - client 控制器：仅可操作自己的客户端；不可注册新客户端
+//   - index 控制器：id 必须属于本人（任务或 host 任一命中即放行）
+//   - global 控制器：全局设置仅管理员
+//
+// 管理员不受限制。
 func (s *BaseController) CheckUserAuth() {
-	if s.controllerName == "client" {
+	myClientId := -1
+	if cid, ok := s.GetSession("clientId").(int); ok {
+		myClientId = cid
+	}
+	if admin, ok := s.GetSession("isAdmin").(bool); ok && admin {
+		return
+	}
+	// beego GetControllerAndAction 返回原始类型名（如 "Global"），统一转小写再比较
+	switch strings.ToLower(s.controllerName) {
+	case "client":
 		if s.actionName == "add" {
-			s.StopRun()
+			s.deny()
 			return
 		}
-		if id := s.GetIntNoErr("id"); id != 0 {
-			if id != s.GetSession("clientId").(int) {
-				s.StopRun()
-				return
-			}
+		if id := s.GetIntNoErr("id"); id != 0 && id != myClientId {
+			s.deny()
+			return
+		}
+	case "index":
+		if id := s.GetIntNoErr("id"); id != 0 && !s.tunnelBelongsToMe(id, myClientId) {
+			s.deny()
+			return
+		}
+	case "global":
+		s.deny()
+	}
+}
+
+// deny 拒绝非授权请求：beego 1.12 的 StopRun 是 panic，会跳过 WriteHeader
+// （仅 SetStatus 不落 header，响应仍为 200）；CustomAbort 立即写状态码+body 再中止（F2-9 门禁）。
+func (s *BaseController) deny() {
+	s.CustomAbort(403, "forbidden")
+}
+
+// tunnelBelongsToMe 显式归属校验：任务或 host 任一属于本人即放行。
+// 替代原 strings.Contains(actionName, "h") 字符串猜谜（"help"/"http" 会被误判，F2-9）。
+func (s *BaseController) tunnelBelongsToMe(id, myClientId int) bool {
+	if v, ok := file.GetDb().JsonDb.Tasks.Load(id); ok {
+		if v.(*file.Tunnel).Client.Id == myClientId {
+			return true
 		}
 	}
-	if s.controllerName == "index" {
-		if id := s.GetIntNoErr("id"); id != 0 {
-			belong := false
-			if strings.Contains(s.actionName, "h") {
-				if v, ok := file.GetDb().JsonDb.Hosts.Load(id); ok {
-					if v.(*file.Host).Client.Id == s.GetSession("clientId").(int) {
-						belong = true
-					}
-				}
-			} else {
-				if v, ok := file.GetDb().JsonDb.Tasks.Load(id); ok {
-					if v.(*file.Tunnel).Client.Id == s.GetSession("clientId").(int) {
-						belong = true
-					}
-				}
-			}
-			if !belong {
-				s.StopRun()
-			}
+	if v, ok := file.GetDb().JsonDb.Hosts.Load(id); ok {
+		if v.(*file.Host).Client.Id == myClientId {
+			return true
 		}
 	}
+	return false
 }
 
 // getPublicIP 返回本机第一个公网 IPv4，找不到返回空串
