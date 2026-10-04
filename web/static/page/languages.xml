@@ -218,14 +218,6 @@
 		<zh-CN>TLS快捷启动命令</zh-CN>
 		<en-US>TLS Quickly command</en-US>
 	</lang>
-	<lang id="word-bridgefingerprint">
-		<zh-CN>服务端桥接证书指纹（tls_fingerprint，客户端配置后启用严格校验）</zh-CN>
-		<en-US>Server bridge cert fingerprint (tls_fingerprint, enables strict verification on clients)</en-US>
-	</lang>
-	<lang id="word-bridgefingerprint-empty">
-		<zh-CN>（未生成，TLS 桥接未启用或初始化失败）</zh-CN>
-		<en-US>(not generated, TLS bridge disabled or init failed)</en-US>
-	</lang>
 
 	<lang id="word-commandclient">
 		<zh-CN>客户端命令</zh-CN>

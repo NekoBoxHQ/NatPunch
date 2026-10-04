@@ -18,11 +18,6 @@
             <div class="content">
             {{if eq true .isAdmin}}
 
-                <div class="alert alert-info" style="margin-bottom:10px;">
-                    <b langtag="word-bridgefingerprint"></b>: <code>{{if .bridge_fingerprint}}{{.bridge_fingerprint}}{{else}}<span langtag="word-bridgefingerprint-empty"></span>{{end}}</code>
-                    <button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button>
-                </div>
-
                 <div class="table-responsive">
                     <div id="toolbar">
                         <a href="{{.web_base_url}}/client/add" class="btn btn-primary dim">
