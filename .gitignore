@@ -1,10 +1,9 @@
 .idea
-nps
 
 # Go build outputs
 /npc
-/nps.exe
 /npc.exe
+/natpunch.exe
 
 # Node.js / VuePress
 node_modules/

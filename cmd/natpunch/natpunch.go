@@ -38,7 +38,7 @@ var (
 	ver        = flag.Bool("version", false, "show current version")
 	confPath   = flag.String("conf_path", "", "set current confPath")
 	serverCmd  = flag.Bool("server", false, "NatPunch管理脚本")
-	npsLogPath = flag.String("log_path", "", "natpunch log path")
+	natpunchLogPath = flag.String("log_path", "", "natpunch log path")
 )
 
 func main() {
@@ -102,7 +102,7 @@ func main() {
 	// init service
 	options := make(service.KeyValue)
 	svcConfig := &service.Config{
-		Name:        "Nps",
+		Name:        "NatPunch",
 		DisplayName: "NatPunch 内网穿透代理服务器",
 		Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
 		Option:      options,
@@ -257,7 +257,7 @@ func inputCmd() {
 		}
 		options := make(service.KeyValue)
 		svcConfig := &service.Config{
-			Name:        "Nps",
+			Name:        "NatPunch",
 			DisplayName: "NatPunch 内网穿透代理服务器",
 			Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
 			Option:      options,
@@ -452,7 +452,7 @@ func run() {
 		os.Exit(0)
 	}
 
-	logs.Info("日志路径：" + *npsLogPath)
+	logs.Info("日志路径：" + *natpunchLogPath)
 	logs.Info("the config path is:" + common.GetRunPath())
 	logs.Info("the version of server is %s ,allow client core version to be %s,tls enable is %t", version.VERSION, version.GetVersion(), bridge.ServerTlsEnable)
 	connection.InitConnectionService()

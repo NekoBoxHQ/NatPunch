@@ -1,6 +1,6 @@
 # Contributing
 
-感谢你愿意参与 NatPunch。本项目是 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版，请遵守以下约定。
+感谢你愿意参与 NatPunch。本项目以 GPLv3 许可分发，派生关系与上游差异见 [NOTICE](NOTICE)，请遵守以下约定。
 
 ## 流程
 

@@ -42,21 +42,11 @@ func GetVkey() string {
 }
 
 func Base64Decoding(encodedString string) (string, error) {
-	// legacy 兼容：旧版（nps 时代）快速命令带 "nps " base64 前缀，为不破坏存量客户端配置保留解析
 	decodedBytes, err := base64.StdEncoding.DecodeString(encodedString)
 	decodedString := string(decodedBytes)
 
-	if err == nil {
-		if len(decodedString) >= 4 && decodedString[:4] == "nps " {
-			return decodedString[4:], nil
-		}
-	}
-	// legacy 兼容：旧版快速命令 "nps:name|addr|key|tls[|fp]" 前缀格式
-	if len(decodedString) >= 4 && strings.HasPrefix(decodedString, "nps:") {
-		return joinQuickCmd(decodedString[4:])
-	}
 	// 面板当前生成的格式：name|addr|key|tls[|fp]（无前缀，F2-2 快速命令携带指纹）
-	if strings.Contains(decodedString, "|") {
+	if err == nil && strings.Contains(decodedString, "|") {
 		return joinQuickCmd(decodedString)
 	}
 

@@ -1,11 +1,11 @@
 # Changelog
 
-本项目为 ehang-io/nps 的修改版，所有版本均为对上游代码的增量修改（详见 NOTICE）。
+本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
 ## [未发布]（v26.9.98 候选）
 
 ### 变更
-- **README 完全品牌化**：README/README_zh 移除顶部与 License 章节的"基于 ehang-io/nps 的修改版"显著声明、发布说明模板同步；NPS 相关仅保留在 LICENSE / NOTICE（法律声明）与 CHANGELOG/CONTRIBUTING（工程记录）、docs/comparison（对比语境）。对外呈现完全为 NatPunch。
+- **README 完全品牌化**：README/README_zh 移除顶部与 License 章节的显著派生声明、发布说明模板同步；上游相关仅保留在 LICENSE / NOTICE（法律声明）。对外呈现完全为 NatPunch。
 - **OpenWrt 签名校验落地（静态校验器）**：新增 `cmd/minisign-check`（Go 版 go-minisign 库，约 40 行极简校验器），CI 随发布物静态交叉编译 4 架构（`minisign-check-linux-<arch>`）；`install.sh` / `install_server.sh` 签名校验升级为三级——系统 minisign → 自动下载内置静态校验器 → 降级 SHA256 兜底。**工具可得但校验失败即终止**，只有校验工具完全不可得才警告跳过（OpenWrt 无 minisign 软件包场景首次获得完整签名校验能力）。
 - CI 新增 shell 语法门禁（`sh -n install.sh install_server.sh`）。
 
@@ -21,10 +21,10 @@
 ## [未发布]（v26.9.97 候选）
 
 ### 变更
-- **项目完全 NatPunch 化**：module path 由 `ehang.io/nps` 全面改为 `github.com/NekoBoxHQ/NatPunch`（go.mod + 全部 import）；`cmd/nps` 目录改名 `cmd/natpunch`。
-- 清理代码/配置/界面残留 nps 标识：Windows 服务名、服务安装/卸载/启停菜单、HTTP 代理 404 页、桥接证书 CN、日志路径与文件名（`nps.log`→`natpunch.log`）、`/etc/nps` 兼容路径、默认配置模板等。
-- **legacy 保留**：`lib/crypt` 对旧版 "nps "/"nps:" 前缀快速命令的解析兼容（读取存量客户端配置，删除会导致旧配置失效）。
-- GPLv3 合规声明保留：README/NOTICE/LICENSE 仍注明基于 ehang-io/nps（法律义务），docs/comparison 保留与 nps/frp/ngrok 的对比章节。
+- **项目完全 NatPunch 化**：module path 全面改为 `github.com/NekoBoxHQ/NatPunch`（go.mod + 全部 import）；`cmd` 目录改名 `cmd/natpunch`。
+- 清理代码/配置/界面残留上游标识：Windows 服务名、服务安装/卸载/启停菜单、HTTP 代理 404 页、桥接证书 CN、日志路径与文件名、`/etc` 兼容路径、默认配置模板等。
+- **legacy 移除（v26.9.99）**：`lib/crypt` 删除旧版前缀快速命令的解析兼容（存量客户端以面板重新生成命令即可，无前缀新格式为默认）。
+- GPLv3 合规声明保留于 LICENSE / NOTICE（法律义务），docs/comparison 保留同类工具对比。
 
 ### 工程化 / 依赖 / 合规 / 文档
 - CI 门禁：`check`（vet / go test / govulncheck / golangci-lint）→ `integration`（mux，Docker+tc，缺失自动跳过）→ `build`（linux amd64/arm64/armv7/mipsle × server/client 共 8 组合，产物架构自检）→ `release`（SHA256SUMS + minisign 签名 + 发布说明带 GPL 声明）。go-version 1.26。
@@ -34,7 +34,7 @@
 - 构建矩阵补 armv7/mipsle；install_server.sh / install.sh 未知架构显式报错。
 - 版本号一致：`lib/version.VERSION` 默认 `(dev)`，发布由 -ldflags 注入 tag。
 - 文档体系：docs/（architecture、config-reference、deploy、security-hardening、comparison）、CHANGELOG、SECURITY、CONTRIBUTING、Makefile。
-- GPLv3 声明式合规：README 顶部声明派生自 ehang-io/nps、LICENSE 补版权行、新增 NOTICE。
+- GPLv3 声明式合规：README 顶部声明派生自上游、LICENSE 补版权行、新增 NOTICE。
 - README 措辞："静默管理/免凭据 SSH" 调整为"自动化运维管理/授权终端 + 审计日志"，新增 AUP 段落。
 - 终端审计日志：`TERMINAL AUDIT`（操作人 / 时间 / 目标客户端 / 来源 IP）。
 
@@ -68,4 +68,4 @@
 - 安装脚本密码强制输入；发布物 SHA256SUMS。
 
 ## 基线（commit 24cb16c）
-- 上游 ehang-io/nps 全量导入（硬分叉基线）。
+- 上游全量导入（硬分叉基线）。

@@ -124,7 +124,7 @@ is_running() {
     case "$CMD" in *"$BIN"*) return 0 ;; esac
     return 1
 }
-find_all_nps() {
+find_all_natpunch() {
     if [ -f "$PID_FILE" ]; then
         p=$(cat "$PID_FILE" 2>/dev/null)
         case "$p" in ''|*[!0-9]*) ;; *) [ -d "/proc/$p" ] && echo "$p" ;; esac
@@ -152,7 +152,7 @@ kill_one() {
     kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
 }
 kill_all() {
-    LIST=$(find_all_nps | sort -u)
+    LIST=$(find_all_natpunch | sort -u)
     [ -n "${LIST:-}" ] || return 0
     for p in $LIST; do
         [ "$p" = "$$" ] && continue
