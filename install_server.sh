@@ -389,7 +389,38 @@ upgrade() {
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
     start
+    # 升级成功后才清理旧备份（失败/回滚路径不清理，保证可回滚）
+    cleanup_old_backups
     log "升级完成，当前版本: ${TARGET_VER:-最新版}"
+}
+# ================= 备份清理 =================
+# 升级/改密会累积 natpunch.bak.* 与 natpunch.conf.bak.* 备份，
+# 每次升级后只保留最新一份，避免历史备份无限累积。
+clean_backups() {
+    PRE="$1"; DESC="$2"
+    LIST=""
+    for f in "$PRE".bak.*; do
+        [ -e "$f" ] || continue
+        LIST="$LIST $f"
+    done
+    [ -z "$LIST" ] && return 0
+    # 时间戳 %Y%m%d%H%M%S 定长，字典序即时间序，取最后一个保留
+    # shellcheck disable=SC2086（LIST 为 glob 展开结果，路径不含空格）
+    set -- $(printf '%s\n' $LIST | sort)
+    N=$#
+    DEL=0
+    i=1
+    for f in "$@"; do
+        if [ "$i" -lt "$N" ]; then
+            rm -f "$f" 2>/dev/null && DEL=$((DEL+1))
+        fi
+        i=$((i+1))
+    done
+    [ "$DEL" -gt 0 ] && info "$DESC：已清理 $DEL 份旧备份，仅保留最新"
+}
+cleanup_old_backups() {
+    clean_backups "$BIN"  "二进制备份"
+    clean_backups "$CONF" "面板配置备份"
 }
 # ================= 启停 =================
 start() {
