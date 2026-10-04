@@ -25,7 +25,7 @@
 | Web 面板 | `web/` | beego 控制器 + 视图；客户端/隧道/流量/系统信息管理，SSH 终端（WebSocket） |
 | 桥接服务 bridge | `bridge/` | 客户端注册、鉴权（vkey）、版本握手、隧道建连（SendLinkInfo）、心跳 |
 | 隧道代理 | `server/proxy/` | tcp/udp/http(s)/socks5/p2p 协议代理；连接数/流量/带宽限制 |
-| 多路复用 mux | `lib/nps_mux/` | 单条桥接连接上复用多条逻辑连接（connStatusOkCh/FailCh 事件、优先队列） |
+| 多路复用 mux | `lib/natpunch_mux/` | 单条桥接连接上复用多条逻辑连接（connStatusOkCh/FailCh 事件、优先队列） |
 | 客户端 | `client/` | 注册、重连、本地监听（socks5/p2p/secret）、健康检查 |
 | 密码学 | `lib/crypt/` | 隧道 TLS（三态指纹）、证书持久化、随机密钥（crypto/rand） |
 | 安装/守护 | `lib/install/` `lib/daemon/` | 服务注册、升级（SHA256 强制校验 + minisign 分级）、kill 安全封装 |

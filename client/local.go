@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/NekoBoxHQ/NatPunch/lib/nps_mux"
+	"github.com/NekoBoxHQ/NatPunch/lib/natpunch_mux"
 	"errors"
 	"net"
 	"net/http"
@@ -22,7 +22,7 @@ import (
 var (
 	LocalServer   []*net.TCPListener
 	udpConn       net.Conn
-	muxSession    *nps_mux.Mux
+	muxSession    *natpunch_mux.Mux
 	fileServer    []*http.Server
 	p2pNetBridge  *p2pBridge
 	lock          sync.RWMutex
@@ -73,7 +73,7 @@ func startLocalFileServer(config *config.CommonConfig, t *file.Tunnel, vkey stri
 	}
 	logs.Info("start local file system, local path %s, strip prefix %s ,remote port %s ", t.LocalPath, t.StripPre, t.Ports)
 	fileServer = append(fileServer, srv)
-	listener := nps_mux.NewMux(remoteConn.Conn, common.CONN_TCP, config.DisconnectTime)
+	listener := natpunch_mux.NewMux(remoteConn.Conn, common.CONN_TCP, config.DisconnectTime)
 	logs.Error(srv.Serve(listener))
 }
 
@@ -214,6 +214,6 @@ func newUdpConn(localAddr string, config *config.CommonConfig, l *config.LocalSe
 	logs.Trace("successful create a connection with server", remoteAddress)
 	conn.SetUdpSession(udpTunnel)
 	udpConn = udpTunnel
-	muxSession = nps_mux.NewMux(udpConn, "kcp", config.DisconnectTime)
+	muxSession = natpunch_mux.NewMux(udpConn, "kcp", config.DisconnectTime)
 	p2pNetBridge = &p2pBridge{}
 }

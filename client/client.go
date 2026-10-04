@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/NekoBoxHQ/NatPunch/lib/nps_mux"
+	"github.com/NekoBoxHQ/NatPunch/lib/natpunch_mux"
 	"github.com/pires/go-proxyproto"
 
 	"github.com/astaxie/beego/logs"
@@ -36,7 +36,7 @@ type TRPClient struct {
 	proxyUrl       string
 	vKey           string
 	p2pAddr        map[string]string
-	tunnel         *nps_mux.Mux
+	tunnel         *natpunch_mux.Mux
 	signal         *conn.Conn
 	ticker         *time.Ticker
 	cnf            *config.Config
@@ -222,7 +222,7 @@ func (s *TRPClient) newUdpConn(localAddr, rAddr string, md5Password string) {
 			conn.SetUdpSession(udpTunnel)
 			s.logTrace("successful connection with client ,address %s", udpTunnel.RemoteAddr().String())
 			//read link info from remote
-			conn.Accept(nps_mux.NewMux(udpTunnel, s.bridgeConnType, s.disconnectTime), func(c net.Conn) {
+			conn.Accept(natpunch_mux.NewMux(udpTunnel, s.bridgeConnType, s.disconnectTime), func(c net.Conn) {
 				go s.handleChan(c)
 			})
 			break
@@ -240,7 +240,7 @@ func (s *TRPClient) newChan() {
 		s.Close()
 		return
 	}
-	s.tunnel = nps_mux.NewMux(tunnel.Conn, s.bridgeConnType, s.disconnectTime)
+	s.tunnel = natpunch_mux.NewMux(tunnel.Conn, s.bridgeConnType, s.disconnectTime)
 	for {
 		src, err := s.tunnel.Accept()
 		if err != nil {

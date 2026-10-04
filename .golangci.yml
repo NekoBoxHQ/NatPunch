@@ -15,7 +15,7 @@ linters:
 issues:
   exclude-rules:
     # 集成测试（build tag 隔离，默认不编译）；保留文件级规则避免误报
-    - path: lib/nps_mux/mux_test.go
+    - path: lib/natpunch_mux/mux_test.go
       linters:
         - staticcheck
     # SA6002：[]byte 池化传值属常见惯例（避免分配的建议性提示），非缺陷

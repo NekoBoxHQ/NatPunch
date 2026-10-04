@@ -1,4 +1,4 @@
-package nps_mux
+package natpunch_mux
 
 import (
 	"encoding/binary"

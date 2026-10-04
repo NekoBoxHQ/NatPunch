@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package nps_mux
+package natpunch_mux
 
 import (
 	"net"

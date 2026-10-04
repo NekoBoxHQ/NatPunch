@@ -25,7 +25,7 @@ test-race:
 	$(GO) test -race ./...
 
 integration:
-	$(GO) test -tags integration ./lib/nps_mux/ -timeout 20m
+	$(GO) test -tags integration ./lib/natpunch_mux/ -timeout 20m
 
 lint:
 	golangci-lint run

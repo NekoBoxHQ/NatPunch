@@ -2,7 +2,7 @@ package bridge
 
 import (
 	"crypto/tls"
-	"github.com/NekoBoxHQ/NatPunch/lib/nps_mux"
+	"github.com/NekoBoxHQ/NatPunch/lib/natpunch_mux"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -28,14 +28,14 @@ var ServerTlsEnable bool = false
 
 type Client struct {
 	mu        sync.Mutex // 保护 signal/tunnel/Version 等字段的并发读写
-	tunnel    *nps_mux.Mux
+	tunnel    *natpunch_mux.Mux
 	signal    *conn.Conn
-	file      *nps_mux.Mux
+	file      *natpunch_mux.Mux
 	Version   string
 	retryTime atomic.Int32 // it will be add 1 when ping not ok until to 3 will close the client
 }
 
-func NewClient(t, f *nps_mux.Mux, s *conn.Conn, vs string) *Client {
+func NewClient(t, f *natpunch_mux.Mux, s *conn.Conn, vs string) *Client {
 	return &Client{
 		signal:  s,
 		tunnel:  t,
@@ -328,7 +328,7 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 		go s.GetHealthFromClient(id, c)
 		logs.Info("clientId %d connection succeeded, address:%s ", id, c.Conn.RemoteAddr())
 	case common.WORK_CHAN:
-		muxConn := nps_mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime)
+		muxConn := natpunch_mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime)
 		if v, ok := s.Client.LoadOrStore(id, NewClient(muxConn, nil, nil, vs)); ok {
 			cl := v.(*Client)
 			cl.mu.Lock()
@@ -360,7 +360,7 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 			logs.Error("secret error, failed to match the key successfully")
 		}
 	case common.WORK_FILE:
-		muxConn := nps_mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime)
+		muxConn := natpunch_mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime)
 		if v, ok := s.Client.LoadOrStore(id, NewClient(nil, muxConn, nil, vs)); ok {
 			cl := v.(*Client)
 			cl.mu.Lock()
@@ -439,7 +439,7 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 				}
 			}
 		}
-		var tunnel *nps_mux.Mux
+		var tunnel *natpunch_mux.Mux
 		cl := v.(*Client)
 		cl.mu.Lock()
 		if t != nil && t.Mode == "file" {
