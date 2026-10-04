@@ -25,8 +25,13 @@ import (
 	"unsafe"
 )
 
-// TestMain：前置条件（docker / tc）缺失时整体跳过，避免集成测试在普通环境硬失败（阶段四 F4-1）
+// TestMain：默认跳过集成测试（依赖 docker + tc + NET_ADMIN 网络命名空间）。
+// 需要真实运行容器组网测试时：NP_MUX_INTEGRATION=1 go test -tags integration ./lib/natpunch_mux/ -timeout 20m
 func TestMain(m *testing.M) {
+	if os.Getenv("NP_MUX_INTEGRATION") == "" {
+		fmt.Println("skip integration tests: NP_MUX_INTEGRATION not set (NP_MUX_INTEGRATION=1 to run)")
+		os.Exit(0)
+	}
 	for _, bin := range []string{"docker", "tc"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			fmt.Printf("skip integration tests: %s not found\n", bin)

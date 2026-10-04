@@ -852,13 +852,14 @@ if [ -n "${1:-}" ]; then
 fi
 while :; do
     show_menu
-    read CHOICE
+    if ! read -r CHOICE; then echo "已退出"; exit 0; fi
     case "${CHOICE:-}" in
         1) do_install ;; 2) do_start ;; 3) do_stop ;; 4) do_restart ;; 5) do_status ;;
         6) do_passwd ;; 7) do_upgrade ;; 8) do_uninstall ;; 0) echo "已退出"; exit 0 ;;
+        '') ;;  # 空回车：直接重显菜单，不报"无效选项"
         *) echo "无效选项，请重新输入" ;;
     esac
     echo ""
     printf "按回车键返回菜单..."
-    read dummy
+    read -r dummy || exit 0
 done
