@@ -26,8 +26,10 @@ type conn struct {
 
 func NewConn(connId int32, mux *Mux) *conn {
 	c := &conn{
-		connStatusOkCh:   make(chan struct{}),
-		connStatusFailCh: make(chan struct{}),
+		// 有缓冲：发送方（readSession）不会被无人接收的 connStatusOk/Fail 阻塞，
+		// 否则单个连接创建超时会导致该 mux 的全部隧道停摆（阶段三 #1）
+		connStatusOkCh:   make(chan struct{}, 1),
+		connStatusFailCh: make(chan struct{}, 1),
 		connId:           connId,
 		receiveWindow:    new(receiveWindow),
 		sendWindow:       new(sendWindow),

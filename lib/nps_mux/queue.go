@@ -18,7 +18,11 @@ type priorityQueue struct {
 	starving     uint8
 	stop         bool
 	cond         *sync.Cond
+	length       int64 // 当前排队元素数（原子）；0 表示未启用上限
+	maxLength    int64 // 排队上限，防止单客户端打爆服务端内存（阶段三 #2）
 }
+
+var errQueueOverflow = errors.New("mux write queue overflow")
 
 func (Self *priorityQueue) New() {
 	Self.highestChain = new(bufChain)
@@ -29,12 +33,25 @@ func (Self *priorityQueue) New() {
 	Self.lowestChain.new(256)
 	locker := new(sync.Mutex)
 	Self.cond = sync.NewCond(locker)
+	Self.maxLength = 4096 // 宽松默认：4096 个包（数据面 1 包通常 ≤32KB），可覆盖绝大多数隧道吞吐
 }
 
-func (Self *priorityQueue) Push(packager *muxPackager) {
+// Push 入队；队列达到上限时返回错误（调用方应关闭 mux 并打独立日志）
+func (Self *priorityQueue) Push(packager *muxPackager) error {
+	if Self.maxLength > 0 {
+		for {
+			cur := atomic.LoadInt64(&Self.length)
+			if cur >= Self.maxLength {
+				return errQueueOverflow
+			}
+			if atomic.CompareAndSwapInt64(&Self.length, cur, cur+1) {
+				break
+			}
+		}
+	}
 	Self.push(packager)
 	Self.cond.Broadcast()
-	return
+	return nil
 }
 
 func (Self *priorityQueue) push(packager *muxPackager) {
@@ -86,6 +103,7 @@ func (Self *priorityQueue) Pop() (packager *muxPackager) {
 func (Self *priorityQueue) TryPop() (packager *muxPackager) {
 	ptr, ok := Self.highestChain.popTail()
 	if ok {
+		atomic.AddInt64(&Self.length, -1)
 		packager = (*muxPackager)(ptr)
 		return
 	}
@@ -93,6 +111,7 @@ func (Self *priorityQueue) TryPop() (packager *muxPackager) {
 		// not pop too much, lowestChain will wait too long
 		ptr, ok = Self.middleChain.popTail()
 		if ok {
+			atomic.AddInt64(&Self.length, -1)
 			packager = (*muxPackager)(ptr)
 			Self.starving++
 			return
@@ -100,6 +119,7 @@ func (Self *priorityQueue) TryPop() (packager *muxPackager) {
 	}
 	ptr, ok = Self.lowestChain.popTail()
 	if ok {
+		atomic.AddInt64(&Self.length, -1)
 		packager = (*muxPackager)(ptr)
 		if Self.starving > 0 {
 			Self.starving = Self.starving / 2
@@ -109,6 +129,7 @@ func (Self *priorityQueue) TryPop() (packager *muxPackager) {
 	if Self.starving > 0 {
 		ptr, ok = Self.middleChain.popTail()
 		if ok {
+			atomic.AddInt64(&Self.length, -1)
 			packager = (*muxPackager)(ptr)
 			Self.starving++
 			return

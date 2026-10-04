@@ -316,7 +316,8 @@ func (s *Conn) WriteChan() (int, error) {
 
 // get task or host result of add
 func (s *Conn) GetAddStatus() (b bool) {
-	binary.Read(s.Conn, binary.LittleEndian, &b)
+	// 读取失败返回零值 false，调用方走 fail 分支（fail-closed），无需额外处理（阶段三 #17）
+	_ = binary.Read(s.Conn, binary.LittleEndian, &b)
 	return
 }
 

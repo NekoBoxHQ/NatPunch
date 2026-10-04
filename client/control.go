@@ -110,8 +110,13 @@ var errAdd = errors.New("The server returned an error, which port or host may ha
 func StartFromFile(path string) {
 	first := true
 	cnf, err := config.NewConfig(path)
-	if err != nil || cnf.CommonConfig == nil {
+	if err != nil {
 		logs.Error("Config file %s loading error %s", path, err.Error())
+		os.Exit(0)
+	}
+	// G5：err == nil 但缺 [common] 段时不得解引用 err（阶段三）
+	if cnf.CommonConfig == nil {
+		logs.Error("Config file %s: missing [common] section", path)
 		os.Exit(0)
 	}
 	logs.Info("Loading configuration file %s successfully", path)
@@ -123,6 +128,7 @@ func StartFromFile(path string) {
 		os.Exit(0)
 	}
 	logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), GetTlsEnable())
+	var c *conn.Conn // 在 re 标签前声明：重连循环各处 goto re 时按需关闭旧连接（阶段三 #5）
 re:
 	if first || cnf.CommonConfig.AutoReconnection {
 		if !first {
@@ -133,13 +139,26 @@ re:
 		return
 	}
 	first = false
-	c, err := NewConn(cnf.CommonConfig.Tp, cnf.CommonConfig.VKey, cnf.CommonConfig.Server, common.WORK_CONFIG, cnf.CommonConfig.ProxyUrl)
+	// 重连前显式关闭可能已建立的旧连接，避免每次失败重试泄漏一条（阶段三 #5）
+	if c != nil {
+		c.Close()
+		c = nil
+	}
+	c, err = NewConn(cnf.CommonConfig.Tp, cnf.CommonConfig.VKey, cnf.CommonConfig.Server, common.WORK_CONFIG, cnf.CommonConfig.ProxyUrl)
 	if err != nil {
+		if c != nil {
+			c.Close()
+		}
 		logs.Error(err)
 		goto re
 	}
 	var isPub bool
-	binary.Read(c, binary.LittleEndian, &isPub)
+	if err := binary.Read(c, binary.LittleEndian, &isPub); err != nil {
+		logs.Error("read isPub: %v", err)
+		c.Close()
+		c = nil
+		goto re
+	}
 
 	// get tmp password
 	var b []byte

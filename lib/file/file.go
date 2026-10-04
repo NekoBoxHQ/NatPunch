@@ -281,7 +281,8 @@ func loadSyncMapFromFileWithSingleJson(filePath string, f func(value string)) {
 }
 
 func storeSyncMapToFile(m *sync.Map, filePath string) {
-	file, err := os.Create(filePath + ".tmp")
+	// 0600：JSON 库文件含 VerifyKey/WebPassword 等敏感字段（阶段三 #13）
+	file, err := os.OpenFile(filePath+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	// first create a temporary file to store
 	if err != nil {
 		logs.Error("store to file: create tmp file error: %v", err)
@@ -346,7 +347,8 @@ func storeSyncMapToFile(m *sync.Map, filePath string) {
 }
 
 func storeGlobalToFile(m *Glob, filePath string) {
-	file, err := os.Create(filePath + ".tmp")
+	// 0600：全局配置含 ServerUrl 等（阶段三 #13）
+	file, err := os.OpenFile(filePath+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	// first create a temporary file to store
 	if err != nil {
 		logs.Error("store global to file: create tmp file error: %v", err)

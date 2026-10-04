@@ -89,12 +89,18 @@ func (s *Client) AddConn() {
 	atomic.AddInt32(&s.NowConn, -1)
 }
 
+// GetConn 尝试占用一个连接名额；check-then-increment 改为原子 CAS，
+// 避免并发下突破 MaxConn 上限（阶段三 #4）
 func (s *Client) GetConn() bool {
-	if s.MaxConn == 0 || int(s.NowConn) < s.MaxConn {
-		s.CutConn()
-		return true
+	for {
+		cur := atomic.LoadInt32(&s.NowConn)
+		if s.MaxConn != 0 && int(cur) >= s.MaxConn {
+			return false
+		}
+		if atomic.CompareAndSwapInt32(&s.NowConn, cur, cur+1) {
+			return true
+		}
 	}
-	return false
 }
 
 func (s *Client) HasTunnel(t *Tunnel) (exist bool) {

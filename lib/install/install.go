@@ -602,7 +602,7 @@ func InstallNps() string {
 		if err := CopyDir(filepath.Join(common.GetAppPath(), "conf"), filepath.Join(path, "conf")); err != nil {
 			log.Fatalln(err)
 		}
-		chMod(filepath.Join(path, "conf"), 0766)
+		chMod(filepath.Join(path, "conf"), 0755)
 	}
 	binPath, err := copyStaticFile(common.GetAppPath(), "nps")
 	if err != nil {
@@ -620,7 +620,7 @@ anywhere!`)
 nps.exe start|stop|restart|uninstall|update
 now!`)
 	}
-	chMod(common.GetLogPath(), 0777)
+	chMod(common.GetLogPath(), 0640)
 	return binPath
 }
 
@@ -628,7 +628,7 @@ func InstallNpsToCurrentDir() string {
 	path := common.GetAppPath()
 	log.Println("install path:" + path)
 	log.Println("install ok!")
-	chMod(filepath.Join(path, "nps.log"), 0777)
+	chMod(filepath.Join(path, "nps.log"), 0640)
 
 	if !common.IsWindows() {
 		path = filepath.Join(path, "nps")
@@ -674,7 +674,8 @@ func CopyDir(srcPath string, destPath string) error {
 			log.Println("copy file ::" + path + " to " + destNewPath)
 			copyFile(path, destNewPath)
 			if !common.IsWindows() {
-				chMod(destNewPath, 0766)
+				// 拷贝的配置文件含 vkey/web_password 等敏感项：0640（组可读），不再 0766 全局可写（阶段三 #12）
+				chMod(destNewPath, 0640)
 			}
 		}
 		return nil

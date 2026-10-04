@@ -1,8 +1,8 @@
 package connection
 
 import (
+	"errors"
 	"net"
-	"os"
 	"strconv"
 
 	"ehang.io/nps/lib/pmux"
@@ -25,8 +25,9 @@ func InitConnectionService() {
 	if httpPort == bridgePort || httpsPort == bridgePort || webPort == bridgePort {
 		port, err := strconv.Atoi(bridgePort)
 		if err != nil {
-			logs.Error(err)
-			os.Exit(0)
+			// 库代码禁止 os.Exit：端口非法时跳过端口复用，交由各监听器正常报错（阶段三 #15）
+			logs.Error("bridge_port 解析失败，跳过端口复用: %v", err)
+			return
 		}
 		pMux = pmux.NewPortMux(port, beego.AppConfig.String("web_host"))
 	}
@@ -40,7 +41,11 @@ func GetBridgeListener(tp string) (net.Listener, error) {
 		return nil, err
 	}
 	if pMux != nil {
-		return pMux.GetClientListener(), nil
+		l := pMux.GetClientListener()
+		if l == nil {
+			return nil, errors.New("pmux client listener not ready")
+		}
+		return l, nil
 	}
 	return net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(beego.AppConfig.String("bridge_ip")), Port: p})
 }
@@ -48,7 +53,11 @@ func GetBridgeListener(tp string) (net.Listener, error) {
 func GetHttpListener() (net.Listener, error) {
 	if pMux != nil && httpPort == bridgePort {
 		logs.Info("start http listener, port is", bridgePort)
-		return pMux.GetHttpListener(), nil
+		l := pMux.GetHttpListener()
+		if l == nil {
+			return nil, errors.New("pmux http listener not ready")
+		}
+		return l, nil
 	}
 	logs.Info("start http listener, port is", httpPort)
 	return getTcpListener(beego.AppConfig.String("http_proxy_ip"), httpPort)
@@ -57,7 +66,11 @@ func GetHttpListener() (net.Listener, error) {
 func GetHttpsListener() (net.Listener, error) {
 	if pMux != nil && httpsPort == bridgePort {
 		logs.Info("start https listener, port is", bridgePort)
-		return pMux.GetHttpsListener(), nil
+		l := pMux.GetHttpsListener()
+		if l == nil {
+			return nil, errors.New("pmux https listener not ready")
+		}
+		return l, nil
 	}
 	logs.Info("start https listener, port is", httpsPort)
 	return getTcpListener(beego.AppConfig.String("http_proxy_ip"), httpsPort)
@@ -66,7 +79,11 @@ func GetHttpsListener() (net.Listener, error) {
 func GetWebManagerListener() (net.Listener, error) {
 	if pMux != nil && webPort == bridgePort {
 		logs.Info("Web management start, access port is", bridgePort)
-		return pMux.GetManagerListener(), nil
+		l := pMux.GetManagerListener()
+		if l == nil {
+			return nil, errors.New("pmux manager listener not ready")
+		}
+		return l, nil
 	}
 	logs.Info("web management start, access port is", webPort)
 	return getTcpListener(beego.AppConfig.String("web_ip"), webPort)
@@ -75,8 +92,8 @@ func GetWebManagerListener() (net.Listener, error) {
 func getTcpListener(ip, p string) (net.Listener, error) {
 	port, err := strconv.Atoi(p)
 	if err != nil {
-		logs.Error(err)
-		os.Exit(0)
+		logs.Error("listen port 解析失败: %v", err)
+		return nil, err
 	}
 	if ip == "" {
 		ip = "0.0.0.0"

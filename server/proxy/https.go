@@ -207,6 +207,11 @@ func (https *HttpsServer) cert(host *file.Host, c net.Conn, rb []byte, certFileU
 			// 证书已经存在，直接加载
 			if v, ok := https.httpsListenerMap.Load(certFileUrl); ok {
 				l = v.(*HttpsListener)
+			} else {
+				// map miss（防御）：重建 listener，避免 nil 解引用（阶段三 #3）
+				l = NewHttpsListener(https.listener)
+				https.NewHttps(l, certFileUrl, keyFileUrl)
+				https.httpsListenerMap.Store(certFileUrl, l)
 			}
 		} else {
 			// 证书修改过，重新加载证书
@@ -232,7 +237,12 @@ func (https *HttpsServer) cert(host *file.Host, c net.Conn, rb []byte, certFileU
 
 	acceptConn := conn.NewConn(c)
 	acceptConn.Rb = rb
-	l.acceptConn <- acceptConn
+	select {
+	case l.acceptConn <- acceptConn:
+	case <-l.closeCh:
+		// listener 已关闭：丢弃连接，避免向已关闭的 channel 发送 panic（阶段三 #3）
+		c.Close()
+	}
 }
 
 // handle the https which is just proxy to other client
@@ -308,24 +318,34 @@ func (https *HttpsServer) handleHttps(c net.Conn) {
 type HttpsListener struct {
 	acceptConn     chan *conn.Conn
 	parentListener net.Listener
+	closeCh        chan struct{}
+	closeOnce      sync.Once
 }
 
 // https listener
 func NewHttpsListener(l net.Listener) *HttpsListener {
-	return &HttpsListener{parentListener: l, acceptConn: make(chan *conn.Conn)}
+	// 有缓冲：避免 Accept 未就绪时 send 阻塞泄漏 goroutine（阶段三 #3）
+	return &HttpsListener{parentListener: l, acceptConn: make(chan *conn.Conn, 8), closeCh: make(chan struct{})}
 }
 
 // accept
 func (httpsListener *HttpsListener) Accept() (net.Conn, error) {
-	httpsConn := <-httpsListener.acceptConn
-	if httpsConn == nil {
-		return nil, errors.New("get connection error")
+	select {
+	case httpsConn := <-httpsListener.acceptConn:
+		if httpsConn == nil {
+			return nil, errors.New("get connection error")
+		}
+		return httpsConn, nil
+	case <-httpsListener.closeCh:
+		return nil, errors.New("https listener closed")
 	}
-	return httpsConn, nil
 }
 
-// close
+// close 真正关闭：通知阻塞中的 Accept 退出（阶段三 #3）
 func (httpsListener *HttpsListener) Close() error {
+	httpsListener.closeOnce.Do(func() {
+		close(httpsListener.closeCh)
+	})
 	return nil
 }
 

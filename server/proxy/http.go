@@ -152,7 +152,19 @@ func (s *httpServer) handleHttp(c *conn.Conn, r *http.Request, br *bufio.Reader)
 		isReset    bool
 		wg         sync.WaitGroup
 		remoteAddr string
+		// countedClient 记录当前已占用连接数的客户端（阶段三 #7）：
+		// keep-alive 换 host 时，reset 标签处 host 已被更新为新值，旧的 defer 释放逻辑会
+		// 释放"新 host 未占用的计数"（新 host 变负值）、且旧 host 的计数永不释放（旧 client 永久 +1）。
+		// 改为显式登记：releaseCounted 释放上一轮登记的占用，defer 保证函数退出时余额清零。
+		countedClient *file.Client
 	)
+	releaseCounted := func() {
+		if countedClient != nil {
+			countedClient.AddConn()
+			countedClient = nil
+		}
+	}
+	defer releaseCounted()
 	defer func() {
 		if connClient != nil {
 			connClient.Close()
@@ -163,9 +175,8 @@ func (s *httpServer) handleHttp(c *conn.Conn, r *http.Request, br *bufio.Reader)
 	}()
 	firstReq := true
 reset:
-	if isReset {
-		host.Client.AddConn()
-	}
+	// 换 host 重进循环：释放上一轮占用的连接数（阶段三 #7）
+	releaseCounted()
 
 	remoteAddr = strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
 	if len(remoteAddr) == 0 {
@@ -189,9 +200,7 @@ reset:
 		c.Close()
 		return
 	}
-	if !isReset {
-		defer host.Client.AddConn()
-	}
+	countedClient = host.Client // 登记占用，由 releaseCounted 统一释放（阶段三 #7）
 	if err = s.auth(r, c, host.Client.Cnf.U, host.Client.Cnf.P); err != nil {
 		logs.Warn("auth error", err, r.RemoteAddr)
 		return
@@ -216,14 +225,15 @@ reset:
 					if pass == host.Client.IpWhitePass {
 						host.Client.IpWhiteList = append(host.Client.IpWhiteList, ip)
 						file.GetDb().UpdateClient(host.Client)
-						logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s] password [%s]", host.Client.VerifyKey, ip, pass)
+						logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
 						jsonBytes, err = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
 					} else {
-						logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s] password [%s]", host.Client.VerifyKey, ip, pass)
+						// 不打印密码（阶段三 #18 日志脱敏）
+						logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
 						jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
 					}
 				} else {
-					logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
+					logs.Error("客户端IP白名单认证授权参数错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
 					jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "参数错误"})
 				}
 				s.errorContent = jsonBytes

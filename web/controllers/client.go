@@ -140,7 +140,37 @@ func (s *ClientController) GetClient() {
 			data["code"] = 0
 		} else {
 			data["code"] = 1
-			data["data"] = c
+			// DTO 脱敏：绝不下发 WebPassword（阶段三 #18）；VerifyKey 为客户端连接凭证，
+			// 对非管理员隐藏（管理员编辑页需要展示/下发）。
+			// 显式字段映射，避免整体拷贝内嵌 sync.RWMutex 触发 lock copy 告警。
+			admin, _ := s.GetSession("isAdmin").(bool)
+			vkey := c.VerifyKey
+			if !admin {
+				vkey = ""
+			}
+			// 字段名与 Client struct 序列化一致（前端 bootstrap-table 使用 Go 字段名）
+			data["data"] = map[string]interface{}{
+				"Id":                c.Id,
+				"VerifyKey":         vkey,
+				"Addr":              c.Addr,
+				"LocalAddr":         c.LocalAddr,
+				"Remark":            c.Remark,
+				"Status":            c.Status,
+				"IsConnect":         c.IsConnect,
+				"RateLimit":         c.RateLimit,
+				"Flow":              c.Flow,
+				"WebUserName":       c.WebUserName,
+				"ConfigConnAllow":   c.ConfigConnAllow,
+				"MaxConn":           c.MaxConn,
+				"MaxTunnelNum":      c.MaxTunnelNum,
+				"Version":           c.Version,
+				"BlackIpList":       c.BlackIpList,
+				"CreateTime":        c.CreateTime,
+				"LastOnlineTime":    c.LastOnlineTime,
+				"IpWhite":           c.IpWhite,
+				"IpWhitePass":       c.IpWhitePass,
+				"IpWhiteList":       c.IpWhiteList,
+			}
 		}
 		s.Data["json"] = data
 		s.ServeJSON()

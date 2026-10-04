@@ -477,5 +477,9 @@ func NewSock5ModeServer(bridge NetBridge, task *file.Tunnel) *Sock5ModeServer {
 
 // close
 func (s *Sock5ModeServer) Close() error {
+	// 建隧道后立即删除时 Start 尚未执行、listener 为 nil（阶段三 G4）
+	if s.listener == nil {
+		return nil
+	}
 	return s.listener.Close()
 }

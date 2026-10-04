@@ -74,6 +74,10 @@ func (s *TunnelModeServer) Start() error {
 
 // close
 func (s *TunnelModeServer) Close() error {
+	// 建隧道后立即删除时 Start 尚未执行、listener 为 nil（阶段三 G4）
+	if s.listener == nil {
+		return nil
+	}
 	return s.listener.Close()
 }
 

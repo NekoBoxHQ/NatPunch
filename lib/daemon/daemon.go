@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -46,20 +47,39 @@ func InitDaemon(f string, runPath string, pidPath string) {
 	}
 }
 
+// readPidFile 统一读取并校验 pid 文件：TrimSpace → Atoi → 正整数校验。
+// 之后的所有 kill/status 均以纯数字参数直传 exec（不经 shell 拼接），杜绝命令注入（阶段三 #14）。
+func readPidFile(pidPath, f string) (int, error) {
+	b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
+	if err != nil {
+		return 0, fmt.Errorf("pid file does not exist: %w", err)
+	}
+	s := strings.TrimSpace(string(b))
+	pid, err := strconv.Atoi(s)
+	if err != nil || pid <= 0 {
+		return 0, fmt.Errorf("invalid pid file content: %q", s)
+	}
+	return pid, nil
+}
+
+// killByPid 以参数数组直传 kill 命令（不经 shell），pid 已由 readPidFile 校验为纯数字。
+func killByPid(pid int, sig string) error {
+	return exec.Command("kill", sig, strconv.Itoa(pid)).Run()
+}
+
 func reload(f string, pidPath string) {
 	if f == "nps" && !common.IsWindows() && !status(f, pidPath) {
 		log.Println("reload fail")
 		return
 	}
-	var c *exec.Cmd
-	var err error
-	b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
-	if err == nil {
-		c = exec.Command("/bin/bash", "-c", `kill -30 `+string(b))
-	} else {
-		log.Fatalln("reload error,pid file does not exist")
+	if common.IsWindows() {
+		log.Fatalln("reload is not supported on windows")
 	}
-	if c.Run() == nil {
+	pid, err := readPidFile(pidPath, f)
+	if err != nil {
+		log.Fatalln("reload error,", err)
+	}
+	if killByPid(pid, "-30") == nil {
 		log.Println("reload success")
 	} else {
 		log.Println("reload fail")
@@ -67,20 +87,23 @@ func reload(f string, pidPath string) {
 }
 
 func status(f string, pidPath string) bool {
-	var cmd *exec.Cmd
-	b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
-	if err == nil {
-		if !common.IsWindows() {
-			cmd = exec.Command("/bin/sh", "-c", "ps -ax | awk '{ print $1 }' | grep "+string(b))
-		} else {
-			cmd = exec.Command("tasklist")
+	if common.IsWindows() {
+		b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
+		if err != nil {
+			return false
 		}
-		out, _ := cmd.Output()
-		if strings.Index(string(out), string(b)) > -1 {
+		out, _ := exec.Command("tasklist").Output()
+		if strings.Index(string(out), strings.TrimSpace(string(b))) > -1 {
 			return true
 		}
+		return false
 	}
-	return false
+	pid, err := readPidFile(pidPath, f)
+	if err != nil {
+		return false
+	}
+	// kill -0 仅探测进程是否存在，不发送信号
+	return killByPid(pid, "-0") == nil
 }
 
 func start(osArgs []string, f string, pidPath, runPath string) {
@@ -110,12 +133,17 @@ func stop(f string, p string, pidPath string) {
 		p := strings.Split(p, `\`)
 		c = exec.Command("taskkill", "/F", "/IM", p[len(p)-1])
 	} else {
-		b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
-		if err == nil {
-			c = exec.Command("/bin/bash", "-c", `kill -9 `+string(b))
-		} else {
-			log.Fatalln("stop error,pid file does not exist")
+		pid, err := readPidFile(pidPath, f)
+		if err != nil {
+			log.Fatalln("stop error,", err)
 		}
+		err = killByPid(pid, "-9")
+		if err != nil {
+			log.Println("stop error,", err)
+		} else {
+			log.Println("stop ok")
+		}
+		return
 	}
 	err = c.Run()
 	if err != nil {

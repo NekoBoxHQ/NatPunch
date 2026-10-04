@@ -21,6 +21,7 @@ import (
 	"ehang.io/nps/lib/install"
 	"ehang.io/nps/lib/version"
 	"ehang.io/nps/server/connection"
+	"ehang.io/nps/server/proxy"
 	"ehang.io/nps/server/tool"
 	"ehang.io/nps/web/routers"
 
@@ -461,6 +462,10 @@ func run() {
 	if err != nil {
 		timeout = 60
 	}
+	// 全局连接数上限（阶段三 #4，0=不限）
+	if maxConn, err := beego.AppConfig.Int64("max_global_conn"); err == nil {
+		proxy.SetMaxGlobalConn(maxConn)
+	}
 	go server.StartNewServer(bridgePort, task, beego.AppConfig.String("bridge_type"), timeout)
 }
 
@@ -499,6 +504,9 @@ public_vkey=123
 # 客户端/隧道数量上限（0=不限，沿用存量语义；推荐 max_clients=100、max_tunnels_per_client=20，见文档）
 max_clients=0
 max_tunnels_per_client=0
+
+# 全局并发连接数上限（0=不限，沿用存量语义；推荐 10000，见文档）
+max_global_conn=0
 
 flow_store_interval=1
 

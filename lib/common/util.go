@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"ehang.io/nps/lib/crypt"
 )
@@ -438,18 +439,26 @@ func GeSynctMapLen(m *sync.Map) int {
 }
 
 var externalIp string
+var externalIpOnce sync.Once
 
+// GetExternalIp 获取公网出口 IP：优先 HTTPS 源（阶段三 #16），失败回退 HTTP；
+// 结果由 sync.Once 缓存，避免无锁全局读写与重复外呼。
 func GetExternalIp() string {
-	if externalIp != "" {
-		return externalIp
-	}
-	resp, err := http.Get("http://myexternalip.com/raw")
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	content, _ := ioutil.ReadAll(resp.Body)
-	externalIp = string(content)
+	externalIpOnce.Do(func() {
+		client := &http.Client{Timeout: 5 * time.Second}
+		for _, u := range []string{"https://api.ipify.org", "https://myexternalip.com/raw", "http://myexternalip.com/raw"} {
+			resp, err := client.Get(u)
+			if err != nil {
+				continue
+			}
+			content, _ := ioutil.ReadAll(io.LimitReader(resp.Body, 1024))
+			resp.Body.Close()
+			if ip := strings.TrimSpace(string(content)); ip != "" {
+				externalIp = ip
+				return
+			}
+		}
+	})
 	return externalIp
 }
 

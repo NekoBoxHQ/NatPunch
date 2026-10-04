@@ -107,6 +107,13 @@ func in(target string, str_array []string) bool {
 func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
 	rb []byte, tp string, f func(), flow *file.Flow, localProxy bool, task *file.Tunnel, host *file.Host) error {
 
+	// 全局连接数上限（阶段三 #4，max_global_conn=0 不限）
+	if !TryAcquireGlobalConn() {
+		c.Close()
+		return errors.New("global connections exceed the global limit")
+	}
+	defer ReleaseGlobalConn()
+
 	// 判断访问地址是否在全局黑名单内
 	if IsGlobalBlackIp(c.RemoteAddr().String()) {
 		c.Close()

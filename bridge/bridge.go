@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,10 +62,11 @@ func NewTunnel(tunnelPort int, tunnelType string, ipVerify bool, runList *sync.M
 	return &Bridge{
 		TunnelPort:     tunnelPort,
 		tunnelType:     tunnelType,
-		OpenTask:       make(chan *file.Tunnel),
-		CloseTask:      make(chan *file.Tunnel),
-		CloseClient:    make(chan int),
-		SecretChan:     make(chan *conn.Secret),
+		// 有缓冲：避免 DealBridgeTask 忙时生产者（client 消息循环）阻塞（阶段三 G6）
+		OpenTask:       make(chan *file.Tunnel, 128),
+		CloseTask:      make(chan *file.Tunnel, 128),
+		CloseClient:    make(chan int, 128),
+		SecretChan:     make(chan *conn.Secret, 128),
 		ipVerify:       ipVerify,
 		runList:        runList,
 		disconnectTime: disconnectTime,
@@ -85,8 +85,8 @@ func (s *Bridge) StartTunnel() error {
 		go func() {
 			listener, err := connection.GetBridgeListener(s.tunnelType)
 			if err != nil {
-				logs.Error(err)
-				os.Exit(0)
+				// 库代码禁止 os.Exit：监听失败记录错误并退出本 goroutine（阶段三 #15）
+				logs.Error("bridge listener start error: %v", err)
 				return
 			}
 			conn.Accept(listener, func(c net.Conn) {
@@ -103,8 +103,8 @@ func (s *Bridge) StartTunnel() error {
 				logs.Info("tls server start, the bridge type is %s, the tls bridge port is %d", "tcp", tlsBridgePort)
 				tlsListener, tlsErr := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(beego.AppConfig.String("bridge_ip")), Port: tlsBridgePort})
 				if tlsErr != nil {
-					logs.Error(tlsErr)
-					os.Exit(0)
+					// 库代码禁止 os.Exit：监听失败记录错误并退出本 goroutine（阶段三 #15）
+					logs.Error("tls bridge listener start error: %v", tlsErr)
 					return
 				}
 				conn.Accept(tlsListener, func(c net.Conn) {
@@ -345,7 +345,11 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 			c.Close()
 			return
 		}
-		binary.Write(c, binary.LittleEndian, isPub)
+		if err := binary.Write(c, binary.LittleEndian, isPub); err != nil {
+			logs.Warn("write isPub error: %v", err)
+			c.Close()
+			return
+		}
 		go s.getConfig(c, isPub, client)
 	case common.WORK_REGISTER:
 		go s.register(c)
@@ -385,16 +389,23 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 					return
 				}
 				//向密钥对应的客户端发送与服务端udp建立连接信息，地址，密钥
-				sig.Write([]byte(common.NEW_UDP_CONN))
-				svrAddr := beego.AppConfig.String("p2p_ip") + ":" + beego.AppConfig.String("p2p_port")
-				if err != nil {
-					logs.Warn("get local udp addr error")
+				if _, err := sig.Write([]byte(common.NEW_UDP_CONN)); err != nil {
+					logs.Warn("p2p write NEW_UDP_CONN error: %v", err)
 					return
 				}
-				sig.WriteLenContent([]byte(svrAddr))
-				sig.WriteLenContent(b)
+				svrAddr := beego.AppConfig.String("p2p_ip") + ":" + beego.AppConfig.String("p2p_port")
+				if err := sig.WriteLenContent([]byte(svrAddr)); err != nil {
+					logs.Warn("p2p write svrAddr error: %v", err)
+					return
+				}
+				if err := sig.WriteLenContent(b); err != nil {
+					logs.Warn("p2p write secret error: %v", err)
+					return
+				}
 				//向该请求者发送建立连接请求,服务器地址
-				c.WriteLenContent([]byte(svrAddr))
+				if err := c.WriteLenContent([]byte(svrAddr)); err != nil {
+					logs.Warn("p2p write requester svrAddr error: %v", err)
+				}
 			}
 		}
 	}
@@ -560,7 +571,24 @@ loop:
 				}
 				c.WriteAddOk()
 				c.Write([]byte(client.VerifyKey))
-				s.Client.Store(client.Id, NewClient(nil, nil, nil, ""))
+				// LoadOrStore：不覆盖活跃条目，旧连接（signal/tunnel/file）显式关闭（阶段三 G6）
+				if old, loaded := s.Client.LoadOrStore(client.Id, NewClient(nil, nil, nil, "")); loaded {
+					cl := old.(*Client)
+					cl.mu.Lock()
+					if cl.signal != nil {
+						_ = cl.signal.Close()
+						cl.signal = nil
+					}
+					if cl.tunnel != nil {
+						_ = cl.tunnel.Close()
+						cl.tunnel = nil
+					}
+					if cl.file != nil {
+						_ = cl.file.Close()
+						cl.file = nil
+					}
+					cl.mu.Unlock()
+				}
 			}
 		case common.NEW_HOST:
 			h, err := c.GetHostInfo()

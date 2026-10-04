@@ -44,16 +44,18 @@ func (s *AuthController) IpWhiteAuth() {
 
 	c, err := file.GetDb().GetClientByVkey(vkey)
 	if err != nil {
-		s.Data["json"] = map[string]interface{}{"success": false, "message": "客户端密钥错误"}
+		// 统一错误消息，避免"密钥错误/密码错误"区分构成凭据 oracle（阶段三 #18）
+		s.Data["json"] = map[string]interface{}{"success": false, "message": "认证失败"}
 		s.ServeJSON()
-		logs.Error("客户端IP白名单认证失败,客户端密钥错误:vkey [%s] ip [%s] password [%s]", vkey, ip, password)
+		// 不打印密码（阶段三 #18 日志脱敏）
+		logs.Error("客户端IP白名单认证失败,密钥不存在:vkey [%s] ip [%s]", vkey, ip)
 		return
 	}
 
 	if c.IpWhitePass != password {
-		s.Data["json"] = map[string]interface{}{"success": false, "message": "授权密码错误"}
+		s.Data["json"] = map[string]interface{}{"success": false, "message": "认证失败"}
 		s.ServeJSON()
-		logs.Error("客户端IP白名单认证失败,授权密码错误:vkey [%s] ip [%s] password [%s]", vkey, ip, password)
+		logs.Error("客户端IP白名单认证失败,授权密码错误:vkey [%s] ip [%s]", vkey, ip)
 		return
 	}
 
@@ -73,7 +75,7 @@ func (s *AuthController) IpWhiteAuth() {
 	s.Data["json"] = map[string]interface{}{"success": true, "message": "授权成功"}
 	s.ServeJSON()
 
-	logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s] password [%s]", vkey, ip, password)
+	logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", vkey, ip)
 
 }
 

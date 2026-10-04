@@ -25,7 +25,8 @@ func (pConn *PortConn) Read(b []byte) (n int, err error) {
 		defer func() {
 			pConn.start = pConn.start + len(b)
 		}()
-		return copy(b, pConn.rs), nil
+		// 必须从 pConn.start 偏移处拷贝，否则重复读旧缓冲（阶段三 #19）
+		return copy(b, pConn.rs[pConn.start:]), nil
 	}
 	if pConn.start < len(pConn.rs) {
 		defer func() {

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ehang.io/nps/lib/nps_mux"
@@ -43,6 +44,8 @@ type TRPClient struct {
 	once           sync.Once
 	closeCh        chan struct{} // closed when client is shutting down; stops ping
 	logger         Logger        // 每客户端独立的 logger，未设置时使用全局 logger
+	nowStatus      atomic.Int32  // 连接状态（原包级 NowStatus，收敛为实例字段，阶段三 #6）
+	closeClient    atomic.Bool   // 关闭标记（原包级 CloseClient，阶段三 #6）
 }
 
 // Logger 客户端日志接口，GUI / CLI 均可注入实现
@@ -112,17 +115,19 @@ func (s *TRPClient) IsConnected() bool {
 	return s.signal != nil
 }
 
-var NowStatus int
-var CloseClient bool
+// Status 返回当前连接状态（0=未连接，1=已连接；原包级 NowStatus，阶段三 #6）
+func (s *TRPClient) Status() int {
+	return int(s.nowStatus.Load())
+}
 
 // start
 func (s *TRPClient) Start() {
-	CloseClient = false
+	s.closeClient.Store(false)
 retry:
-	if CloseClient {
+	if s.closeClient.Load() {
 		return
 	}
-	NowStatus = 0
+	s.nowStatus.Store(0)
 	c, err := NewConn(s.bridgeConnType, s.vKey, s.svrAddr, common.WORK_MAIN, s.proxyUrl)
 	if err != nil {
 		s.logError("The connection server failed and will be reconnected in five seconds, error", err.Error())
@@ -144,7 +149,7 @@ retry:
 	if s.cnf != nil && len(s.cnf.Healths) > 0 {
 		go heathCheck(s.cnf.Healths, s.signal)
 	}
-	NowStatus = 1
+	s.nowStatus.Store(1)
 	//msg connection, eg udp
 	s.handleMain()
 }
@@ -493,8 +498,8 @@ func (s *TRPClient) Close() {
 }
 
 func (s *TRPClient) closing() {
-	CloseClient = true
-	NowStatus = 0
+	s.closeClient.Store(true)
+	s.nowStatus.Store(0)
 	// unblock ping; safe: closing runs only once via once.Do
 	select {
 	case <-s.closeCh:
@@ -507,4 +512,5 @@ func (s *TRPClient) closing() {
 	if s.signal != nil {
 		_ = s.signal.Close()
 	}
+	s.signal = nil // 复位：IsConnected 在关闭后返回 false（阶段三 #6）
 }

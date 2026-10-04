@@ -43,6 +43,15 @@ func (u *udpSession) touch() {
 	atomic.StoreInt64(&u.lastActive, time.Now().UnixNano())
 }
 
+// flowExceeded 检查客户端流量是否超限（UDP 数据面复查，阶段三 #10；
+// TCP/SOCKS5 走 CopyBuffer 已复查，UDP 的转发路径不经过 CopyBuffer，需在此补查）
+func flowExceeded(client *file.Client) bool {
+	if client == nil || client.Flow == nil {
+		return false
+	}
+	return client.Flow.FlowLimit > 0 && (client.Flow.FlowLimit<<20) < (client.Flow.ExportFlow+client.Flow.InletFlow)
+}
+
 type UdpModeServer struct {
 	BaseServer
 	addrMap   sync.Map
@@ -166,6 +175,11 @@ func (s *UdpModeServer) dispatch(key string, sess *udpSession, data []byte, n in
 	// 公网 UDP 数据 -> 隧道(客户端) = 入口流量
 	s.task.Client.Flow.Add(int64(n), 0)
 	s.task.Flow.Add(int64(n), 0)
+	// 数据面复查流量上限（阶段三 #10）
+	if flowExceeded(s.task.Client) {
+		logs.Warn("udp client id %d flow exceeded, close session %s", s.task.Client.Id, key)
+		s.removeSession(key, sess)
+	}
 }
 
 // runSession 由占位赢家执行：建立到 npc 的 stream、发送首包、运行下行读循环。
@@ -215,6 +229,11 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 	// 公网 UDP 首包 -> 隧道(客户端) = 入口流量
 	s.task.Client.Flow.Add(int64(n), 0)
 	s.task.Flow.Add(int64(n), 0)
+	// 数据面复查流量上限（阶段三 #10）
+	if flowExceeded(s.task.Client) {
+		logs.Warn("udp client id %d flow exceeded, close session %s", s.task.Client.Id, key)
+		return
+	}
 
 	// 下行读循环
 	rbuf := common.BufPoolUdp.Get().([]byte)
@@ -237,6 +256,11 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 		// 隧道(客户端)数据 -> 公网 UDP 用户 = 出口流量
 		s.task.Client.Flow.Add(0, int64(rn))
 		s.task.Flow.Add(0, int64(rn))
+		// 数据面复查流量上限（阶段三 #10）
+		if flowExceeded(s.task.Client) {
+			logs.Warn("udp client id %d flow exceeded, stop session %s", s.task.Client.Id, key)
+			return
+		}
 	}
 }
 
@@ -290,5 +314,9 @@ func (s *UdpModeServer) Close() error {
 		s.removeSession(k.(string), v.(*udpSession))
 		return true
 	})
+	// 建隧道后立即删除时 Start 尚未执行、listener 为 nil（阶段三 G4）
+	if s.listener == nil {
+		return nil
+	}
 	return s.listener.Close()
 }

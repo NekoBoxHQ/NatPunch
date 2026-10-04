@@ -1,3 +1,7 @@
+//go:build integration
+
+// mux_test.go 为集成测试：依赖 Docker 容器网络与 tc（NET_ADMIN）环境，
+// 通过 build tag 隔离（阶段四 F4-1）：默认 go test / go vet 不编译本文件。
 package nps_mux
 
 import (

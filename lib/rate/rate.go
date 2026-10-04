@@ -54,7 +54,17 @@ func (s *Rate) Get(size int64) {
 	if size <= 0 {
 		return
 	}
+	// 按 burst 分块等待：WaitN 在 size > burst 时直接返回错误（大块读写绕过限速），
+	// 必须拆成 burst 大小逐块排队（阶段三 #10）
+	burst := int64(s.limiter.Burst())
 	ctx := context.Background()
-	_ = s.limiter.WaitN(ctx, int(size))
-	atomic.AddInt64(&s.consumed, size)
+	for size > 0 {
+		n := size
+		if n > burst {
+			n = burst
+		}
+		_ = s.limiter.WaitN(ctx, int(n))
+		atomic.AddInt64(&s.consumed, n)
+		size -= n
+	}
 }

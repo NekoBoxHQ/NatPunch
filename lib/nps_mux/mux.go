@@ -135,7 +135,13 @@ func (s *Mux) sendInfo(flag uint8, id int32, data interface{}) {
 		_ = s.Close()
 		return
 	}
-	s.writeQueue.Push(pack)
+	if err = s.writeQueue.Push(pack); err != nil {
+		// 独立日志区分「队列限流」与「链路故障」：写端过载（如单连接突发大流量）触发
+		log.Printf("mux: write queue overflow (limit=%d), closing mux", s.writeQueue.maxLength)
+		muxPack.Put(pack)
+		_ = s.Close()
+		return
+	}
 	return
 }
 
@@ -284,10 +290,17 @@ func (s *Mux) readSession() {
 					}
 					continue
 				case muxNewConnOk: //connection ok
-					connection.connStatusOkCh <- struct{}{}
+					// 非阻塞发送：接收方（NewConn）可能已超时返回，不能阻塞 readSession（阶段三 #1）
+					select {
+					case connection.connStatusOkCh <- struct{}{}:
+					default:
+					}
 					continue
 				case muxNewConnFail:
-					connection.connStatusFailCh <- struct{}{}
+					select {
+					case connection.connStatusFailCh <- struct{}{}:
+					default:
+					}
 					continue
 				case muxMsgSendOk:
 					if connection.isClose {

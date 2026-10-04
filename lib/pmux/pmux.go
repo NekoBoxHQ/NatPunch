@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"io"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +33,7 @@ const (
 type PortMux struct {
 	net.Listener
 	port        int
+	started     bool
 	isClose     bool
 	done        chan struct{}  // 关闭时触发 process() 退出，避免 send on closed channel
 	wg          sync.WaitGroup // 跟踪 in-flight process()，保证 Close() 关闭 conn channel 前全部退出
@@ -59,6 +59,10 @@ func NewPortMux(port int, managerHost string) *PortMux {
 }
 
 func (pMux *PortMux) Start() error {
+	if pMux.started {
+		return errors.New("port mux already started")
+	}
+	pMux.started = true
 	// Port multiplexing is based on TCP only
 	tcpAddr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:"+strconv.Itoa(pMux.port))
 	if err != nil {
@@ -66,14 +70,17 @@ func (pMux *PortMux) Start() error {
 	}
 	pMux.Listener, err = net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
-		logs.Error(err)
-		os.Exit(0)
+		// 失败路径显式复位为 nil：net.ListenTCP 返回的 nil 指针装入 net.Listener 接口后
+		// `== nil` 为 false（经典 Go 陷阱），不清零会导致 Getter 的 nil 守卫失效、Addr() panic（阶段三 #15）
+		pMux.Listener = nil
+		return err
 	}
+	ln := pMux.Listener // 局部捕获：accept 循环引用局部值，防止 Listener 字段被外部清零导致 nil 解引用
 	pMux.wg.Add(1)
 	go func() {
 		defer pMux.wg.Done()
 		for {
-			conn, err := pMux.Listener.Accept()
+			conn, err := ln.Accept()
 			if err != nil {
 				logs.Warn(err)
 				return
@@ -163,7 +170,10 @@ func (pMux *PortMux) Close() error {
 		return errors.New("the port pmux has closed")
 	}
 	pMux.isClose = true
-	_ = pMux.Listener.Close() // 停止接收新连接，触发 accept 协程退出
+	// Listener 可能为 (*TCPListener)(nil) 接口（Start 失败路径），直接 Close() 会 nil 解引用（阶段三 #15）
+	if pMux.Listener != nil {
+		_ = pMux.Listener.Close() // 停止接收新连接，触发 accept 协程退出
+	}
 	close(pMux.done)          // 唤醒 in-flight process()
 	pMux.wg.Wait()            // 等待所有 process() 退出后再 close conn channel
 	close(pMux.clientConn)
@@ -173,18 +183,32 @@ func (pMux *PortMux) Close() error {
 	return nil
 }
 
+// GetXxxListener：Listener 未就绪（Start 失败/未调用）时返回 nil，
+// 由调用方检查并报错，避免 nil 解引用（阶段三 #15 配套）
 func (pMux *PortMux) GetClientListener() net.Listener {
+	if pMux.Listener == nil {
+		return nil
+	}
 	return NewPortListener(pMux.clientConn, pMux.Listener.Addr())
 }
 
 func (pMux *PortMux) GetHttpListener() net.Listener {
+	if pMux.Listener == nil {
+		return nil
+	}
 	return NewPortListener(pMux.httpConn, pMux.Listener.Addr())
 }
 
 func (pMux *PortMux) GetHttpsListener() net.Listener {
+	if pMux.Listener == nil {
+		return nil
+	}
 	return NewPortListener(pMux.httpsConn, pMux.Listener.Addr())
 }
 
 func (pMux *PortMux) GetManagerListener() net.Listener {
+	if pMux.Listener == nil {
+		return nil
+	}
 	return NewPortListener(pMux.managerConn, pMux.Listener.Addr())
 }

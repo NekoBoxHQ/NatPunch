@@ -21,7 +21,10 @@ func heathCheck(healths []*file.Health, c *conn.Conn) bool {
 	serverConn = c
 	if isStart {
 		for _, v := range healths {
+			// 重建 HealthMap 必须加锁：session 的 check goroutine 可能正在并发写（阶段三 #8）
+			v.Lock()
 			v.HealthMap = make(map[string]int)
+			v.Unlock()
 		}
 		return true
 	}
@@ -31,7 +34,9 @@ func heathCheck(healths []*file.Health, c *conn.Conn) bool {
 		if v.HealthMaxFail > 0 && v.HealthCheckTimeout > 0 && v.HealthCheckInterval > 0 {
 			v.HealthNextTime = time.Now().Add(time.Duration(v.HealthCheckInterval) * time.Second)
 			heap.Push(h, v.HealthNextTime.Unix())
+			v.Lock()
 			v.HealthMap = make(map[string]int)
+			v.Unlock()
 		}
 	}
 	go session(healths, h)

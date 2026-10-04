@@ -634,19 +634,25 @@ func GetDashboardData() map[string]interface{} {
 
 // 实例化流量数据到文件
 func flowSession(m time.Duration) {
+	// once.Do 只负责启动一次 ticker，不得包住无限循环（阶段三 #20）：
+	// 否则 once.Do 的调用 goroutine 会被循环永久占用，且无法单独停止
 	once.Do(func() {
-		ticker := time.NewTicker(m)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				file.GetDb().JsonDb.StoreHostToJsonFile()
-				file.GetDb().JsonDb.StoreTasksToJsonFile()
-				file.GetDb().JsonDb.StoreClientsToJsonFile()
-				file.GetDb().JsonDb.StoreGlobalToJsonFile()
-			}
-		}
+		go flowSessionTicker(m)
 	})
+}
+
+func flowSessionTicker(m time.Duration) {
+	ticker := time.NewTicker(m)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			file.GetDb().JsonDb.StoreHostToJsonFile()
+			file.GetDb().JsonDb.StoreTasksToJsonFile()
+			file.GetDb().JsonDb.StoreClientsToJsonFile()
+			file.GetDb().JsonDb.StoreGlobalToJsonFile()
+		}
+	}
 }
 
 // isPrivateIP 判断是否为内网 IP
