@@ -1,6 +1,6 @@
 #!/bin/sh
 # NatPunch 客户端管理脚本（卸载 / 更新）
-# 仅操作客户端专属命名 natpunch-client，与服务端 natpunch 完全隔离（进程名/自启名/二进制名均不同），互不影响
+# 仅操作客户端专属命名 natpunch-client，与服务端 natpunch 完全隔离
 # 用法:
 #   sh uninstall_client.sh             卸载客户端（默认）
 #   sh uninstall_client.sh uninstall   卸载客户端
@@ -16,13 +16,56 @@ CLIENT_CONF_3="/usr/local/etc/natpunch.conf"
 CLIENT_INIT="/etc/init.d/natpunch-client"
 CLIENT_SYSTEMD_1="/etc/systemd/system/natpunch-client.service"
 CLIENT_SYSTEMD_2="/lib/systemd/system/natpunch-client.service"
-CLIENT_PLIST="/Library/LaunchDaemons/com.natpunch.client.plist"
-CLIENT_AGENT="${HOME:-}/Library/LaunchAgents/com.natpunch.client.plist"
-log() { echo "==> $*"; }
+DONE_FILE="/tmp/natpunch_uninstall.done"
+UPDATE_LOG="/tmp/natpunch_update.log"
+UNINSTALL_LOG="/tmp/natpunch_uninstall.log"
+log()  { echo "==> $*"; }
 warn() { echo "==> 警告: $*" >&2; }
-
-# ---------- 更新模式：保留配置，仅替换二进制并重启 ----------
-if [ "$ACTION" = "update" ]; then
+die()  { echo "==> 错误: $*" >&2; exit 1; }
+# timeout 不存在时（精简 Linux）直接调用，保证 KillMode 生效不被 command not found 打断
+tcmd() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$@"
+    else
+        N="$1"; shift; "$@"
+    fi
+}
+# ---------- 下载工具 ----------
+HAS_WGET=0; HAS_CURL=0
+command -v wget >/dev/null 2>&1 && HAS_WGET=1
+command -v curl >/dev/null 2>&1 && HAS_CURL=1
+[ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 wget 或 curl"
+fetch_to() {
+    # fetch_to <url> <out>
+    if [ "$HAS_WGET" -eq 1 ]; then
+        wget -q --timeout=15 --tries=2 -O "$2" "$1" 2>/dev/null || return 1
+    else
+        curl -fsSL --max-time 30 --retry 2 -o "$2" "$1" || return 1
+    fi
+    [ -s "$2" ] || return 1
+    return 0
+}
+# ---------- 修改 systemd unit 的 KillMode ----------
+# 使用 grep + echo 追加，避免 busybox sed 不支持 a 命令
+ensure_killmode_process() {
+    U="$1"
+    [ -f "$U" ] || return 0
+    if grep -q '^KillMode=' "$U" 2>/dev/null; then
+        # 用 awk 原地替换，busybox 兼容
+        awk 'BEGIN{FS=OFS="="} /^KillMode=/{print "KillMode","process"; next} {print}' "$U" > "$U.tmp" \
+            && mv "$U.tmp" "$U" || rm -f "$U.tmp"
+    else
+        # 优先插到 RestartSec 之后，否则追加到末尾
+        if grep -q '^RestartSec=' "$U" 2>/dev/null; then
+            awk '/^RestartSec=/{print; print "KillMode=process"; next} {print}' "$U" > "$U.tmp" \
+                && mv "$U.tmp" "$U" || rm -f "$U.tmp"
+        else
+            echo "KillMode=process" >> "$U"
+        fi
+    fi
+}
+# ---------- 更新模式 ----------
+do_update() {
     log "更新 NatPunch 客户端（保留配置）..."
     if [ ! -f "$CLIENT_BIN_1" ] && [ ! -f "$CLIENT_BIN_2" ]; then
         warn "未检测到已安装客户端，请使用 install.sh 全新安装"
@@ -32,152 +75,108 @@ if [ "$ACTION" = "update" ]; then
     case "$ARCH" in
         x86_64|amd64)   PKG="linux_amd64_client.tar.gz" ;;
         aarch64|arm64)  PKG="linux_arm64_client.tar.gz" ;;
-        *) warn "不支持架构: $ARCH（当前仅支持 x86_64 / arm64）"; exit 1 ;;
+        *) die "不支持架构: $ARCH（当前仅支持 x86_64 / arm64）" ;;
     esac
     VER=""
-    if command -v wget >/dev/null 2>&1; then
-        VER="$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
-    elif command -v curl >/dev/null 2>&1; then
-        VER="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+    if [ "$HAS_WGET" -eq 1 ]; then
+        VER="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+            | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+    else
+        VER="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+            | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
     fi
     log "最新版本: ${VER:-最新发布}"
-    # 下载走 releases/latest/download，自动指向最新发布，不依赖写死的版本号
     URL="https://github.com/$REPO/releases/latest/download/$PKG"
     TMP_DIR="/tmp/natpunch_update.$$"
-    mkdir -p "$TMP_DIR" || { warn "无法创建临时目录"; exit 1; }
-    trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
-    if command -v wget >/dev/null 2>&1; then
-        wget -q -O "$TMP_DIR/pkg.tar.gz" "$URL" || { warn "下载失败: $URL"; exit 1; }
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$TMP_DIR/pkg.tar.gz" "$URL" || { warn "下载失败: $URL"; exit 1; }
-    else
-        warn "未找到 wget / curl"; exit 1
-    fi
-    [ -s "$TMP_DIR/pkg.tar.gz" ] || { warn "下载文件为空"; exit 1; }
-    tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || { warn "压缩包损坏"; exit 1; }
-    tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || { warn "解压失败"; exit 1; }
-    BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client | head -n1)"
-    [ -n "$BIN_SRC" ] || { warn "压缩包内未找到 natpunch-client 二进制"; exit 1; }
-    # —— 断连保护 ——
-    # SSH 通常通过客户端打通的隧道连接：停止客户端 = 隧道断 = SSH 断。
-    # 面板 SSH 终端更是客户端打通的 PTY：kill 客户端 = PTY 会话一起断。
-    # 因此将"替换+重启"逻辑写成仓库独立脚本 update_client_apply.sh，
-    # 此处无条件拉取后写入 /tmp，用 setsid 彻底脱离当前会话后台执行，当前脚本立即退出；
-    # 否则脚本随会话一起被杀 → 客户端停而不启 → 设备失联。
-    # 注意：不能用环境变量做"是否已 detach"判定——面板 SSH 的 shell 继承客户端进程环境，
-    # 之前 export 的 NATPUNCH_UPDATE_DETACHED 会残留到客户端进程链，导致本段被跳过。
-    # 本脚本不存在重入（apply 逻辑在独立脚本中），故此处无条件执行。
+    rm -rf "$TMP_DIR"
+    mkdir -p "$TMP_DIR" || die "无法创建临时目录"
+    # 下载/解压阶段失败时自动清理临时目录；
+    # 后台 apply 脚本就绪并 setsid 启动后，由 apply 脚本负责清理，这里再解除 trap
+    trap 'rm -rf "$TMP_DIR" 2>/dev/null || true' EXIT INT TERM
+    fetch_to "$URL" "$TMP_DIR/pkg.tar.gz" || die "下载失败: $URL"
+    tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"
+    tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || die "解压失败"
+    BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client 2>/dev/null | head -n1)"
+    [ -n "${BIN_SRC:-}" ] || die "压缩包内未找到 natpunch-client 二进制"
+    # —— 拉取 apply 脚本（先就绪，再改 KillMode，避免副作用残留） ——
     APPLY_URL="https://cdn.jsdelivr.net/gh/$REPO@master/update_client_apply.sh"
-    fetch_apply() {
-        if command -v wget >/dev/null 2>&1; then
-            wget -q -O /tmp/natpunch_apply.sh "$1"
-        elif command -v curl >/dev/null 2>&1; then
-            curl -fsSL -o /tmp/natpunch_apply.sh "$1"
-        else
-            warn "未找到 wget / curl"; exit 1
-        fi
-    }
-    fetch_apply "$APPLY_URL" || { warn "拉取更新脚本失败"; exit 1; }
-    # 内容校验：jsdelivr 偶发 404 缓存返回非脚本内容，必须是以 #!/bin/sh 开头的有效脚本
-    if ! head -1 /tmp/natpunch_apply.sh 2>/dev/null | grep -q '^#!'; then
+    if ! fetch_to "$APPLY_URL" /tmp/natpunch_apply.sh || ! head -1 /tmp/natpunch_apply.sh 2>/dev/null | grep -q '^#!'; then
         APPLY_URL="https://raw.githubusercontent.com/$REPO/master/update_client_apply.sh"
-        fetch_apply "$APPLY_URL" || { warn "拉取更新脚本失败"; exit 1; }
+        fetch_to "$APPLY_URL" /tmp/natpunch_apply.sh || die "拉取更新脚本失败"
+        head -1 /tmp/natpunch_apply.sh 2>/dev/null | grep -q '^#!' || die "更新脚本内容非法"
     fi
-    [ -s /tmp/natpunch_apply.sh ] || { warn "更新脚本为空"; exit 1; }
     chmod 755 /tmp/natpunch_apply.sh
-    echo "==> 升级文件已就绪，流程转入后台执行"
-    echo "==> SSH 断开后自动完成替换与重启，日志: /tmp/natpunch_update.log"
-    echo "==> 完成后客户端自动重启，隧道恢复后请重新连接"
-    # 关键保护（面板 SSH 升级场景）：更新子脚本由客户端派生，位于 natpunch-client.service 的 cgroup 内；
-    # systemd 默认 KillMode=control-group，stop 会连带杀掉更新子脚本 → 客户端停而不启。
-    # 必须在 detach 前（主脚本还活着、客户端还在跑时）先把 unit 改为 KillMode=process 并重载。
+    # —— KillMode=process：apply 脚本就绪后再改，失败也不影响 ——
     if command -v systemctl >/dev/null 2>&1; then
-        for U in /etc/systemd/system/natpunch-client.service /lib/systemd/system/natpunch-client.service; do
-            if [ -f "$U" ]; then
-                if grep -q '^KillMode=' "$U" 2>/dev/null; then
-                    sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
-                else
-                    sed -i '/^RestartSec=/a KillMode=process' "$U" 2>/dev/null || true
-                    grep -q '^KillMode=process' "$U" || echo "KillMode=process" >> "$U"
-                fi
-            fi
-        done
-        systemctl daemon-reload >/dev/null 2>&1 &
-        DR=$!
-        sleep 3
-        kill "$DR" 2>/dev/null || true
+        ensure_killmode_process "$CLIENT_SYSTEMD_1"
+        ensure_killmode_process "$CLIENT_SYSTEMD_2"
+        tcmd 10 systemctl daemon-reload >/dev/null 2>&1 || true
     fi
+    echo "==> 升级文件已就绪，流程转入后台执行"
+    echo "==> SSH 断开后自动完成替换与重启，日志: $UPDATE_LOG"
+    echo "==> 完成后客户端自动重启，隧道恢复后请重新连接"
+    # —— setsid 彻底脱离会话 ——
     if command -v setsid >/dev/null 2>&1; then
-        NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" NP_CLIENT_INIT="$CLIENT_INIT" NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" setsid sh /tmp/natpunch_apply.sh > /tmp/natpunch_update.log 2>&1 < /dev/null &
+        NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" \
+        NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" \
+        NP_CLIENT_INIT="$CLIENT_INIT" \
+        NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" \
+        setsid sh /tmp/natpunch_apply.sh > "$UPDATE_LOG" 2>&1 < /dev/null &
     else
-        NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" NP_CLIENT_INIT="$CLIENT_INIT" NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" nohup sh /tmp/natpunch_apply.sh > /tmp/natpunch_update.log 2>&1 < /dev/null &
+        NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" \
+        NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" \
+        NP_CLIENT_INIT="$CLIENT_INIT" \
+        NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" \
+        nohup sh /tmp/natpunch_apply.sh > "$UPDATE_LOG" 2>&1 < /dev/null &
     fi
-    # 关键：清空 EXIT/INT/TERM trap，避免 exit 0 时把 $TMP_DIR（升级文件）删掉，
-    # 否则后台子脚本替换时会找不到源文件 → 客户端停而不启。TMP_DIR 由子脚本末尾清理。
+    # 清空 trap，避免 EXIT 删掉 $TMP_DIR（由 apply 脚本清理）
     trap - EXIT INT TERM
     exit 0
-fi
-if [ "$ACTION" != "uninstall" ]; then
-    echo "用法: sh uninstall_client.sh [update|uninstall]" >&2
-    exit 1
-fi
-
-# ================= 卸载模式 =================
-# 断连保护（与升级链路同一机制）：
-# 面板 SSH 会话在 natpunch-client.service 的 cgroup 内，systemd 默认 KillMode=control-group，
-# `systemctl stop` 会连带杀掉正在执行的卸载脚本 → 卸载中断、残留。
-# 因此：1) 先把 KillMode 改为 process（只杀主进程）；2) 卸载动作写成独立脚本 setsid 后台静默执行，
-# 与当前 SSH 会话完全解耦——杀客户端即断连，但后台清理照常跑完，完整无残留。
-if command -v systemctl >/dev/null 2>&1; then
-    for U in "$CLIENT_SYSTEMD_1" "$CLIENT_SYSTEMD_2"; do
-        [ -f "$U" ] || continue
-        if grep -q '^KillMode=' "$U" 2>/dev/null; then
-            sed -i 's/^KillMode=.*/KillMode=process/' "$U" 2>/dev/null || true
-        else
-            sed -i '/^RestartSec=/a KillMode=process' "$U" 2>/dev/null || true
-            grep -q '^KillMode=process' "$U" || echo "KillMode=process" >> "$U"
-        fi
-    done
-    systemctl daemon-reload >/dev/null 2>&1 &
-    DR=$!
-    sleep 3
-    kill "$DR" 2>/dev/null || true
-fi
-# 拉取卸载应用脚本（jsdelivr 优先，raw 兜底；内容校验避免 CDN 缓存返回非脚本内容）
-UN_URL="https://cdn.jsdelivr.net/gh/$REPO@master/uninstall_client_apply.sh"
-fetch_unapply() {
-    if command -v wget >/dev/null 2>&1; then
-        wget -q -O /tmp/natpunch_uninstall.sh "$1"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o /tmp/natpunch_uninstall.sh "$1"
-    else
-        return 1
-    fi
 }
-fetch_unapply "$UN_URL" || { warn "拉取卸载脚本失败"; exit 1; }
-if ! head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!'; then
-    UN_URL="https://raw.githubusercontent.com/$REPO/master/uninstall_client_apply.sh"
-    fetch_unapply "$UN_URL" || { warn "拉取卸载脚本失败"; exit 1; }
-fi
-[ -s /tmp/natpunch_uninstall.sh ] || { warn "卸载脚本为空"; exit 1; }
-chmod 755 /tmp/natpunch_uninstall.sh
-# setsid 静默后台执行（与当前 SSH 会话解耦，断连不影响清理完整性）
-if command -v setsid >/dev/null 2>&1; then
-    setsid sh /tmp/natpunch_uninstall.sh >> /tmp/natpunch_uninstall.log 2>&1 < /dev/null &
-else
-    nohup sh /tmp/natpunch_uninstall.sh >> /tmp/natpunch_uninstall.log 2>&1 < /dev/null &
-fi
-UN_PID=$!
-# 等待卸载完成：正常 SSH（隧道未断）场景输出"客户端已卸载完成"；
-# 面板 SSH 卸载自身时隧道已断，用户看不到后续输出，但后台卸载照常完整执行（无残留）。
-i=0
-while kill -0 "$UN_PID" 2>/dev/null && [ "$i" -lt 60 ]; do
-    sleep 1
-    i=$((i+1))
-done
-if ! kill -0 "$UN_PID" 2>/dev/null; then
-    log "客户端已卸载完成"
-else
-    warn "卸载仍在后台进行（可能正通过隧道卸载自身），请稍后直连确认"
-fi
-exit 0
+# ---------- 卸载模式 ----------
+do_uninstall() {
+    log "卸载 NatPunch 客户端..."
+    rm -f "$DONE_FILE"
+    # —— 拉取 apply 脚本（先就绪，再改 KillMode） ——
+    UN_URL="https://cdn.jsdelivr.net/gh/$REPO@master/uninstall_client_apply.sh"
+    if ! fetch_to "$UN_URL" /tmp/natpunch_uninstall.sh || ! head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!'; then
+        UN_URL="https://raw.githubusercontent.com/$REPO/master/uninstall_client_apply.sh"
+        fetch_to "$UN_URL" /tmp/natpunch_uninstall.sh || die "拉取卸载脚本失败"
+        head -1 /tmp/natpunch_uninstall.sh 2>/dev/null | grep -q '^#!' || die "卸载脚本内容非法"
+    fi
+    chmod 755 /tmp/natpunch_uninstall.sh
+    # —— KillMode=process：避免 systemd stop 连带杀掉 apply 脚本 ——
+    if command -v systemctl >/dev/null 2>&1; then
+        ensure_killmode_process "$CLIENT_SYSTEMD_1"
+        ensure_killmode_process "$CLIENT_SYSTEMD_2"
+        tcmd 10 systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    # —— setsid 静默后台执行 ——
+    # 用 done 文件判定完成，不依赖 $!（setsid 会 fork，$! 不可靠）
+    if command -v setsid >/dev/null 2>&1; then
+        NP_DONE_FILE="$DONE_FILE" \
+        setsid sh /tmp/natpunch_uninstall.sh >> "$UNINSTALL_LOG" 2>&1 < /dev/null &
+    else
+        NP_DONE_FILE="$DONE_FILE" \
+        nohup sh /tmp/natpunch_uninstall.sh >> "$UNINSTALL_LOG" 2>&1 < /dev/null &
+    fi
+    # 等待 done 文件（最多 60s）
+    i=0
+    while [ ! -f "$DONE_FILE" ] && [ "$i" -lt 60 ]; do
+        sleep 1
+        i=$((i+1))
+    done
+    if [ -f "$DONE_FILE" ]; then
+        log "客户端已卸载完成"
+    else
+        warn "卸载仍在后台进行（可能正通过隧道卸载自身），请稍后直连确认"
+        warn "日志: $UNINSTALL_LOG"
+    fi
+    exit 0
+}
+# ---------- 入口 ----------
+case "$ACTION" in
+    update)    do_update ;;
+    uninstall) do_uninstall ;;
+    *) echo "用法: sh uninstall_client.sh [update|uninstall]" >&2; exit 1 ;;
+esac

@@ -29,7 +29,6 @@ if [ ! -t 1 ]; then
     C_GREEN=''; C_YELLOW=''; C_RED=''; C_CYAN=''; C_BLUE=''
 fi
 LINE="----------------------------------------"
-# 输出统一用 printf（%b 解释 \033 转义），兼容 busybox 不带 -e 的 echo，避免输出字面 "-e" 前缀
 title() {
     printf '\n%b\n%b\n%b\n' "${C_CYAN}${LINE}${C_RESET}" "${C_BOLD}  $*${C_RESET}" "${C_CYAN}${LINE}${C_RESET}"
 }
@@ -55,26 +54,29 @@ norm() {
     echo "$1"
 }
 safe_dir() {
-    case "$DIR" in
+    case "${DIR:-}" in
         /?*) ;;
-        *) die "DIR 配置非法: $DIR" ;;
+        *) die "DIR 配置非法: ${DIR:-}" ;;
     esac
-    [ "$DIR" != "/" ] || die "DIR 不能为根目录"
+    [ "${DIR:-}" != "/" ] || die "DIR 不能为根目录"
 }
+# 路径含空格安全：用 find | head -n1
 find_first_file() {
-    for f in $(find "$1" -type f -name "$2" 2>/dev/null); do
-        echo "$f"; return 0
-    done
-    return 1
+    find "$1" -type f -name "$2" 2>/dev/null | head -n1
 }
 find_first_dir() {
-    for d in $(find "$1" -type d -name "$2" 2>/dev/null); do
-        echo "$d"; return 0
-    done
-    return 1
+    find "$1" -type d -name "$2" 2>/dev/null | head -n1
 }
 is_openwrt() { [ -f /etc/openwrt_release ]; }
 has_systemd() { command -v systemctl >/dev/null 2>&1; }
+# timeout 命令不存在时（精简 Linux）直接调用，保证卸载/自启清理不因缺少 timeout 而失败
+tcmd() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$@"
+    else
+        N="$1"; shift; "$@"
+    fi
+}
 # ================= 锁 =================
 LOCK_MODE=""
 acquire_lock() {
@@ -86,8 +88,8 @@ acquire_lock() {
     fi
     if [ -f "$LOCK_DIR/pid" ]; then
         OLD=$(cat "$LOCK_DIR/pid" 2>/dev/null)
-        if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then
-            die "已有 NatPunch 操作进行中 (PID $OLD)，请稍后重试"
+        if [ -n "${OLD:-}" ] && kill -0 "${OLD:-}" 2>/dev/null; then
+            die "已有 NatPunch 操作进行中 (PID ${OLD})，请稍后重试"
         fi
         info "清理陈旧锁 (PID ${OLD:-未知})"
         rm -rf "$LOCK_DIR" 2>/dev/null
@@ -99,7 +101,7 @@ acquire_lock() {
     die "无法获取锁"
 }
 release_lock() {
-    [ "$LOCK_MODE" = "held" ] || return 0
+    [ "${LOCK_MODE:-}" = "held" ] || return 0
     rm -rf "$LOCK_DIR" 2>/dev/null || true
     LOCK_MODE=""
 }
@@ -107,11 +109,11 @@ release_lock() {
 is_running() {
     [ -f "$PID_FILE" ] || return 1
     PIDV=$(cat "$PID_FILE" 2>/dev/null) || return 1
-    [ -n "$PIDV" ] || return 1
+    [ -n "${PIDV:-}" ] || return 1
     case "$PIDV" in *[!0-9]*) return 1 ;; esac
     [ -d "/proc/$PIDV" ] || return 1
     EXE=$(readlink "/proc/$PIDV/exe" 2>/dev/null)
-    if [ -n "$EXE" ]; then
+    if [ -n "${EXE:-}" ]; then
         case "$EXE" in *" (deleted)") return 1 ;; esac
         [ "$(norm "$EXE")" = "$(norm "$BIN")" ] && return 0
         return 1
@@ -130,26 +132,26 @@ find_all_nps() {
         for p in $(pgrep -x natpunch 2>/dev/null); do
             [ "$p" = "$$" ] && continue
             exe=$(readlink "/proc/$p/exe" 2>/dev/null)
-            [ -n "$exe" ] && [ "$(norm "$exe")" = "$TARGET" ] && echo "$p"
+            [ -n "${exe:-}" ] && [ "$(norm "$exe")" = "$TARGET" ] && echo "$p"
         done
     else
         for d in /proc/[0-9]*; do
             p=${d#/proc/}
             [ "$p" = "$$" ] && continue
             exe=$(readlink "$d/exe" 2>/dev/null)
-            [ -n "$exe" ] && [ "$(norm "$exe")" = "$TARGET" ] && echo "$p"
+            [ -n "${exe:-}" ] && [ "$(norm "$exe")" = "$TARGET" ] && echo "$p"
         done
     fi
 }
 kill_one() {
-    p="$1"; [ -n "$p" ] || return 0
+    p="${1:-}"; [ -n "$p" ] || return 0
     kill "$p" 2>/dev/null || true
     sleep 1
     kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
 }
 kill_all() {
     LIST=$(find_all_nps | sort -u)
-    [ -n "$LIST" ] || return 0
+    [ -n "${LIST:-}" ] || return 0
     for p in $LIST; do
         [ "$p" = "$$" ] && continue
         kill "$p" 2>/dev/null || true
@@ -163,12 +165,12 @@ kill_all() {
 }
 # ================= 配置读写 =================
 get_kv() {
-    key="$1"
+    key="${1:-}"
     [ -f "$CONF" ] || return 1
     grep -E "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null | head -n1 | sed "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//"
 }
 set_kv() {
-    key="$1"; val="$2"
+    key="${1:-}"; val="${2:-}"
     case "$key" in *[!A-Za-z0-9_]*) die "非法配置键: $key" ;; esac
     case "$val" in
         *'
@@ -180,38 +182,47 @@ set_kv() {
     printf '%s=%s\n' "$key" "$val" >> "$CONF" || die "追加 $key 失败"
     grep -q "^$key=" "$CONF" || die "校验 $key 失败"
 }
+# ================= 安全输入 =================
+read_secret() {
+    # read_secret <prompt> <varname>
+    printf "  %s" "$1"
+    stty -echo 2>/dev/null
+    read "$2"
+    stty echo 2>/dev/null
+    echo
+}
 # ================= 交互输入 =================
 prompt_credentials() {
     section "设置 NatPunch 面板登录信息"
     printf "  Web 端口 [默认 8080]: "; read IN_PORT
-    [ -n "$IN_PORT" ] || IN_PORT="8080"
+    [ -n "${IN_PORT:-}" ] || IN_PORT="8080"
     case "$IN_PORT" in *[!0-9]*) die "Web 端口必须是纯数字" ;; esac
     [ "$IN_PORT" -ge 1 ] && [ "$IN_PORT" -le 65535 ] || die "Web 端口范围必须是 1-65535"
     printf "  客户端 HTTP 端口 [默认 8024]: "; read IN_BRIDGE
-    [ -n "$IN_BRIDGE" ] || IN_BRIDGE="8024"
+    [ -n "${IN_BRIDGE:-}" ] || IN_BRIDGE="8024"
     case "$IN_BRIDGE" in *[!0-9]*) die "客户端 HTTP 端口必须是纯数字" ;; esac
     [ "$IN_BRIDGE" -ge 1 ] && [ "$IN_BRIDGE" -le 65535 ] || die "客户端 HTTP 端口范围必须是 1-65535"
     printf "  客户端 HTTPS 端口 [默认 8025]: "; read IN_TLS_PORT
-    [ -n "$IN_TLS_PORT" ] || IN_TLS_PORT="8025"
+    [ -n "${IN_TLS_PORT:-}" ] || IN_TLS_PORT="8025"
     case "$IN_TLS_PORT" in *[!0-9]*) die "客户端 HTTPS 端口必须是纯数字" ;; esac
     [ "$IN_TLS_PORT" -ge 1 ] && [ "$IN_TLS_PORT" -le 65535 ] || die "客户端 HTTPS 端口范围必须是 1-65535"
     printf "  启用 HTTPS/TLS (y/N): "; read IN_HTTPS
     NEW_HTTPS="false"; NEW_CERT=""; NEW_KEY=""; NEW_DOMAIN=""
-    case "$IN_HTTPS" in
+    case "${IN_HTTPS:-}" in
         y|Y|yes|YES)
             NEW_HTTPS="true"
             printf "  域名: "; read NEW_DOMAIN
-            [ -n "$NEW_DOMAIN" ] || NEW_DOMAIN="$(get_ip)"
+            [ -n "${NEW_DOMAIN:-}" ] || NEW_DOMAIN="$(get_ip)"
             printf "  pem [默认 /opt/natpunch/conf/server.pem]: "; read IN_CERT
-            [ -n "$IN_CERT" ] && NEW_CERT="$IN_CERT" || NEW_CERT="/opt/natpunch/conf/server.pem"
+            [ -n "${IN_CERT:-}" ] && NEW_CERT="$IN_CERT" || NEW_CERT="/opt/natpunch/conf/server.pem"
             printf "  key [默认 /opt/natpunch/conf/server.key]: "; read IN_KEY
-            [ -n "$IN_KEY" ] && NEW_KEY="$IN_KEY" || NEW_KEY="/opt/natpunch/conf/server.key"
+            [ -n "${IN_KEY:-}" ] && NEW_KEY="$IN_KEY" || NEW_KEY="/opt/natpunch/conf/server.key"
             ;;
     esac
     printf "  用户名 [默认 admin]: "; read IN_USER
-    [ -n "$IN_USER" ] || IN_USER="admin"
-    printf "  密码   [默认 123  ]: "; read IN_PASS
-    [ -n "$IN_PASS" ] || IN_PASS="123"
+    [ -n "${IN_USER:-}" ] || IN_USER="admin"
+    read_secret "密码   [默认 123  ]: " IN_PASS
+    [ -n "${IN_PASS:-}" ] || IN_PASS="123"
     case "$IN_USER" in *"="*) die "用户名不能包含 =" ;; esac
     case "$IN_PASS" in *"="*) die "密码不能包含 =" ;; esac
     NEW_PORT="$IN_PORT"; NEW_BRIDGE="$IN_BRIDGE"; NEW_TLS_PORT="$IN_TLS_PORT"; NEW_USER="$IN_USER"; NEW_PASS="$IN_PASS"
@@ -253,15 +264,15 @@ choose_downloader() {
 dl() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
-        wget) wget -q -O "$2" "$1" ;;
-        curl) curl -fsSL -o "$2" "$1" ;;
+        wget) wget -q --timeout=30 --tries=2 -O "$2" "$1" ;;
+        curl) curl -fsSL --max-time 60 --retry 2 -o "$2" "$1" ;;
     esac
 }
 fetch() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
-        wget) wget -q -O - "$1" 2>/dev/null ;;
-        curl) curl -fsSL "$1" 2>/dev/null ;;
+        wget) wget -q --timeout=10 -O - "$1" 2>/dev/null ;;
+        curl) curl -fsSL --max-time 10 "$1" 2>/dev/null ;;
     esac
 }
 get_latest_ver() {
@@ -269,10 +280,10 @@ get_latest_ver() {
     # 仅用于展示版本号；两者都失败返回空，下载仍走 releases/latest/download 自动取最新。
     V=""
     RESP=$(fetch "$API_URL") || RESP=""
-    if [ -n "$RESP" ]; then
+    if [ -n "${RESP:-}" ]; then
         V=$(echo "$RESP" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
     fi
-    if [ -z "$V" ]; then
+    if [ -z "${V:-}" ]; then
         LOC=""
         if command -v curl >/dev/null 2>&1; then
             LOC=$(curl -sI --max-time 10 "https://github.com/$REPO/releases/latest" 2>/dev/null | tr -d '\r' | grep -i '^location:' | head -n1)
@@ -281,13 +292,13 @@ get_latest_ver() {
         fi
         V=$(echo "$LOC" | sed 's/.*tag\///' | tr -d '[:space:]')
     fi
-    [ -n "$V" ] && echo "$V" && return 0
+    [ -n "${V:-}" ] && echo "$V" && return 0
     return 1
 }
 get_current_ver() {
     if [ -x "$BIN" ]; then
         V=$("$BIN" -version 2>/dev/null | head -n1)
-        [ -n "$V" ] && echo "$V" && return 0
+        [ -n "${V:-}" ] && echo "$V" && return 0
     fi
     echo "未知"
 }
@@ -311,9 +322,9 @@ install() {
     BIN_SRC=$(find_first_file . natpunch)
     CONF_SRC=$(find_first_dir . conf)
     WEB_SRC=$(find_first_dir . web)
-    [ -n "$BIN_SRC" ]  || { cd /; rm -rf "$TMP"; die "压缩包中未找到 natpunch 二进制"; }
-    [ -n "$CONF_SRC" ] || { cd /; rm -rf "$TMP"; die "压缩包中未找到 conf 目录"; }
-    [ -n "$WEB_SRC" ]  || { cd /; rm -rf "$TMP"; die "压缩包中未找到 web 目录"; }
+    [ -n "${BIN_SRC:-}" ]  || { cd /; rm -rf "$TMP"; die "压缩包中未找到 natpunch 二进制"; }
+    [ -n "${CONF_SRC:-}" ] || { cd /; rm -rf "$TMP"; die "压缩包中未找到 conf 目录"; }
+    [ -n "${WEB_SRC:-}" ]  || { cd /; rm -rf "$TMP"; die "压缩包中未找到 web 目录"; }
     cp "$BIN_SRC" "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "拷贝二进制失败"; }
     chmod +x "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "赋予执行权限失败"; }
     mv "$DIR/natpunch.new" "$BIN" || { cd /; rm -rf "$TMP"; die "替换二进制失败"; }
@@ -351,7 +362,7 @@ upgrade() {
     rm -f natpunch.tar.gz
     BIN_SRC=$(find_first_file . natpunch)
     WEB_SRC=$(find_first_dir . web)
-    [ -n "$BIN_SRC" ] || { cd /; rm -rf "$TMP"; die "压缩包中未找到 natpunch 二进制"; }
+    [ -n "${BIN_SRC:-}" ] || { cd /; rm -rf "$TMP"; die "压缩包中未找到 natpunch 二进制"; }
     BAK=""
     if [ -f "$BIN" ]; then
         BAK="$BIN.bak.$(date +%Y%m%d%H%M%S)"
@@ -363,11 +374,11 @@ upgrade() {
     stop
     if ! mv "$DIR/natpunch.new" "$BIN"; then
         warn "替换二进制失败，尝试回滚"
-        [ -n "$BAK" ] && [ -f "$BAK" ] && cp "$BAK" "$BIN"
+        [ -n "${BAK:-}" ] && [ -f "$BAK" ] && cp "$BAK" "$BIN"
         [ "$WAS_RUNNING" = "1" ] && start
         cd /; rm -rf "$TMP"; die "替换二进制失败"
     fi
-    if [ -n "$WEB_SRC" ]; then
+    if [ -n "${WEB_SRC:-}" ]; then
         rm -rf "$WEB"
         cp -r "$WEB_SRC" "$WEB" || { cd /; rm -rf "$TMP"; die "拷贝 web 失败"; }
         info "已更新 web 目录"
@@ -387,10 +398,12 @@ start() {
         return 0
     fi
     kill_all; rm -f "$PID_FILE"
-    cd "$DIR" || die "无法进入 $DIR"
     info "启动服务 ..."
-    nohup "$BIN" >"$LOG" 2>&1 &
-    echo $! > "$PID_FILE"
+    (
+        cd "$DIR" || exit 1
+        nohup "$BIN" >"$LOG" 2>&1 &
+        echo $! > "$PID_FILE"
+    )
     sleep 2
     if is_running; then
         log "启动成功 (PID $(cat "$PID_FILE"))"
@@ -421,7 +434,24 @@ status() {
 register_autostart() {
     if is_openwrt; then
         info "注册 OpenWrt init.d 自启 ..."
-        cat > /etc/init.d/natpunch <<'EOL'
+        if [ -f /sbin/procd ] || grep -q "USE_PROCD" /etc/rc.common 2>/dev/null; then
+            cat > /etc/init.d/natpunch <<'EOL'
+#!/bin/sh /etc/rc.common
+START=99
+STOP=10
+USE_PROCD=1
+start_service() {
+    procd_open_instance
+    procd_set_param command /opt/natpunch/natpunch
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param cwd /opt/natpunch
+    procd_close_instance
+}
+EOL
+        else
+            cat > /etc/init.d/natpunch <<'EOL'
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
@@ -452,6 +482,7 @@ stop() {
     fi
 }
 EOL
+        fi
         chmod +x /etc/init.d/natpunch || die "无法赋予 init 脚本执行权限"
         /etc/init.d/natpunch enable 2>/dev/null && log "已启用开机自启 (init.d)" || warn "启用开机自启失败"
         return 0
@@ -461,14 +492,14 @@ EOL
         cat > /etc/systemd/system/natpunch.service <<EOF
 [Unit]
 Description=NatPunch Server
-After=network.target
+After=network-online.target
+Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$DIR
 ExecStart=$BIN
 Restart=always
 RestartSec=3
-PIDFile=$PID_FILE
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -482,13 +513,14 @@ unregister_autostart() {
     if is_openwrt; then
         /etc/init.d/natpunch stop  >/dev/null 2>&1 || true
         /etc/init.d/natpunch disable >/dev/null 2>&1 || true
-        rm -f /etc/init.d/natpunch /etc/rc.d/*natpunch 2>/dev/null
+        rm -f /etc/init.d/natpunch
+        rm -f /etc/rc.d/S*natpunch /etc/rc.d/K*natpunch 2>/dev/null
     fi
     if has_systemd; then
-        timeout 8 systemctl stop natpunch >/dev/null 2>&1 || true
-        timeout 8 systemctl disable natpunch >/dev/null 2>&1 || true
+        tcmd 8 systemctl stop natpunch >/dev/null 2>&1 || true
+        tcmd 8 systemctl disable natpunch >/dev/null 2>&1 || true
         rm -f /etc/systemd/system/natpunch.service
-        timeout 8 systemctl daemon-reload >/dev/null 2>&1 || true
+        tcmd 8 systemctl daemon-reload >/dev/null 2>&1 || true
     fi
 }
 cleanup_download() {
@@ -496,8 +528,8 @@ cleanup_download() {
     if command -v uci >/dev/null 2>&1; then
         uci show uhttpd.download >/dev/null 2>&1 && { uci delete uhttpd.download 2>/dev/null; uci commit uhttpd 2>/dev/null; info "已删除 uhttpd download"; }
         uci show firewall.allow-npc-download >/dev/null 2>&1 && { uci delete firewall.allow-npc-download 2>/dev/null; uci commit firewall 2>/dev/null; info "已删除 firewall 规则"; }
-        timeout 15 /etc/init.d/uhttpd restart >/dev/null 2>&1
-        timeout 20 /etc/init.d/firewall restart >/dev/null 2>&1
+        tcmd 15 /etc/init.d/uhttpd restart >/dev/null 2>&1
+        tcmd 20 /etc/init.d/firewall restart >/dev/null 2>&1
     fi
     [ -d "/opt/npc_download" ] && rm -rf /opt/npc_download 2>/dev/null && info "已删除旧版下载目录"
 }
@@ -505,9 +537,9 @@ uninstall() {
     safe_dir; stop; kill_all
     info "清理自启服务 ..."
     unregister_autostart; cleanup_download
-    if [ -n "$DIR" ] && [ "$DIR" != "/" ]; then
+    if [ -n "${DIR:-}" ] && [ "$DIR" != "/" ]; then
         info "删除安装目录 $DIR ..."
-        timeout 20 rm -rf "$DIR" || warn "删除 $DIR 超时，请稍后手动清理"
+        tcmd 20 rm -rf "$DIR" || warn "删除 $DIR 超时，请稍后手动清理"
     fi
     rm -rf "$LOCK_DIR" 2>/dev/null || true
     log "已卸载"
@@ -515,19 +547,22 @@ uninstall() {
 # ================= 信息获取 =================
 get_ip() {
     IP=""
-    if command -v wget >/dev/null 2>&1; then
-        IP=$(wget -qO- --timeout=3 https://api.ipify.org 2>/dev/null | head -n1)
-    elif command -v curl >/dev/null 2>&1; then
-        IP=$(curl -fsSL --max-time 3 https://api.ipify.org 2>/dev/null | head -n1)
-    fi
-    [ -z "$IP" ] && IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
-    [ -z "$IP" ] && IP=$(ip addr 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    [ -n "$IP" ] || IP="<本机IP>"
+    for u in "https://api.ipify.org" "https://ifconfig.me/ip" "https://ipinfo.io/ip"; do
+        if command -v wget >/dev/null 2>&1; then
+            IP=$(wget -qO- --timeout=3 "$u" 2>/dev/null | head -n1)
+        elif command -v curl >/dev/null 2>&1; then
+            IP=$(curl -fsSL --max-time 3 "$u" 2>/dev/null | head -n1)
+        fi
+        [ -n "${IP:-}" ] && break
+    done
+    [ -z "${IP:-}" ] && IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
+    [ -z "${IP:-}" ] && IP=$(ip addr 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    [ -n "${IP:-}" ] || IP="<本机IP>"
     echo "$IP"
 }
 get_web_port() {
     P=$(get_kv web_port)
-    [ -n "$P" ] && echo "$P" && return 0
+    [ -n "${P:-}" ] && echo "$P" && return 0
     echo "8080"
 }
 # ================= 菜单 =================
@@ -577,7 +612,7 @@ do_start() {
     if [ $RC -eq 0 ]; then
         PORT=$(get_web_port)
         if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
         else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""; kv "面板地址" "$SCHEME://$HOST:$PORT"; echo ""
     fi
@@ -590,7 +625,7 @@ do_restart() {
     if [ $RC -eq 0 ]; then
         PORT=$(get_web_port)
         if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
         else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""; kv "面板地址" "$SCHEME://$HOST:$PORT"; echo ""
     fi
@@ -600,20 +635,20 @@ do_passwd() {
     if [ ! -f "$CONF" ]; then die "NatPunch 未安装，找不到配置文件 $CONF"; fi
     title "修改面板连接配置"
     acquire_lock
-    OLD_USER=$(get_kv web_username); [ -n "$OLD_USER" ] || OLD_USER="admin"
+    OLD_USER=$(get_kv web_username); [ -n "${OLD_USER:-}" ] || OLD_USER="admin"
     OLD_PORT=$(get_web_port)
     section "当前信息"
     kv "用户名" "$OLD_USER"; kv "Web 端口" "$OLD_PORT"
     info "客户端连接端口保持不变（避免已在线客户端失联）"
     section "输入新信息（回车保持当前值）"
     printf "  新 Web 端口 [回车保持 %s]: " "$OLD_PORT"; read IN_PORT
-    [ -n "$IN_PORT" ] || IN_PORT="$OLD_PORT"
+    [ -n "${IN_PORT:-}" ] || IN_PORT="$OLD_PORT"
     case "$IN_PORT" in *[!0-9]*) die "端口必须是纯数字" ;; esac
     [ "$IN_PORT" -ge 1 ] && [ "$IN_PORT" -le 65535 ] || die "端口范围必须是 1-65535"
     printf "  新用户名 [回车保持 %s]: " "$OLD_USER"; read IN_USER
-    [ -n "$IN_USER" ] || IN_USER="$OLD_USER"
-    printf "  新密码 (不能为空): "; read IN_PASS
-    [ -n "$IN_PASS" ] || die "密码不能为空"
+    [ -n "${IN_USER:-}" ] || IN_USER="$OLD_USER"
+    read_secret "新密码 (不能为空): " IN_PASS
+    [ -n "${IN_PASS:-}" ] || die "密码不能为空"
     case "$IN_USER" in *"="*) die "用户名不能包含 =" ;; esac
     case "$IN_PASS" in *"="*) die "密码不能包含 =" ;; esac
     cp "$CONF" "$CONF.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null
@@ -623,7 +658,7 @@ do_passwd() {
     restart; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
         if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
         else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
@@ -641,18 +676,21 @@ do_upgrade() {
     kv "当前版本" "$(get_current_ver)"
     info "正在获取最新版本 ..."
     LATEST=$(get_latest_ver)
-    if [ -n "$LATEST" ]; then
+    if [ -n "${LATEST:-}" ]; then
         info "GitHub 最新版本: $LATEST"
     else
         warn "无法获取最新版本号（将直接下载最新发布）"
     fi
     printf "  目标版本 [回车使用最新版]: "; read IN_VER
-    case "$IN_VER" in *"/"*|*" "*|*".."*) die "版本号不合法" ;; esac
+    case "${IN_VER:-}" in
+        '') ;;
+        *[!A-Za-z0-9._-]*) die "版本号不合法（仅允许字母数字 . _ -）" ;;
+    esac
     acquire_lock; upgrade "$IN_VER"; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
         PORT=$(get_web_port)
         if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "$HOST" ] || HOST="$(get_ip)"
+            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
         else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
@@ -668,7 +706,7 @@ do_uninstall() {
     printf '%b\n' "  ${C_YELLOW}[WARN]${C_RESET} 即将卸载 NatPunch"
     printf '%b\n' "  ${C_DIM}       将删除: $DIR、自启服务、全部配置（含证书）${C_RESET}"
     printf "  确认卸载？[y/N]: "; read ans
-    case "$ans" in y|Y|yes|YES) ;; *) echo "  已取消"; return 0 ;; esac
+    case "${ans:-}" in y|Y|yes|YES) ;; *) echo "  已取消"; return 0 ;; esac
     acquire_lock; uninstall; release_lock
     echo ""
     printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
@@ -678,7 +716,8 @@ do_uninstall() {
     exit 0
 }
 # ================= 入口 =================
-trap 'release_lock' EXIT INT TERM
+trap 'release_lock; exit 130' INT TERM
+trap 'release_lock' EXIT
 if [ -n "${1:-}" ]; then
     case "$1" in
         install)   do_install ;;
@@ -700,7 +739,7 @@ fi
 while :; do
     show_menu
     read CHOICE
-    case "$CHOICE" in
+    case "${CHOICE:-}" in
         1) do_install ;; 2) do_start ;; 3) do_stop ;; 4) do_restart ;; 5) do_status ;;
         6) do_passwd ;; 7) do_upgrade ;; 8) do_uninstall ;; 0) echo "已退出"; exit 0 ;;
         *) echo "无效选项，请重新输入" ;;
