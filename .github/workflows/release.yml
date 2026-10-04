@@ -184,7 +184,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum *.tar.gz > SHA256SUMS
+          # 包与静态校验器一并入哈希清单：校验器由安装脚本下载后先比对 SHA256SUMS 再执行（防镜像替换校验器）
+          sha256sum *.tar.gz minisign-check-linux-* > SHA256SUMS
           cat SHA256SUMS
 
       - name: Sign checksums (minisign)

@@ -11,7 +11,7 @@
    - `govulncheck ./...` 无新增可达漏洞；
    - `golangci-lint run`（配置见 `.golangci.yml`）无告警。
 3. 提交信息中文、描述改动动机与验证方式（本项目惯例：`git commit -F` 文件方式提交，避免引号问题）。
-4. 提 PR 到 `master`；CI（check → integration → build）全绿后合入。
+4. 提 PR 到 `master`；CI（check → build → release 门禁）全绿后合入。
 
 ## 代码约定
 

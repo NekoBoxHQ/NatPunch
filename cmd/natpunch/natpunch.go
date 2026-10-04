@@ -20,6 +20,7 @@ import (
 
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/NekoBoxHQ/NatPunch/lib/install"
+	"github.com/NekoBoxHQ/NatPunch/lib/natpunch_mux"
 	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/NekoBoxHQ/NatPunch/server/connection"
 	"github.com/NekoBoxHQ/NatPunch/server/proxy"
@@ -46,7 +47,7 @@ var (
 func isServiceCommand(args []string) bool {
 	for _, v := range args[1:] {
 		switch v {
-		case "install", "start", "stop", "uninstall", "restart", "service":
+		case "install", "start", "stop", "uninstall", "restart", "service", "reload", "update":
 			return true
 		}
 	}
@@ -105,6 +106,15 @@ func main() {
 
 	if err := beego.LoadAppConfig("ini", filepath.Join(common.GetRunPath(), "conf", "natpunch.conf")); err != nil {
 		log.Fatalln("load config file error", err.Error())
+	}
+
+	// 初始化数据层上限（复评🟠6：上限校验下沉 NewClient/NewTask，所有入口统一生效）
+	file.MaxClients = beego.AppConfig.DefaultInt("max_clients", 0)
+	file.MaxTunnelsPerClient = beego.AppConfig.DefaultInt("max_tunnels_per_client", 0)
+
+	// 写队列上限注入（复评🟠7：默认 16384 包≈64MB，0=不限）
+	if v := beego.AppConfig.DefaultInt64("mux_write_queue_max", 16384); v >= 0 {
+		natpunch_mux.WriteQueueMax = v
 	}
 
 	common.InitPProfFromFile()
@@ -507,7 +517,7 @@ func initConfig(confDir string) {
 	if !common.FileExists(confPath) {
 		webPassword := crypt.GetRandomString(8)
 		publicVkey := crypt.GetRandomString(16) // 公共密钥随机化，避免写死 123（F1-8）
-		content := strings.Replace(defaultNpsConf, "web_password=123", "web_password="+webPassword, 1)
+		content := strings.Replace(defaultNatPunchConf, "web_password=123", "web_password="+webPassword, 1)
 		content = strings.Replace(content, "public_vkey=123", "public_vkey="+publicVkey, 1)
 		f, err := os.Create(confPath)
 		if err != nil {
@@ -520,7 +530,7 @@ func initConfig(confDir string) {
 	}
 }
 
-const defaultNpsConf = `http_proxy_ip=0.0.0.0
+const defaultNatPunchConf = `http_proxy_ip=0.0.0.0
 http_proxy_port=0
 https_proxy_port=0
 show_http_proxy_port=true
@@ -534,6 +544,9 @@ public_vkey=123
 # 客户端/隧道数量上限（0=不限，沿用存量语义；推荐 max_clients=100、max_tunnels_per_client=20，见文档）
 max_clients=0
 max_tunnels_per_client=0
+
+# mux 写队列排队上限（包数，0=不限；默认 16384 约 64MB，千兆级大流量下防批量掉线）
+mux_write_queue_max=16384
 
 # 全局并发连接数上限（0=不限，沿用存量语义；推荐 10000，见文档）
 max_global_conn=0

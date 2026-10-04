@@ -20,6 +20,12 @@ type DbUtils struct {
 var (
 	Db   *DbUtils
 	once sync.Once
+
+	// 客户端/隧道数量上限（从 natpunch.conf 读取，0=不限，存量语义）。
+	// 启动时由 cmd/natpunch 初始化；数据层统一校验，使 bridge 协议注册、
+	// Web 自注册、面板新建客户端等所有入口一致生效（复评🟠6：此前上限只在 bridge 路径校验）
+	MaxClients          int
+	MaxTunnelsPerClient int
 )
 
 // init csv from file
@@ -93,6 +99,10 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 }
 
 func (s *DbUtils) NewTask(t *Tunnel) (err error) {
+	// 每客户端隧道数上限（数据层统一校验，所有入口生效；0=不限）
+	if MaxTunnelsPerClient > 0 && t.Client != nil && s.GetTaskCountByClient(t.Client.Id) >= MaxTunnelsPerClient {
+		return errors.New(fmt.Sprintf("client %d task count >= max_tunnels_per_client %d", t.Client.Id, MaxTunnelsPerClient))
+	}
 	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*Tunnel)
 		if (v.Mode == "secret" || v.Mode == "p2p") && v.Password == t.Password && t.Password != "" {
@@ -251,6 +261,10 @@ func (s *DbUtils) GetTaskCountByClient(clientId int) int {
 }
 
 func (s *DbUtils) NewClient(c *Client) error {
+	// 客户端注册上限（数据层统一校验，所有入口生效；0=不限）
+	if MaxClients > 0 && s.GetClientCount() >= MaxClients {
+		return errors.New(fmt.Sprintf("client count %d >= max_clients %d", s.GetClientCount(), MaxClients))
+	}
 	var isNotSet bool
 	if c.WebUserName != "" && !s.VerifyUserName(c.WebUserName, c.Id) {
 		return errors.New("web login username duplicate, please reset")

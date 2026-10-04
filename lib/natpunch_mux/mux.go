@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// WriteQueueMax 写队列排队上限（包数，0=不限）。
+// 默认 16384 包（约 64MB，按数据面 1 包 ≤4KB 计），由配置 mux_write_queue_max 注入
+// （复评🟠7：4096 硬编码约 16MB，千兆级客户端大流量下可能批量掉线）
+var WriteQueueMax int64 = 16384
+
 const (
 	muxPingFlag uint8 = iota
 	muxNewConnOk
@@ -76,6 +81,7 @@ func NewMux(c net.Conn, connType string, pingCheckThreshold int) *Mux {
 		counter:            newLatencyCounter(),
 	}
 	m.writeQueue.New()
+	m.writeQueue.SetMaxLength(WriteQueueMax) // 配置注入的写队列上限（复评🟠7）
 	m.newConnQueue.New()
 	//read session by flag
 	m.readSession()

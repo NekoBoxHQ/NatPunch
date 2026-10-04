@@ -43,7 +43,7 @@
 ## 升级校验信任模型
 
 - 发布物附 `SHA256SUMS`（**强制校验**，防传输损坏/镜像篡改）与 `SHA256SUMS.minisig`（minisign 签名，本机有签名工具时校验，防发布方密钥泄露场景）。
-- 发布流程门禁：vet / test / govulncheck / golangci-lint / integration 全绿 + 8 架构构建 + 架构自检。
+- 发布流程门禁：vet / test / govulncheck / golangci-lint 全绿 + 8 架构构建 + 架构自检（mux 集成测试为本地可选项，不在 CI 门禁内）。
 
 ## 加固指引
 

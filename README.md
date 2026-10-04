@@ -1,5 +1,7 @@
 ﻿# NatPunch
 
+> 基于 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版，与原版的差异见 [NOTICE](./NOTICE)。本 fork 已彻底重构：代码库内不再保留上游标识，仅按 GPLv3 §5 要求保留版权声明。
+
 > 轻量级内网穿透 / 无公网设备管理平台。可选 TLS 桥接加密（支持证书指纹固定），TCP/UDP 隧道 + HTTP/SOCKS5 代理，自动化运维管理软路由与服务器。
 
 ## 特性

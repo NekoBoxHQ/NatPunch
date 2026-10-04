@@ -38,7 +38,7 @@
 - 面板登录：bcrypt 密码 + 会话 Cookie（`SameSite=Strict`，HTTPS 下 `Secure`），登录后会话 ID 轮换（防固定）。
 - 变更操作一律 POST + 会话鉴权（GET 只做渲染，见 D11）。
 - 终端 SSH：仅管理员或本人客户端可开 shell；WebSocket Origin 白名单；**每次开 shell 记录审计日志** `TERMINAL AUDIT: user [x] opened shell on client id [y] ...`。
-- 客户端 VKEY 为 128bit（crypto/rand）。**存量 40bit vkey**：登录面板 → 客户端 → 重置 VKEY → 更新客户端配置（旧 vkey 立即失效）。
+- 客户端 VKEY 为 128bit（crypto/rand）。**存量 40bit vkey**（旧版生成，如 `3060aada57`）：面板无自动轮换入口（`ResetVkey` 已移除，避免运维误操作导致批量掉线）。手动轮换：面板删除旧客户端 → 重新添加（vkey 留空自动生成 32 位长 key）→ 客户端统一重配新 vkey。**注意：升级服务端不会改变已有 vkey，vkey 只由客户端注册时生成**。
 
 ## 3. 资源上限（防滥用/耗尽）
 
@@ -69,11 +69,11 @@ UDP/p2p 工作池内置上限（单源 16、4096 源、TTL 5 分钟、满即丢�
 - `govulncheck`：**代码 0 漏洞、import 包 0 漏洞**；残余 1 个 module 级（GO-2026-5932，`golang.org/x/crypto/openpgp` 未维护且本项目未使用，无修复版本，不可达）。
 - `kcp-go` 保持 `v5.4.20+incompatible`：无已知漏洞；v5.6+ 因 module path 变更为 `/v5` 需改 import（列为后续项）。
 - `beego`（1.12.0，replace 至 NekoBoxHQ 维护分支）历史 CVE 评估见 [SECURITY.md](../SECURITY.md)；升级 beego 2.x 为后续项。
-- CI 门禁：`go vet` / `go test` / `govulncheck` / `golangci-lint` / integration（Docker）全绿才允许发布。
+- CI 门禁：`go vet` / `go test` / `govulncheck` / `golangci-lint` 全绿才允许发布；mux 集成测试（需 Docker + tc + NET_ADMIN）为可选本地项，不在发布门禁内。
 
 ## 6. 运维红线
 
 - 日志/接口不下发密码与 vkey（DTO 脱敏，阶段三 #18）；日志出现密码即视为事故。
 - `pprof` 被强制绑回环（`127.0.0.1:6060`），不要尝试公网暴露。
-- 不要修改已发布包的 conf 权限（安装器已收敛到 0700/0600）；配置内含 vkey 与口令。
+- 不要修改已发布包的 conf 权限（安装器默认 conf 目录 0755、文件/日志 0640，二进制 0755）；配置内含 vkey 与口令，公网部署建议手动收紧为 0700/0600。
 - 只用于**合法运维场景**（见 README AUP）；终端会话有审计日志，可追溯谁在何时对哪台设备开了 shell。

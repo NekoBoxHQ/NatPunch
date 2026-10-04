@@ -47,6 +47,38 @@ func NewP2PServer(p2pPort int) *P2PServer {
 	}
 }
 
+// cleanupLoop 后台清扫：TTL 仅在条目被再次访问时评估，若无后台清扫，
+// 攻击者向 p2p 端口发 "<key>|provider" 即可永久创建条目导致 map 无界增长（复评🔴2）
+func (s *P2PServer) cleanupLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			s.mu.Lock()
+			for k, v := range s.p2p {
+				if now.Sub(v.lastSeen) > p2pEntryTTL {
+					delete(s.p2p, k)
+				}
+			}
+			s.mu.Unlock()
+		case <-stop:
+			return
+		}
+	}
+}
+
+// Close 关闭监听并停止后台清扫（进程退出/服务回收时调用）
+func (s *P2PServer) Close() {
+	if s.listener != nil {
+		_ = s.listener.Close()
+	}
+	if s.srcPools != nil {
+		s.srcPools.Close()
+	}
+}
+
 func (s *P2PServer) Start() error {
 	logs.Info("start p2p server port", s.p2pPort)
 	var err error
@@ -55,6 +87,9 @@ func (s *P2PServer) Start() error {
 		return err
 	}
 	s.srcPools = newSourcePoolSet(srcPoolCapacity, srcPoolMaxPools, s.p2pPoolWorker)
+	stop := make(chan struct{})
+	go s.cleanupLoop(stop)
+	defer close(stop)
 	for {
 		buf := common.BufPoolUdp.Get().([]byte)
 		n, addr, err := s.listener.ReadFromUDP(buf)

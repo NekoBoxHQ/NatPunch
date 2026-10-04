@@ -33,7 +33,14 @@ func (Self *priorityQueue) New() {
 	Self.lowestChain.new(256)
 	locker := new(sync.Mutex)
 	Self.cond = sync.NewCond(locker)
-	Self.maxLength = 4096 // 宽松默认：4096 个包（数据面 1 包通常 ≤32KB），可覆盖绝大多数隧道吞吐
+	Self.maxLength = WriteQueueMax // 默认 WriteQueueMax（约 64MB/包数），可由配置 mux_write_queue_max 覆盖（复评🟠7）
+}
+
+// SetMaxLength 设置排队上限（包数；0=不限）。供配置注入，须在 Push 前调用。
+func (Self *priorityQueue) SetMaxLength(max int64) {
+	if max >= 0 {
+		Self.maxLength = max
+	}
 }
 
 // Push 入队；队列达到上限时返回错误（调用方应关闭 mux 并打独立日志）

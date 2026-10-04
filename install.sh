@@ -128,37 +128,56 @@ log "sha256 校验通过"
 MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
 sig_ok=0
 if [ -n "${MINISIGN_PUBKEY:-}" ]; then
-    fetch "$BASE_URL/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS.minisig" || die "获取签名失败"
-    # 1) 系统 minisign（存在即强制校验，失败即中止）
-    if command -v minisign >/dev/null 2>&1; then
-        minisign -Vm "$TMP_DIR/SHA256SUMS" -P "$MINISIGN_PUBKEY" -x "$TMP_DIR/SHA256SUMS.minisig" || die "minisign 签名校验失败"
-        log "minisign 签名校验通过"
-        sig_ok=1
-    fi
-    # 2) 内置静态校验器（与发布物同源下载，架构匹配；工具不可得才降级）
-    if [ "$sig_ok" -eq 0 ]; then
-        case "$ARCH" in
-            x86_64|amd64) MSC_ARCH="amd64";;
-            aarch64|arm64) MSC_ARCH="arm64";;
-            armv7l|armv6l) MSC_ARCH="arm";;
-            mips|mipsel|mipsle) MSC_ARCH="mipsle";;
-            *) MSC_ARCH="" ;;
-        esac
-        if [ -n "$MSC_ARCH" ]; then
-            MSC="minisign-check-linux-$MSC_ARCH"
-            if fetch "$BASE_URL/$MSC" "$TMP_DIR/$MSC"; then
-                chmod +x "$TMP_DIR/$MSC" 2>/dev/null || true
-                printf 'untrusted comment: minisign public key\n%s\n' "$MINISIGN_PUBKEY" > "$TMP_DIR/natpunch.pub"
-                if "$TMP_DIR/$MSC" "$TMP_DIR/natpunch.pub" "$TMP_DIR/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS"; then
-                    log "minisign 签名校验通过（内置静态校验器）"
-                    sig_ok=1
+    if fetch "$BASE_URL/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS.minisig"; then
+        # 1) 系统 minisign（存在即强制校验，失败即中止）
+        if command -v minisign >/dev/null 2>&1; then
+            minisign -Vm "$TMP_DIR/SHA256SUMS" -P "$MINISIGN_PUBKEY" -x "$TMP_DIR/SHA256SUMS.minisig" || die "minisign 签名校验失败"
+            log "minisign 签名校验通过"
+            sig_ok=1
+        fi
+        # 2) 内置静态校验器（与包同源下载；其哈希须在已签名的 SHA256SUMS 内，否则拒绝执行）
+        if [ "$sig_ok" -eq 0 ]; then
+            case "$ARCH" in
+                x86_64|amd64) MSC_ARCH="amd64";;
+                aarch64|arm64) MSC_ARCH="arm64";;
+                armv7l|armv6l) MSC_ARCH="arm";;
+                mips|mipsel|mipsle) MSC_ARCH="mipsle";;
+                *) MSC_ARCH="" ;;
+            esac
+            if [ -n "$MSC_ARCH" ]; then
+                MSC="minisign-check-linux-$MSC_ARCH"
+                if fetch "$BASE_URL/$MSC" "$TMP_DIR/$MSC"; then
+                    MSC_EXPECT="$(awk -v f="$MSC" '$2==f {print $1; exit}' "$TMP_DIR/SHA256SUMS")"
+                    if [ -n "$MSC_EXPECT" ]; then
+                        if command -v sha256sum >/dev/null 2>&1; then
+                            MSC_ACTUAL="$(sha256sum "$TMP_DIR/$MSC" | awk '{print $1}')"
+                        elif command -v shasum >/dev/null 2>&1; then
+                            MSC_ACTUAL="$(shasum -a 256 "$TMP_DIR/$MSC" | awk '{print $1}')"
+                        else
+                            MSC_ACTUAL=""
+                        fi
+                        if [ -n "$MSC_ACTUAL" ] && [ "$MSC_EXPECT" = "$MSC_ACTUAL" ]; then
+                            chmod +x "$TMP_DIR/$MSC" 2>/dev/null || true
+                            printf 'untrusted comment: minisign public key\n%s\n' "$MINISIGN_PUBKEY" > "$TMP_DIR/natpunch.pub"
+                            if "$TMP_DIR/$MSC" "$TMP_DIR/natpunch.pub" "$TMP_DIR/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS"; then
+                                log "minisign 签名校验通过（内置静态校验器）"
+                                sig_ok=1
+                            else
+                                die "minisign 签名校验失败（内置校验器）"
+                            fi
+                        else
+                            warn "内置校验器 $MSC 哈希不在已签名 SHA256SUMS 内，拒绝执行，跳过签名校验（SHA256 已强制校验）"
+                        fi
+                    else
+                        warn "SHA256SUMS 无 $MSC 条目，拒绝执行，跳过签名校验（SHA256 已强制校验）"
+                    fi
                 else
-                    die "minisign 签名校验失败（内置校验器）"
+                    warn "无法下载内置校验器 $MSC，跳过签名校验（SHA256 已强制校验）"
                 fi
-            else
-                warn "无法下载内置校验器 $MSC，跳过签名校验（SHA256 已强制校验）"
             fi
         fi
+    else
+        warn "发布未提供 SHA256SUMS.minisig，跳过签名校验（SHA256 已强制校验）"
     fi
 fi
 [ "$sig_ok" -eq 1 ] || warn "未找到签名校验工具，跳过签名校验（SHA256 已强制校验）"
