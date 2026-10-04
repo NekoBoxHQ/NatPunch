@@ -228,6 +228,28 @@ func (s *DbUtils) DelClient(id int) error {
 	return nil
 }
 
+// GetClientCount 返回已注册客户端总数（F1-8：max_clients 限额用）
+func (s *DbUtils) GetClientCount() int {
+	cnt := 0
+	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
+		cnt++
+		return true
+	})
+	return cnt
+}
+
+// GetTaskCountByClient 返回指定客户端已创建的隧道数（F1-8：max_tunnels_per_client 限额用）
+func (s *DbUtils) GetTaskCountByClient(clientId int) int {
+	cnt := 0
+	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
+		if v, ok := value.(*Tunnel); ok && v.Client != nil && v.Client.Id == clientId {
+			cnt++
+		}
+		return true
+	})
+	return cnt
+}
+
 func (s *DbUtils) NewClient(c *Client) error {
 	var isNotSet bool
 	if c.WebUserName != "" && !s.VerifyUserName(c.WebUserName, c.Id) {
@@ -291,6 +313,9 @@ func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
 func (s *DbUtils) UpdateClient(t *Client) error {
 	s.JsonDb.Clients.Store(t.Id, t)
 	if t.RateLimit == 0 {
+		if t.Rate != nil {
+			t.Rate.Stop() // 重建前先停旧 ticker，避免 goroutine 泄漏（F1-8）
+		}
 		t.Rate = rate.NewRate(int64((2 << 23) * 1024))
 		t.Rate.Start()
 	}

@@ -90,10 +90,18 @@ jobs:
           find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
           ls -la dist/
 
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
           generate_release_notes: true
 
       - name: Notify Telegram Group

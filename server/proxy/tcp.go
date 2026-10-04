@@ -162,5 +162,5 @@ func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
 		rb = nil
 	}
 	logs.Info("http proxy request, method %s, host %s, client %d, remote %s", r.Method, addr, s.task.Client.Id, c.Conn.RemoteAddr())
-	return s.DealClient(c, s.task.Client, addr, rb, common.CONN_TCP, nil, s.task.Client.Flow, s.task.Target.LocalProxy, nil, nil)
+	return s.DealClient(c, s.task.Client, addr, rb, common.CONN_TCP, nil, s.task.Client.Flow, s.task.Target.LocalProxy, s.task, nil)
 }

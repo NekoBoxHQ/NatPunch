@@ -221,8 +221,12 @@ prompt_credentials() {
     esac
     printf "  用户名 [默认 admin]: "; read IN_USER
     [ -n "${IN_USER:-}" ] || IN_USER="admin"
-    read_secret "密码   [默认 123  ]: " IN_PASS
-    [ -n "${IN_PASS:-}" ] || IN_PASS="123"
+    # 密码强制输入：空输入不允许落 123（F1-9）
+    while :; do
+        read_secret "密码   [必填，不允许为空]: " IN_PASS
+        [ -n "${IN_PASS:-}" ] && break
+        warn "密码不能为空，请重新输入"
+    done
     case "$IN_USER" in *"="*) die "用户名不能包含 =" ;; esac
     case "$IN_PASS" in *"="*) die "密码不能包含 =" ;; esac
     NEW_PORT="$IN_PORT"; NEW_BRIDGE="$IN_BRIDGE"; NEW_TLS_PORT="$IN_TLS_PORT"; NEW_USER="$IN_USER"; NEW_PASS="$IN_PASS"

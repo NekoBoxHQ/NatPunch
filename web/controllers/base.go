@@ -2,15 +2,12 @@ package controllers
 
 import (
 	"html"
-	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"ehang.io/nps/bridge"
 
 	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/crypt"
 	"ehang.io/nps/lib/file"
 	"ehang.io/nps/lib/version"
 	"ehang.io/nps/server"
@@ -30,32 +27,26 @@ func (s *BaseController) Prepare() {
 	controllerName, actionName := s.GetControllerAndAction()
 	s.controllerName = strings.ToLower(controllerName[0 : len(controllerName)-10])
 	s.actionName = strings.ToLower(actionName)
-	// web api verify
-	// param 1 is md5(authKey+Current timestamp)
-	// param 2 is timestamp (It's limited to 20 seconds.)
-	md5Key := s.getEscapeString("auth_key")
-	timestamp := s.GetIntNoErr("timestamp")
-	configKey := beego.AppConfig.String("auth_key")
-	if configKey == "" {
-		configKey = crypt.GetRandomString(64)
+	// 纯会话认证（auth_key query 认证链路已移除，见 F1-1）
+	if s.GetSession("auth") != true {
+		s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
 	}
-	timeNowUnix := time.Now().Unix()
-	if !(md5Key != "" && (math.Abs(float64(timeNowUnix-int64(timestamp))) <= 20) && (crypt.Md5(configKey+strconv.Itoa(timestamp)) == md5Key)) {
-		if s.GetSession("auth") != true {
-			s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
+	// isAdmin 三路分支（fail-closed，定稿 v3 F1-1 第 6 条）
+	switch v := s.GetSession("isAdmin").(type) {
+	case bool:
+		if v {
+			s.Data["isAdmin"] = true
+		} else if cid, ok := s.GetSession("clientId").(int); ok {
+			s.Ctx.Input.SetData("client_id", cid)
+			s.Ctx.Input.SetParam("client_id", strconv.Itoa(cid))
+			s.Data["isAdmin"] = false
+			s.Data["username"] = s.GetSession("username")
+			s.CheckUserAuth()
+		} else {
+			s.Data["isAdmin"] = false
 		}
-	} else {
-		s.SetSession("isAdmin", true)
-		s.Data["isAdmin"] = true
-	}
-	if s.GetSession("isAdmin") != nil && !s.GetSession("isAdmin").(bool) {
-		s.Ctx.Input.SetData("client_id", s.GetSession("clientId").(int))
-		s.Ctx.Input.SetParam("client_id", strconv.Itoa(s.GetSession("clientId").(int)))
+	default:
 		s.Data["isAdmin"] = false
-		s.Data["username"] = s.GetSession("username")
-		s.CheckUserAuth()
-	} else {
-		s.Data["isAdmin"] = true
 	}
 	s.Data["allow_user_login"], _ = beego.AppConfig.Bool("allow_user_login")
 	s.Data["allow_flow_limit"], _ = beego.AppConfig.Bool("allow_flow_limit")

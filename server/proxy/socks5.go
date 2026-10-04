@@ -172,7 +172,7 @@ func (s *Sock5ModeServer) doConnect(c net.Conn, command uint8) {
 	}
 	s.DealClient(conn.NewConn(c), s.task.Client, addr, nil, ltype, func() {
 		s.sendReply(c, succeeded)
-	}, s.task.Flow, s.task.Target.LocalProxy, nil, nil)
+	}, s.task.Flow, s.task.Target.LocalProxy, s.task, nil)
 	return
 }
 
@@ -301,18 +301,21 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 	}()
 
 	go func() {
-		var l int32
 		b := common.BufPoolUdp.Get().([]byte)
 		defer common.BufPoolUdp.Put(b)
 		defer c.Close()
 		for {
-			if err := binary.Read(target, binary.LittleEndian, &l); err != nil || l >= common.PoolSizeUdp || l <= 0 {
-				logs.Warn("read len bytes error", err.Error())
+			var l int32
+			if err := binary.Read(target, binary.LittleEndian, &l); err != nil {
+				logs.Warn("read len bytes error: %v", err)
 				return
 			}
-			binary.Read(target, binary.LittleEndian, b[:l])
-			if err != nil {
-				logs.Warn("read data form client error", err.Error())
+			if l <= 0 || l >= common.PoolSizeUdp {
+				logs.Warn("bad len %d", l)
+				return
+			}
+			if _, err := io.ReadFull(target, b[:l]); err != nil {
+				logs.Warn("read data: %v", err)
 				return
 			}
 			if _, err := reply.WriteTo(b[:l], clientAddr); err != nil {

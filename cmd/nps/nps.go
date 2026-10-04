@@ -469,11 +469,9 @@ func initConfig(confDir string) {
 	confPath := filepath.Join(confDir, "natpunch.conf")
 	if !common.FileExists(confPath) {
 		webPassword := crypt.GetRandomString(8)
-		authKey := crypt.GetRandomString(8)
-		authCryptKey := crypt.GetRandomString(16)
+		publicVkey := crypt.GetRandomString(16) // 公共密钥随机化，避免写死 123（F1-8）
 		content := strings.Replace(defaultNpsConf, "web_password=123", "web_password="+webPassword, 1)
-		content = strings.Replace(content, "auth_key=123", "auth_key="+authKey, 1)
-		content = strings.Replace(content, "auth_crypt_key =213", "auth_crypt_key ="+authCryptKey, 1)
+		content = strings.Replace(content, "public_vkey=123", "public_vkey="+publicVkey, 1)
 		f, err := os.Create(confPath)
 		if err != nil {
 			return
@@ -482,8 +480,6 @@ func initConfig(confDir string) {
 		f.WriteString(content)
 		logs.Info("Auto-generated default config file:", confPath)
 		logs.Info("Web login username: admin, password:", webPassword)
-		logs.Info("auth_key:", authKey)
-		logs.Info("auth_crypt_key:", authCryptKey)
 	}
 }
 
@@ -497,6 +493,10 @@ bridge_port=8024
 bridge_ip=0.0.0.0
 
 public_vkey=123
+
+# 客户端/隧道数量上限（0=不限，沿用存量语义；推荐 max_clients=100、max_tunnels_per_client=20，见文档）
+max_clients=0
+max_tunnels_per_client=0
 
 flow_store_interval=1
 
@@ -512,9 +512,6 @@ web_base_url=
 web_open_ssl=false
 web_cert_file=conf/server.pem
 web_key_file=conf/server.key
-
-auth_key=123
-auth_crypt_key =213
 
 allow_user_login=true
 allow_user_register=false

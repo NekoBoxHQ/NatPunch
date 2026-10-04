@@ -41,7 +41,15 @@ func (s *connMap) Set(id int32, v *conn) {
 }
 
 func (s *connMap) Close() {
+	// 先快照再逐个关闭：v.Close() 会回调 Delete（加锁写），
+	// 遍历中写 map 会触发 concurrent map iteration and write（F1-5）
+	s.RLock()
+	conns := make([]*conn, 0, len(s.cMap))
 	for _, v := range s.cMap {
+		conns = append(conns, v)
+	}
+	s.RUnlock()
+	for _, v := range conns {
 		_ = v.Close() // close all the connections in the mux
 	}
 }

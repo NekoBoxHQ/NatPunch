@@ -546,6 +546,13 @@ loop:
 				c.WriteAddFail()
 				break loop
 			} else {
+				// 注册上限校验（F1-8）：max_clients=0 表示不限（沿用存量语义）
+				if maxClients := beego.AppConfig.DefaultInt("max_clients", 0); maxClients > 0 && file.GetDb().GetClientCount() >= maxClients {
+					fail = true
+					c.WriteAddFail()
+					logs.Warn("register rejected: client count %d >= max_clients %d", file.GetDb().GetClientCount(), maxClients)
+					break loop
+				}
 				if err = file.GetDb().NewClient(client); err != nil {
 					fail = true
 					c.WriteAddFail()
@@ -625,6 +632,13 @@ loop:
 					tl.StripPre = t.StripPre
 					tl.MultiAccount = t.MultiAccount
 					if !client.HasTunnel(tl) {
+						// 每客户端隧道数上限校验（F1-8）：max_tunnels_per_client=0 表示不限
+						if maxTunnels := beego.AppConfig.DefaultInt("max_tunnels_per_client", 0); maxTunnels > 0 && file.GetDb().GetTaskCountByClient(client.Id) >= maxTunnels {
+							fail = true
+							c.WriteAddFail()
+							logs.Warn("add task rejected: client %d task count >= max_tunnels_per_client %d", client.Id, maxTunnels)
+							break loop
+						}
 						if err := file.GetDb().NewTask(tl); err != nil {
 							logs.Notice("Add task error ", err.Error())
 							fail = true

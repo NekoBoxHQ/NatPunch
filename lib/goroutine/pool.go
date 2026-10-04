@@ -28,8 +28,9 @@ type connGroup struct {
 }
 
 // 拷贝方向常量（流量记账方向语义）：
-//   DirMuxToOutside：隧道(mux) -> 公网侧 —— 内网数据返回公网 = 出口流量(ExportFlow)
-//   DirOutsideToMux：公网侧 -> 隧道(mux) —— 公网请求进入内网 = 入口流量(InletFlow)
+//
+//	DirMuxToOutside：隧道(mux) -> 公网侧 —— 内网数据返回公网 = 出口流量(ExportFlow)
+//	DirOutsideToMux：公网侧 -> 隧道(mux) —— 公网请求进入内网 = 入口流量(InletFlow)
 const (
 	DirMuxToOutside = 1
 	DirOutsideToMux = 2
@@ -142,7 +143,12 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 					}
 					// <<20 = 1024 * 1024
 					if flow.FlowLimit > 0 && (flow.FlowLimit<<20) < (flow.ExportFlow+flow.InletFlow) {
-						logs.Error("隧道[%s]流量已经超出", task.Client.VerifyKey)
+						// task 可能为 nil（httpProxy/socks5/transport 路径），不可直接解引用（F1-6）
+						if task != nil {
+							logs.Error("隧道[%s]流量已经超出", task.Client.VerifyKey)
+						} else {
+							logs.Error("流量已经超出")
+						}
 						break
 					}
 				}

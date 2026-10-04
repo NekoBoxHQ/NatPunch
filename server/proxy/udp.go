@@ -49,6 +49,14 @@ type UdpModeServer struct {
 	listener  *net.UDPConn
 	closeOnce sync.Once
 	closeCh   chan struct{}
+	srcPools  *sourcePoolSet // 按源地址分池的 goroutine 调度（F1-7）
+}
+
+// udpPacket 池化任务载体
+type udpPacket struct {
+	addr *net.UDPAddr
+	buf  []byte
+	n    int
 }
 
 func NewUdpModeServer(bridge *bridge.Bridge, task *file.Tunnel) *UdpModeServer {
@@ -57,6 +65,12 @@ func NewUdpModeServer(bridge *bridge.Bridge, task *file.Tunnel) *UdpModeServer {
 	s.task = task
 	s.closeCh = make(chan struct{})
 	return s
+}
+
+// poolWorker 由单源 ants 池调用，等价于原先的每包 goroutine（F1-7）。
+func (s *UdpModeServer) poolWorker(item interface{}) {
+	p := item.(*udpPacket)
+	s.process(p.addr, p.buf, p.n)
 }
 
 // Start 启动 UDP 监听，主循环只负责快速收包并分发，不做任何耗时操作。
@@ -69,6 +83,7 @@ func (s *UdpModeServer) Start() error {
 	if err != nil {
 		return err
 	}
+	s.srcPools = newSourcePoolSet(srcPoolCapacity, srcPoolMaxPools, s.poolWorker)
 	go s.sweeper()
 	for {
 		buf := common.BufPoolUdp.Get().([]byte)
@@ -90,7 +105,12 @@ func (s *UdpModeServer) Start() error {
 			continue
 		}
 
-		go s.process(addr, buf, n)
+		// 按源分池调度：池满/超上限立即丢包（F1-7），不再每包裸起 goroutine
+		if !s.srcPools.Submit(addr.String(), &udpPacket{addr: addr, buf: buf, n: n}) {
+			common.BufPoolUdp.Put(buf)
+			logs.Warn("udp source pool full or over limit, drop packet from %s (dropped total %d)", addr.String(), s.srcPools.Dropped())
+			continue
+		}
 	}
 	return nil
 }
@@ -262,6 +282,9 @@ func (s *UdpModeServer) sweeper() {
 func (s *UdpModeServer) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.closeCh)
+		if s.srcPools != nil {
+			s.srcPools.Close()
+		}
 	})
 	s.addrMap.Range(func(k, v interface{}) bool {
 		s.removeSession(k.(string), v.(*udpSession))

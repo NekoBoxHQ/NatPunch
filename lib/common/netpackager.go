@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net"
 	"strconv"
 )
@@ -153,14 +152,21 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 	}
 	dlen := int(header.Rsv)
 	if dlen == 0 { // standard SOCKS5 UDP datagram
-		extra, err := ioutil.ReadAll(r) // we assume no redundant data
+		// 保留"读到本次报文结束"语义，但用缓冲区剩余容量作为硬上界（F1-3）
+		limited := io.LimitReader(r, int64(len(b)-n))
+		extra, err := io.ReadAll(limited)
 		if err != nil {
 			return nil, err
 		}
-		copy(b[n:], extra)
-		n += len(extra) // total length
-		dlen = n - hlen // data length
+		n += copy(b[n:], extra) // copy 返回实际拷贝字节数，天然不会越界
+		dlen = n - hlen         // data length
+		if dlen < 0 {
+			return nil, errors.New("invalid datagram length")
+		}
 	} else { // extended feature, for UDP over TCP, using reserved field as data length
+		if hlen+dlen > len(b) { // 上界校验必须先于切片（F1-3）
+			return nil, errors.New("udp payload too large")
+		}
 		if _, err := io.ReadFull(r, b[n:hlen+dlen]); err != nil {
 			return nil, err
 		}
