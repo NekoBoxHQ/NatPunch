@@ -235,14 +235,12 @@ jobs:
           body: |
             ## NatPunch ${{ github.ref_name }}
 
-            NatPunch 是基于 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版，版权与修改范围见 LICENSE 与 NOTICE。
-
             ### 安装
             - 服务端：`sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"`
             - 客户端：面板一键安装命令
 
             ### 校验
-            - 发布物附 `SHA256SUMS`（强制校验）与 `SHA256SUMS.minisig`（minisign 签名，本机有签名工具时校验）
+            - 发布物附 `SHA256SUMS`（强制校验）与 `SHA256SUMS.minisig`（minisign 签名，目标机无签名工具时自动使用随包发布的静态校验器）
 
       - name: Notify Telegram Group
         continue-on-error: true

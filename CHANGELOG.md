@@ -5,6 +5,7 @@
 ## [未发布]（v26.9.98 候选）
 
 ### 变更
+- **README 完全品牌化**：README/README_zh 移除顶部与 License 章节的"基于 ehang-io/nps 的修改版"显著声明、发布说明模板同步；NPS 相关仅保留在 LICENSE / NOTICE（法律声明）与 CHANGELOG/CONTRIBUTING（工程记录）、docs/comparison（对比语境）。对外呈现完全为 NatPunch。
 - **OpenWrt 签名校验落地（静态校验器）**：新增 `cmd/minisign-check`（Go 版 go-minisign 库，约 40 行极简校验器），CI 随发布物静态交叉编译 4 架构（`minisign-check-linux-<arch>`）；`install.sh` / `install_server.sh` 签名校验升级为三级——系统 minisign → 自动下载内置静态校验器 → 降级 SHA256 兜底。**工具可得但校验失败即终止**，只有校验工具完全不可得才警告跳过（OpenWrt 无 minisign 软件包场景首次获得完整签名校验能力）。
 - CI 新增 shell 语法门禁（`sh -n install.sh install_server.sh`）。
 

@@ -1,6 +1,6 @@
 # 同类工具对比（nps / frp / ngrok）
 
-> NatPunch 是 ehang-io/nps 的修改版，对比时以 nps 上游为基准，frp/ngrok 为同类参考。表格为一般情况，具体以各项目最新文档为准。
+> 对比以 nps 上游为基准，frp/ngrok 为同类参考。表格为一般情况，具体以各项目最新文档为准。
 
 | 维度 | NatPunch（本仓库） | nps（上游） | frp | ngrok |
 |---|---|---|---|---|

@@ -1,8 +1,6 @@
 ﻿# NatPunch
 
 > 轻量级内网穿透 / 无公网设备管理平台。可选 TLS 桥接加密（支持证书指纹固定），TCP/UDP 隧道 + HTTP/SOCKS5 代理，自动化运维管理软路由与服务器。
->
-> **NatPunch 是基于 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版**，与原版的差异见 [NOTICE](NOTICE)。
 
 ## 特性
 
@@ -86,7 +84,7 @@ uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/u
 
 GPL-3.0 License
 
-NatPunch 是 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版。版权与修改范围见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
+版权与修改范围见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
 ## 讨论群组 / Discussion Group
 
