@@ -37,6 +37,8 @@ jobs:
         env:
           CGO_ENABLED: 0
           GOPROXY: https://goproxy.cn,direct
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           TAG=${GITHUB_REF_NAME}
           mkdir -p out
