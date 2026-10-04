@@ -56,9 +56,9 @@ UDP/p2p 工作池内置上限（单源 16、4096 源、TTL 5 分钟、满即丢�
 发布物附 `SHA256SUMS` 与 `SHA256SUMS.minisig`，安装脚本分级校验：
 
 1. **SHA256 强制校验**：失败即终止。防传输损坏与镜像篡改。
-2. **签名校验（可选）**：本机存在 minisign/openssl 时校验 minisig，失败即终止；否则打印警告并跳过（OpenWrt 默认无 minisign，不阻塞安装）。
+2. **签名校验**：安装脚本已内置发布方公钥（`MINISIGN_PUBKEY` 环境变量可覆盖）。本机存在 minisign 工具时强制校验 minisig、失败即终止；目标机无 minisign（如 OpenWrt 默认）则打印警告并跳过（SHA256 仍强制，不阻塞安装）。
 
-> 两个校验的信任边界不同：SHA256 防"链路层篡改"；签名防"发布方密钥泄露"。公钥验证方式见发布说明。解包使用标准库 tar+gzip，拒绝 `..`/绝对路径/符号链接逃逸。
+> 两个校验的信任边界不同：SHA256 防"链路层篡改"；签名防"发布方密钥泄露"。公钥内置在 `install.sh` / `install_server.sh`（`RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660`），自建发布链可用环境变量覆盖。解包使用标准库 tar+gzip，拒绝 `..`/绝对路径/符号链接逃逸。
 
 ## 5. 依赖与漏洞状态（阶段四 F4-2）
 

@@ -170,10 +170,12 @@ jobs:
         run: |
           cd dist
           if [ -n "$MINISIGN_SECRET_KEY" ]; then
-            go install github.com/jedisct1/go-minisign/cmd/minisign@v0.1.0
+            # C 版 minisign（apt）：与安装脚本校验侧同一实现，避免 go-minisign 子目录版本解析问题
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq minisign
             printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
             chmod 600 /tmp/minisign.key
-            "$(go env GOPATH)/bin/minisign" -Sm SHA256SUMS -s /tmp/minisign.key
+            minisign -Sm SHA256SUMS -s /tmp/minisign.key
             rm -f /tmp/minisign.key
             ls -la SHA256SUMS.minisig
           else

@@ -119,7 +119,9 @@ else
 fi
 [ "$EXPECT" = "$ACTUAL" ] || die "sha256 校验失败（期望 $EXPECT，实际 $ACTUAL）"
 log "sha256 校验通过"
-# 分级签名校验（F2-8）：minisign + 公钥存在则强制，否则警告跳过（SHA256 已强制）
+# 分级签名校验（F2-8）：内置发布方公钥，minisign 工具存在即强制校验，否则警告跳过（SHA256 已强制）
+# 环境变量 MINISIGN_PUBKEY 可覆盖内置公钥（自建发布链场景）
+MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
 if command -v minisign >/dev/null 2>&1 && [ -n "${MINISIGN_PUBKEY:-}" ]; then
     fetch "$BASE_URL/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS.minisig" || die "获取签名失败"
     minisign -Vm "$TMP_DIR/SHA256SUMS" -P "$MINISIGN_PUBKEY" -x "$TMP_DIR/SHA256SUMS.minisig" || die "minisign 签名校验失败"
@@ -153,11 +155,13 @@ install -m 0755 "$BIN_SRC" "$BIN" 2>/dev/null || {
 # ---------- 写配置 ----------
 log "写入配置 $CONF"
 umask 077
+# TLS_FLAG 必须整体加单引号：init.d 用 `. /etc/natpunch.conf` source 本文件，
+# 值含空格时无引号会被拆成多条命令执行（修复：多参数 TLS_FLAG source 崩溃）
 cat > "$CONF" <<EOF
 SERVER=$SERVER
 PORT=$PORT
 VKEY=$VKEY
-TLS_FLAG=$TLS_FLAG
+TLS_FLAG='$TLS_FLAG'
 EOF
 chmod 600 "$CONF"
 umask 022

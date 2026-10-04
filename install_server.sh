@@ -15,6 +15,8 @@ REPO="NekoBoxHQ/NatPunch"
 API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SELF="$(basename "$0")"
 SERVICE_NAME="natpunch"
+# 发布方 minisign 公钥（内置默认，环境变量 MINISIGN_PUBKEY 可覆盖：自建发布链场景）
+MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
 # ================= 输出样式 =================
 C_RESET='\033[0m'
 C_BOLD='\033[1m'
