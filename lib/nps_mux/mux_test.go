@@ -16,6 +16,7 @@ import (
 	"net/http/httputil"
 	_ "net/http/pprof"
 	"os"
+	"os/exec"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,17 @@ import (
 	"time"
 	"unsafe"
 )
+
+// TestMain：前置条件（docker / tc）缺失时整体跳过，避免集成测试在普通环境硬失败（阶段四 F4-1）
+func TestMain(m *testing.M) {
+	for _, bin := range []string{"docker", "tc"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			fmt.Printf("skip integration tests: %s not found\n", bin)
+			os.Exit(0)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 var conn1 net.Conn
 var conn2 net.Conn

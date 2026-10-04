@@ -1,0 +1,16 @@
+# NatPunch 保守 lint 配置（阶段四 F4-1）
+# 老代码大规模 errcheck 噪音不在发布门禁范围内（阶段三已对关键路径逐步补齐读写检查），
+# 门禁聚焦高信号检查：vet / staticcheck / ineffassign / unused。
+run:
+  timeout: 10m
+
+linters:
+  disable:
+    - errcheck
+
+issues:
+  exclude-rules:
+    # 集成测试（build tag 隔离，默认不编译）；保留文件级规则避免误报
+    - path: lib/nps_mux/mux_test.go
+      linters:
+        - staticcheck

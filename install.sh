@@ -67,6 +67,8 @@ ARCH="$(uname -m)"
 case "$ARCH" in
     x86_64|amd64)   PKG="linux_amd64_client.tar.gz";;
     aarch64|arm64)  PKG="linux_arm64_client.tar.gz";;
+    armv7l|armv6l)  PKG="linux_arm_client.tar.gz";;
+    mips|mipsel|mipsle) PKG="linux_mipsle_client.tar.gz";;
     *) die "不支持架构: $ARCH";;
 esac
 echo "    $ARCH -> $PKG"

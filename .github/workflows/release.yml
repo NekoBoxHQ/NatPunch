@@ -9,7 +9,47 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests (exclude integration)
+        run: go test ./...
+
+      - name: Govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: Golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61
+          args: --timeout=10m
+
+  integration:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Integration tests (mux, needs docker+tc; skipped when unavailable)
+        run: go test -tags integration ./lib/nps_mux/ -timeout 20m
+
   build:
+    needs: integration
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,17 +61,31 @@ jobs:
             goarch: arm64
             type: server
           - goos: linux
+            goarch: arm
+            goarm: '7'
+            type: server
+          - goos: linux
+            goarch: mipsle
+            type: server
+          - goos: linux
             goarch: amd64
             type: client
           - goos: linux
             goarch: arm64
+            type: client
+          - goos: linux
+            goarch: arm
+            goarm: '7'
+            type: client
+          - goos: linux
+            goarch: mipsle
             type: client
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
 
       - name: Build
         env:
@@ -39,6 +93,7 @@ jobs:
           GOPROXY: https://goproxy.cn,direct
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           TAG=${GITHUB_REF_NAME}
           mkdir -p out
@@ -59,15 +114,21 @@ jobs:
             tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch-client
           fi
           # 架构自检：产物架构必须与矩阵声明一致，不一致立即失败，防止坏包发布
-          if file -b "$BIN" | grep -q "x86-64"; then
-            [ "${{ matrix.goarch }}" = "amd64" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 amd64"; exit 1; }
-          elif file -b "$BIN" | grep -q "aarch64"; then
-            [ "${{ matrix.goarch }}" = "arm64" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 arm64"; exit 1; }
-          else
-            echo "::error 架构校验失败: 无法识别产物架构 $BIN"
-            exit 1
-          fi
-          echo "架构校验通过: ${{ matrix.goarch }} -> $(file -b "$BIN")"
+          FILE_OUT="$(file -b "$BIN")"
+          case "$FILE_OUT" in
+            *x86-64*)
+              [ "${{ matrix.goarch }}" = "amd64" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 amd64"; exit 1; } ;;
+            *aarch64*)
+              [ "${{ matrix.goarch }}" = "arm64" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 arm64"; exit 1; } ;;
+            *ARM*)
+              [ "${{ matrix.goarch }}" = "arm" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 arm"; exit 1; } ;;
+            *MIPS*)
+              [ "${{ matrix.goarch }}" = "mipsle" ] || { echo "::error 架构校验失败: 声明 ${{ matrix.goarch }} 但产物是 mips"; exit 1; } ;;
+            *)
+              echo "::error 架构校验失败: 无法识别产物架构 $BIN -> $FILE_OUT"
+              exit 1 ;;
+          esac
+          echo "架构校验通过: ${{ matrix.goarch }} -> $FILE_OUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -120,6 +181,17 @@ jobs:
             dist/SHA256SUMS
             dist/SHA256SUMS.minisig
           generate_release_notes: true
+          body: |
+            ## NatPunch ${{ github.ref_name }}
+
+            NatPunch 是基于 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版，版权与修改范围见 LICENSE 与 NOTICE。
+
+            ### 安装
+            - 服务端：`sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"`
+            - 客户端：面板一键安装命令
+
+            ### 校验
+            - 发布物附 `SHA256SUMS`（强制校验）与 `SHA256SUMS.minisig`（minisign 签名，本机有签名工具时校验）
 
       - name: Notify Telegram Group
         continue-on-error: true

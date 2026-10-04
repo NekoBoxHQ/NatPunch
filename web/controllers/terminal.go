@@ -14,6 +14,7 @@ import (
 	"ehang.io/nps/lib/file"
 	"ehang.io/nps/server"
 
+	"github.com/astaxie/beego/logs"
 	"github.com/gorilla/websocket"
 )
 
@@ -181,6 +182,14 @@ func (s *TerminalController) Ws() {
 		return
 	}
 	defer t.Close()
+
+	// 终端审计（阶段四 F4-7）：记录 谁 / 何时 / 对哪个客户端 开启了 shell
+	username := "admin"
+	if u := s.GetSession("username"); u != nil {
+		username = fmt.Sprint(u)
+	}
+	logs.Info("TERMINAL AUDIT: user [%s] opened shell on client id [%d] remark [%s] at %s (remote %s)",
+		username, clientId, client.Remark, time.Now().Format("2006-01-02 15:04:05"), s.Ctx.Input.IP())
 
 	// 双向桥接：内网 -> 浏览器（二进制帧）
 	// 统一流量语义：隧道->公网侧 = 出口流量(ExportFlow)，公网侧->隧道 = 入口流量(InletFlow)

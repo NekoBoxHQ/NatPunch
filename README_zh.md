@@ -1,18 +1,30 @@
 # NatPunch
 
-一款轻量级、高性能的**内网穿透 / 无公网设备管理平台**。TLS 全程加密，TCP/UDP 隧道 + HTTP/SOCKS5 代理，静默管理软路由与服务器。
+一款轻量级、高性能的**内网穿透 / 无公网设备管理平台**。可选 TLS 桥接加密（支持证书指纹固定），TCP/UDP 隧道 + HTTP/SOCKS5 代理，自动化运维管理软路由与服务器。
+
+> **NatPunch 是基于 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版**，与原版的差异见 [NOTICE](NOTICE)。
 
 ## 特性
 
-- **TLS 全程加密**，数据传输安全可靠
+- **可选 TLS 桥接加密**：隧道流量可启用 TLS 传输，并支持证书指纹固定（`tls_fingerprint`）防中间人；默认 TCP 明文，按需开启
 - **TCP / UDP 隧道**：SSH、远程桌面、任意端口，公网直达内网设备
 - **HTTP / SOCKS5 代理**：支持账号密码，安全出网
-- **静默管理**：实时展示在线状态、隧道数、流量与带宽统计
-- **面板 SSH 终端**：客户端列表一键进入免凭据 SSH，内置快捷命令（保存到服务端）
-- **一键部署**：OpenWrt / Linux 一键安装，注册为系统服务静默运行
+- **自动化运维管理**：实时展示在线状态、隧道数、流量与带宽统计
+- **面板 SSH 终端**：客户端列表一键进入（仅限本人/授权客户端，操作留审计日志），内置快捷命令（保存到服务端）
+- **一键部署**：OpenWrt / Linux 一键安装，注册为系统服务运行
 - **一键更新 / 卸载**：`uninstall_client.sh update` 保留配置更新到最新版，`uninstall_client.sh uninstall` 彻底卸载
 - **自动获取最新版**：安装/更新走 `releases/latest/download`，无需指定版本号，永远下载最新发布
 - **命名隔离**：客户端 `natpunch-client` 与服务端 `natpunch` 完全隔离，同机部署互不影响
+
+## 可接受使用政策（AUP）
+
+NatPunch 面向**合法运维场景**：仅允许用于部署方拥有或经明确授权的设备与网络（自建机房、家庭网络、公司内网运维等）。禁止用于：
+
+- 未经授权访问、控制或穿透他人的设备、服务器与内网；
+- 利用「面板 SSH 终端」「免凭据连接」特性获取他人系统的 shell；
+- 任何违反当地法律或平台服务条款的用途。
+
+部署方对使用行为与数据合规承担全部责任。终端会话会记录审计日志（操作人、时间、目标客户端）。
 
 ## 部署
 
@@ -65,3 +77,5 @@ uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/u
 ## License
 
 GPL-3.0 License
+
+NatPunch 是 [ehang-io/nps](https://github.com/ehang-io/nps)（GPLv3）的修改版。版权与修改范围见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。

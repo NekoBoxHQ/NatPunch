@@ -344,7 +344,9 @@ install() {
     case "$ARCH" in
         x86_64|amd64) SERVER_PKG="linux_amd64_server.tar.gz";;
         aarch64|arm64) SERVER_PKG="linux_arm64_server.tar.gz";;
-        *) SERVER_PKG="linux_amd64_server.tar.gz";;
+        armv7l|armv6l) SERVER_PKG="linux_arm_server.tar.gz";;
+        mips|mipsel|mipsle) SERVER_PKG="linux_mipsle_server.tar.gz";;
+        *) die "不支持的架构: $ARCH（支持 amd64/arm64/armv7/mipsle）；请手动下载对应安装包";;
     esac
     info "下载最新发布 ($SERVER_PKG) ..."
     dl "https://github.com/$REPO/releases/latest/download/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
@@ -378,7 +380,9 @@ upgrade() {
     case "$ARCH" in
         x86_64|amd64) SERVER_PKG="linux_amd64_server.tar.gz";;
         aarch64|arm64) SERVER_PKG="linux_arm64_server.tar.gz";;
-        *) SERVER_PKG="linux_amd64_server.tar.gz";;
+        armv7l|armv6l) SERVER_PKG="linux_arm_server.tar.gz";;
+        mips|mipsel|mipsle) SERVER_PKG="linux_mipsle_server.tar.gz";;
+        *) die "不支持的架构: $ARCH（支持 amd64/arm64/armv7/mipsle）；请手动下载对应安装包";;
     esac
     if [ -n "$TARGET_VER" ]; then
         TARGET_URL="https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"

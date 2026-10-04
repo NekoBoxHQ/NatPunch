@@ -5,6 +5,12 @@
  Everyone is permitted to copy and distribute verbatim copies
  of this license document, but changing it is not allowed.
 
+NatPunch 版权声明（GPLv3 §5：保留原版权并标注修改）：
+ Copyright (C) 2018-2021 ehang-io/nps contributors
+ Copyright (C) 2026 NekoBoxHQ
+ 本软件是 ehang-io/nps（https://github.com/ehang-io/nps）的修改版，
+ 修改范围见 NOTICE。
+
                             Preamble
 
   The GNU General Public License is a free, copyleft license for

@@ -1,0 +1,60 @@
+NOTICE
+======
+
+NatPunch 是基于 **ehang-io/nps** 的修改版（fork）。
+
+上游项目
+--------
+- 名称：nps（内网穿透 / NAT 穿透工具）
+- 上游仓库：https://github.com/ehang-io/nps
+- 上游许可证：GNU General Public License v3.0（GPLv3）
+- 导入基线：上游全量代码（含 lib/bridge/web/client/server 等全部模块）
+- 上游 commit：24cb16c（本仓库导入时的基线提交，对应上游完整历史导入）
+
+派生关系
+--------
+本仓库以单个库根提交一次性导入上游全部代码，后续所有修改均为独立提交。
+由于仓库历史在导入时已 squash，上游作者的逐条提交历史无法追溯保留；
+本文件用于声明式合规（GPLv3 §5：保留原版权声明并显著标注已修改）。
+
+修改范围概述（与上游 nps 的主要差异）
+------------------------------------
+安全修复（阶段一，commit 95bf47d）：
+- 移除 `auth_key` query 参数认证链路（未授权接管漏洞），面板认证回归纯会话；
+- 会话鉴权改为 fail-closed 三路分支；
+- 修复 SOCKS5 长度字段 nil 解引用远程崩溃；
+- UDP 报文长度字段上界校验（防 slice 越界 / OOM）；
+- p2p map 与 connMap.Close 并发读写加锁；
+- 流量限制 nil task 解引用防御；
+- UDP/p2p goroutine 池化（按源池 + TTL 淘汰 + 4096 上限）；
+- 注册上限配置（max_clients / max_tunnels_per_client）、public_vkey 随机化、
+  UpdateClient 的 Rate goroutine 泄漏修复；
+- 安装脚本密码强制输入、发布物 SHA256SUMS。
+
+安全基线（阶段二，commit 9261ad5）：
+- 删除零调用方的 AES-CBC/PKCS5 死代码；密钥生成改 crypto/rand；
+  VKEY 提升至 128bit；基础认证常量时间比较；
+- 隧道 TLS 三态指纹（tls_fingerprint / tls_strict），桥接证书持久化
+  并与面板证书路径隔离；
+- 面板密码 bcrypt 化 + 存量明文在线迁移；
+- 会话加固（SameSite=Strict / Secure / SessionRegenerateID）；
+- 终端路由权限收紧 + CheckOrigin 白名单 + 存储型 XSS 修复；
+- 升级包 SHA256 强制校验 + minisign 分级签名；compareVersion 修正；
+  弃用 unpackit 改标准库安全解包；
+- IDOR 显式 RBAC。
+
+稳定性（阶段三，commit 5aa65a0）：
+- mux 死锁修复、写队列上界、连接数原子 CAS、全局连接上限；
+- LRU 加锁、限速按 burst 分块、pprof 强制回环、daemon kill 注入修复、
+  库代码 os.Exit 清除、外部 IP 获取 HTTPS+缓存、日志脱敏等。
+
+工程化（阶段四，未发布 tag）：
+- CI 门禁（vet/test/govulncheck/golangci-lint/integration/8 架构构建矩阵）；
+- 依赖升级（x/net、x/crypto、snappy、ants 等）；kcp-go 因 module path
+  变更（v5.6+ 需 /v5 路径）暂保持 v5.4.20；
+- 发布矩阵补 armv7/mipsle；安装脚本未知架构显式报错；
+- 文档体系（docs/）、安全加固指南、版本号一致、GPL 声明、AUP、终端审计日志。
+
+授权说明
+--------
+本项目以 GPLv3 许可分发，详见 LICENSE。

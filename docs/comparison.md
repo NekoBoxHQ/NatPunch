@@ -1,0 +1,34 @@
+# 同类工具对比（nps / frp / ngrok）
+
+> NatPunch 是 ehang-io/nps 的修改版，对比时以 nps 上游为基准，frp/ngrok 为同类参考。表格为一般情况，具体以各项目最新文档为准。
+
+| 维度 | NatPunch（本仓库） | nps（上游） | frp | ngrok |
+|---|---|---|---|---|
+| 定位 | 内网穿透 + 无公网设备管理平台 | 内网穿透 | 内网穿透 | 内网穿透（SaaS/自托管） |
+| 内核语言 | Go 单二进制 | Go | Go | Go |
+| TCP / UDP 隧道 | ✅ | ✅ | ✅ | ✅（UDP 有限） |
+| HTTP(S) 代理 | ✅（含账号密码） | ✅ | ✅（vhost） | ✅ |
+| SOCKS5 | ✅ | ✅ | 部分 | 部分 |
+| P2P 打洞 | ✅（p2p 协调） | ✅ | ✅（xtcp） | ❌ |
+| Web 管理面板 | ✅ 自研（beego） | ✅ | ✅（frps dashboard） | ✅（自托管版） |
+| 面板 SSH 终端 | ✅（授权 + 审计日志） | ✅（上游无审计/权限收紧） | ❌ | ❌ |
+| 多用户 | ✅（allow_user_login，建议关闭） | ✅ | 有限 | ✅ |
+| 隧道 TLS | ✅（可开，指纹 pin 可选） | ✅（上游默认 InsecureSkipVerify） | ✅（TLS 转发） | ✅（强制 TLS） |
+| 证书指纹固定 | ✅ `tls_fingerprint`/`tls_strict` | ❌ | ❌ | ❌（正规 CA） |
+| 密码存储 | bcrypt + 在线迁移 | 明文（上游） | 明文（配置） | 托管 |
+| 默认安全姿态 | fail-closed（阶段一~四已修复） | 默认 `auth_key=123` 可未授权接管 | 依赖配置 | 平台托管 |
+| 限速/流量统计 | ✅ 按 burst 分块 + 数据面复查 | ✅（部分路径绕过，已修） | ✅ | ✅ |
+| 资源上限 | ✅ max_clients/max_tunnels/max_global_conn | ❌ 无全局上限 | ✅（部分） | ✅ |
+| UDP 洪水防护 | ✅ 按源工作池 + TTL | ❌ 每包 goroutine | 部分 | ✅ |
+| 升级完整性 | ✅ SHA256 强制 + minisign 分级 | ❌ | ✅（checksum） | ✅ |
+| 审计日志 | ✅ 终端审计 | ❌ | ❌ | ✅ |
+| 安装体验 | 一键脚本 + 交互菜单，OpenWrt 原生 | 一键脚本 | 一键脚本 | 平台注册 |
+| 架构覆盖 | amd64/arm64/armv7/mipsle | 多 | 多 | 多 |
+| 许可证 | GPLv3（修改版，声明式合规） | GPLv3 | Apache-2.0 | MIT/平台 |
+
+## 选择建议
+
+- **需要无公网设备管理 + 面板终端 + 自建**：NatPunch（对 nps 用户：安全基线已大幅提升，升级无兼容性破坏）。
+- **追求生态与文档、多协议**：frp（Apache-2.0，社区大）。
+- **需要域名/HTTPS 即开即用、SaaS 化**：ngrok。
+- **已有 nps 部署**：可平滑升级到 NatPunch（配置兼容、默认值不变，安全项默认关闭、按需开启）。
