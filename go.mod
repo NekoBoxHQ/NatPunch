@@ -9,6 +9,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/golang/snappy v1.0.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/jedisct1/go-minisign v0.0.0-20260527172527-a09352b57a22
 	github.com/kardianos/service v1.2.0
 	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/pires/go-proxyproto v0.8.0

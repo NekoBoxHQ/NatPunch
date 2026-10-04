@@ -21,6 +21,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Shell syntax check
+        run: |
+          sh -n install.sh
+          sh -n install_server.sh
+
       - name: Unit tests (exclude integration)
         run: go test ./...
 
@@ -144,8 +149,40 @@ jobs:
           path: |
             *.tar.gz
 
+  minisign-check:
+    # 静态签名校验器：OpenWrt 等无 minisign 软件包的环境，由安装脚本下载本工具做签名校验。
+    # Go 版（go-minisign 库），静态交叉编译覆盖全部发布架构。
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64, arm, mipsle]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build minisign-check
+        env:
+          CGO_ENABLED: 0
+          GOPROXY: https://goproxy.cn,direct
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarch == 'arm' && '7' || '' }}
+        run: |
+          go build -ldflags "-s -w -extldflags -static" -o minisign-check ./cmd/minisign-check
+          file -b minisign-check
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minisign-check-linux-${{ matrix.goarch }}
+          path: minisign-check
+
   release:
-    needs: build
+    needs: [build, minisign-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -156,6 +193,10 @@ jobs:
         run: |
           mkdir -p dist
           find artifacts -name "*.tar.gz" -exec cp {} dist/ \;
+          # 收集各架构静态校验器，按 artifact 目录名（minisign-check-linux-<arch>）重命名
+          find artifacts -type f -name "minisign-check" | while read -r f; do
+            cp "$f" "dist/$(basename "$(dirname "$f")")"
+          done
           ls -la dist/
 
       - name: Generate checksums
@@ -189,6 +230,7 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
             dist/SHA256SUMS.minisig
+            dist/minisign-check-linux-*
           generate_release_notes: true
           body: |
             ## NatPunch ${{ github.ref_name }}

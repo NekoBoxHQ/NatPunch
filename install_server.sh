@@ -294,12 +294,43 @@ verify_package() {
     fi
     [ "$EXPECT" = "$ACTUAL" ] || { cd /; rm -rf "$TMP"; die "sha256 校验失败（期望 $EXPECT 实际 $ACTUAL）"; }
     info "sha256 校验通过 ($f)"
-    if command -v minisign >/dev/null 2>&1 && [ -n "${MINISIGN_PUBKEY:-}" ]; then
+    # 签名校验：系统 minisign → 内置静态校验器（minisign-check）→ 降级 SHA256 兜底。
+    # 工具可得但校验失败即中止；只有校验工具不可得才警告跳过（SHA256 已强制）。
+    if [ -n "${MINISIGN_PUBKEY:-}" ]; then
         dl "$base/SHA256SUMS.minisig" SHA256SUMS.minisig || { cd /; rm -rf "$TMP"; die "获取签名失败"; }
-        minisign -Vm SHA256SUMS -P "$MINISIGN_PUBKEY" -x SHA256SUMS.minisig || { cd /; rm -rf "$TMP"; die "minisign 签名校验失败"; }
-        info "minisign 签名校验通过"
+        local sig_ok=0
+        if command -v minisign >/dev/null 2>&1; then
+            minisign -Vm SHA256SUMS -P "$MINISIGN_PUBKEY" -x SHA256SUMS.minisig || { cd /; rm -rf "$TMP"; die "minisign 签名校验失败"; }
+            info "minisign 签名校验通过"
+            sig_ok=1
+        fi
+        if [ "$sig_ok" -eq 0 ]; then
+            local MSC_ARCH=""
+            case "$(uname -m)" in
+                x86_64|amd64) MSC_ARCH="amd64" ;;
+                aarch64|arm64) MSC_ARCH="arm64" ;;
+                armv7l|armv6l) MSC_ARCH="arm" ;;
+                mips|mipsel|mipsle) MSC_ARCH="mipsle" ;;
+            esac
+            if [ -n "$MSC_ARCH" ]; then
+                local MSC="minisign-check-linux-$MSC_ARCH"
+                if dl "$base/$MSC" "$MSC"; then
+                    chmod +x "$MSC" 2>/dev/null || true
+                    printf 'untrusted comment: minisign public key\n%s\n' "$MINISIGN_PUBKEY" > natpunch.pub
+                    if "./$MSC" natpunch.pub SHA256SUMS.minisig SHA256SUMS; then
+                        info "minisign 签名校验通过（内置静态校验器）"
+                        sig_ok=1
+                    else
+                        cd /; rm -rf "$TMP"; die "minisign 签名校验失败（内置校验器）"
+                    fi
+                else
+                    warn "无法下载内置校验器 $MSC，跳过签名校验（SHA256 已强制校验）"
+                fi
+            fi
+        fi
+        [ "$sig_ok" -eq 1 ] || warn "未找到签名校验工具，跳过签名校验（SHA256 已强制校验）"
     else
-        warn "未找到 minisign 或未配置 MINISIGN_PUBKEY，跳过签名校验（SHA256 已强制校验）"
+        warn "未配置 MINISIGN_PUBKEY，跳过签名校验（SHA256 已强制校验）"
     fi
 }
 fetch() {

@@ -119,16 +119,45 @@ else
 fi
 [ "$EXPECT" = "$ACTUAL" ] || die "sha256 校验失败（期望 $EXPECT，实际 $ACTUAL）"
 log "sha256 校验通过"
-# 分级签名校验（F2-8）：内置发布方公钥，minisign 工具存在即强制校验，否则警告跳过（SHA256 已强制）
+# 分级签名校验：系统 minisign → 内置静态校验器（minisign-check，OpenWrt 无 minisign 包场景）→ 降级 SHA256 兜底
 # 环境变量 MINISIGN_PUBKEY 可覆盖内置公钥（自建发布链场景）
 MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
-if command -v minisign >/dev/null 2>&1 && [ -n "${MINISIGN_PUBKEY:-}" ]; then
+sig_ok=0
+if [ -n "${MINISIGN_PUBKEY:-}" ]; then
     fetch "$BASE_URL/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS.minisig" || die "获取签名失败"
-    minisign -Vm "$TMP_DIR/SHA256SUMS" -P "$MINISIGN_PUBKEY" -x "$TMP_DIR/SHA256SUMS.minisig" || die "minisign 签名校验失败"
-    log "minisign 签名校验通过"
-else
-    warn "未找到 minisign 或未配置 MINISIGN_PUBKEY，跳过签名校验（SHA256 已强制校验）"
+    # 1) 系统 minisign（存在即强制校验，失败即中止）
+    if command -v minisign >/dev/null 2>&1; then
+        minisign -Vm "$TMP_DIR/SHA256SUMS" -P "$MINISIGN_PUBKEY" -x "$TMP_DIR/SHA256SUMS.minisig" || die "minisign 签名校验失败"
+        log "minisign 签名校验通过"
+        sig_ok=1
+    fi
+    # 2) 内置静态校验器（与发布物同源下载，架构匹配；工具不可得才降级）
+    if [ "$sig_ok" -eq 0 ]; then
+        case "$ARCH" in
+            x86_64|amd64) MSC_ARCH="amd64";;
+            aarch64|arm64) MSC_ARCH="arm64";;
+            armv7l|armv6l) MSC_ARCH="arm";;
+            mips|mipsel|mipsle) MSC_ARCH="mipsle";;
+            *) MSC_ARCH="" ;;
+        esac
+        if [ -n "$MSC_ARCH" ]; then
+            MSC="minisign-check-linux-$MSC_ARCH"
+            if fetch "$BASE_URL/$MSC" "$TMP_DIR/$MSC"; then
+                chmod +x "$TMP_DIR/$MSC" 2>/dev/null || true
+                printf 'untrusted comment: minisign public key\n%s\n' "$MINISIGN_PUBKEY" > "$TMP_DIR/natpunch.pub"
+                if "$TMP_DIR/$MSC" "$TMP_DIR/natpunch.pub" "$TMP_DIR/SHA256SUMS.minisig" "$TMP_DIR/SHA256SUMS"; then
+                    log "minisign 签名校验通过（内置静态校验器）"
+                    sig_ok=1
+                else
+                    die "minisign 签名校验失败（内置校验器）"
+                fi
+            else
+                warn "无法下载内置校验器 $MSC，跳过签名校验（SHA256 已强制校验）"
+            fi
+        fi
+    fi
 fi
+[ "$sig_ok" -eq 1 ] || warn "未找到签名校验工具，跳过签名校验（SHA256 已强制校验）"
 # ---------- 解压 ----------
 log "解压..."
 tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"

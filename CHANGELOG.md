@@ -2,6 +2,14 @@
 
 本项目为 ehang-io/nps 的修改版，所有版本均为对上游代码的增量修改（详见 NOTICE）。
 
+## [未发布]（v26.9.98 候选）
+
+### 变更
+- **OpenWrt 签名校验落地（静态校验器）**：新增 `cmd/minisign-check`（Go 版 go-minisign 库，约 40 行极简校验器），CI 随发布物静态交叉编译 4 架构（`minisign-check-linux-<arch>`）；`install.sh` / `install_server.sh` 签名校验升级为三级——系统 minisign → 自动下载内置静态校验器 → 降级 SHA256 兜底。**工具可得但校验失败即终止**，只有校验工具完全不可得才警告跳过（OpenWrt 无 minisign 软件包场景首次获得完整签名校验能力）。
+- CI 新增 shell 语法门禁（`sh -n install.sh install_server.sh`）。
+
+### 工程化 / 依赖 / 合规 / 文档
+
 ## v26.9.96（已发布）
 
 ### 变更
