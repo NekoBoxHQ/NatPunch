@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -41,6 +42,17 @@ var (
 	natpunchLogPath = flag.String("log_path", "", "natpunch log path")
 )
 
+// isServiceCommand 判断是否服务管理命令（这些命令不参与单实例保护）
+func isServiceCommand(args []string) bool {
+	for _, v := range args[1:] {
+		switch v {
+		case "install", "start", "stop", "uninstall", "restart", "service":
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 
 	debug.SetMaxThreads(1000000)
@@ -57,9 +69,8 @@ func main() {
 		inputCmd()
 		return
 	}
-
-	var logPath string
 	// *confPath why get null value ?
+	var logPath string
 	for _, v := range os.Args[1:] {
 		switch v {
 		case "install", "start", "stop", "uninstall", "restart":
@@ -71,6 +82,21 @@ func main() {
 
 		if strings.Contains(v, "-log_path=") {
 			logPath = strings.Replace(v, "-log_path=", "", -1)
+		}
+	}
+
+	// 单实例保护：直接运行服务（非 install/start/stop/restart/service 管理命令）时，
+	// 若已有实例在跑则退出，防止双进程各自持内存互写 clients.json 导致 vkey 丢失
+	if !isServiceCommand(os.Args) {
+		pidFile := filepath.Join(common.GetRunPath(), "natpunch.pid")
+		if b, err := os.ReadFile(pidFile); err == nil {
+			if pid, aerr := strconv.Atoi(strings.TrimSpace(string(b))); aerr == nil && pid > 0 && common.IsProcessAlive(pid) {
+				fmt.Printf("NatPunch 已在运行 (PID %d)，本实例退出（单实例保护）\n", pid)
+				os.Exit(0)
+			}
+		}
+		if werr := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); werr == nil {
+			defer os.Remove(pidFile)
 		}
 	}
 
