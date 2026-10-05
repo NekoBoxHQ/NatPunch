@@ -38,7 +38,7 @@ if [ ! -t 1 ]; then
     C_RESET=''; C_BOLD=''; C_DIM=''
     C_GREEN=''; C_YELLOW=''; C_RED=''; C_CYAN=''; C_BLUE=''
 fi
-LINE="----------------------------------------"
+LINE="-------------------------------"
 title() {
     printf '\n%b\n%b\n%b\n' "${C_CYAN}${LINE}${C_RESET}" "${C_BOLD}  $*${C_RESET}" "${C_CYAN}${LINE}${C_RESET}"
 }
@@ -308,9 +308,13 @@ verify_package() {
         if dl "$base/SHA256SUMS.minisig" SHA256SUMS.minisig; then
             local sig_ok=0
             if command -v minisign >/dev/null 2>&1; then
-                minisign -Vm SHA256SUMS -P "$MINISIGN_PUBKEY" -x SHA256SUMS.minisig || { cd /; rm -rf "$TMP"; die "minisign 签名校验失败"; }
-                info "minisign 签名校验通过"
-                sig_ok=1
+                if minisign -Vm SHA256SUMS -P "$MINISIGN_PUBKEY" -x SHA256SUMS.minisig >minisign.out 2>&1; then
+                    sed 's/^/         /' minisign.out
+                    info "minisign 签名校验通过"
+                    sig_ok=1
+                else
+                    cd /; rm -rf "$TMP"; die "minisign 签名校验失败"
+                fi
             fi
             if [ "$sig_ok" -eq 0 ]; then
                 local MSC_ARCH=""
@@ -344,7 +348,8 @@ verify_package() {
                             if [ -n "$MSC_ACTUAL" ] && [ "$MSC_EXPECT" = "$MSC_ACTUAL" ]; then
                                 chmod +x "$MSC" 2>/dev/null || true
                                 printf 'untrusted comment: minisign public key\n%s\n' "$MINISIGN_PUBKEY" > natpunch.pub
-                                if "./$MSC" natpunch.pub SHA256SUMS.minisig SHA256SUMS; then
+                                if "./$MSC" natpunch.pub SHA256SUMS.minisig SHA256SUMS >msc.out 2>&1; then
+                                    sed 's/^/         /' msc.out
                                     info "minisign 签名校验通过（内置静态校验器）"
                                     sig_ok=1
                                 else
@@ -747,14 +752,14 @@ get_web_port() {
 show_menu() {
     echo ""
     printf '%b\n' "${C_CYAN}${LINE}${C_RESET}"
-    printf '%b\n' "${C_BOLD}         NatPunch 服务端管理脚本${C_RESET}"
+    printf '%b\n' "${C_BOLD}         服务端管理脚本${C_RESET}"
     printf '%b\n' "${C_CYAN}${LINE}${C_RESET}"
     printf '%b\n' "   ${C_GREEN}1${C_RESET}  安装 NatPunch"
     printf '%b\n' "   ${C_GREEN}2${C_RESET}  启动 NatPunch"
     printf '%b\n' "   ${C_GREEN}3${C_RESET}  停止 NatPunch"
     printf '%b\n' "   ${C_GREEN}4${C_RESET}  重启 NatPunch"
-    printf '%b\n' "   ${C_GREEN}5${C_RESET}  查看状态"
-    printf '%b\n' "   ${C_GREEN}6${C_RESET}  修改面板连接配置"
+    printf '%b\n' "   ${C_GREEN}5${C_RESET}  NatPunch 状态"
+    printf '%b\n' "   ${C_GREEN}6${C_RESET}  NatPunch 配置"
     printf '%b\n' "   ${C_GREEN}7${C_RESET}  升级 NatPunch"
     printf '%b\n' "   ${C_GREEN}8${C_RESET}  卸载 NatPunch"
     printf '%b\n' "   ${C_RED}0${C_RESET}  退出"
@@ -811,7 +816,7 @@ do_restart() {
 do_status() { title "运行状态"; status; echo ""; }
 do_passwd() {
     if [ ! -f "$CONF" ]; then die "NatPunch 未安装，找不到配置文件 $CONF"; fi
-    title "修改面板连接配置"
+    title "NatPunch 配置"
     acquire_lock
     OLD_USER=$(get_kv web_username); [ -n "${OLD_USER:-}" ] || OLD_USER="admin"
     OLD_PORT=$(get_web_port)
@@ -859,7 +864,7 @@ do_upgrade() {
     else
         warn "无法获取最新版本号（将直接下载最新发布）"
     fi
-    printf "  目标版本 [回车使用最新版]: "; read IN_VER
+    printf "         目标版本 [回车使用最新版]: "; read IN_VER
     case "${IN_VER:-}" in
         '') ;;
         *[!A-Za-z0-9._-]*) die "版本号不合法（仅允许字母数字 . _ -）" ;;
