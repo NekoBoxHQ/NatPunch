@@ -30,7 +30,10 @@ func (s *BaseController) Prepare() {
 	s.actionName = strings.ToLower(actionName)
 	// 纯会话认证（auth_key query 认证链路已移除，见 F1-1）
 	if s.GetSession("auth") != true {
+		// Redirect → http.Redirect 会立即 WriteHeader，路由据此跳过 action；这里再显式 return，
+		// 使控制流清晰，且避免落入下方 isAdmin 分支造成 403 覆盖 302。
 		s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
+		return
 	}
 	// isAdmin 三路分支（fail-closed，定稿 v3 F1-1 第 6 条）
 	switch v := s.GetSession("isAdmin").(type) {
@@ -44,10 +47,15 @@ func (s *BaseController) Prepare() {
 			s.Data["username"] = s.GetSession("username")
 			s.CheckUserAuth()
 		} else {
+			// 已登录但身份不完整：原实现只把模板标志置 false 就放行动作执行，
+			// 等于"检查被跳过"。fail-closed 拒绝（复评🟡）。
 			s.Data["isAdmin"] = false
+			s.deny()
 		}
 	default:
+		// isAdmin 缺失或类型非法：同上，拒绝而非放行（复评🟡）。
 		s.Data["isAdmin"] = false
+		s.deny()
 	}
 	s.Data["allow_user_login"], _ = beego.AppConfig.Bool("allow_user_login")
 	s.Data["allow_flow_limit"], _ = beego.AppConfig.Bool("allow_flow_limit")
@@ -243,6 +251,12 @@ func (s *BaseController) CheckUserAuth() {
 			return
 		}
 	case "index":
+		// Reorder 的参数是 ids（不含 id），且 server.ReorderTasks 会重写*所有*任务的 Sort
+		// （全局排序），无法按归属校验 → 非管理员一律拒绝（复评🟡）。
+		if s.actionName == "reorder" {
+			s.deny()
+			return
+		}
 		if id := s.GetIntNoErr("id"); id != 0 && !s.tunnelBelongsToMe(id, myClientId) {
 			s.deny()
 			return

@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -87,17 +86,14 @@ func main() {
 	}
 
 	// 单实例保护：直接运行服务（非 install/start/stop/restart/service 管理命令）时，
-	// 若已有实例在跑则退出，防止双进程各自持内存互写 clients.json 导致 vkey 丢失
+	// 若已有实例在跑则退出，防止双进程各自持内存互写 clients.json 导致 vkey 丢失。
+	// 占用改为 O_CREATE|O_EXCL 原子创建，消除原"先读后写"的 TOCTOU 竞态（复评🟡）；
+	// pid 文件保留不删，避免 unlink 与接管之间的竞态（详见 common.OwnPidFile 注释）。
 	if !isServiceCommand(os.Args) {
 		pidFile := filepath.Join(common.GetRunPath(), "natpunch.pid")
-		if b, err := os.ReadFile(pidFile); err == nil {
-			if pid, aerr := strconv.Atoi(strings.TrimSpace(string(b))); aerr == nil && pid > 0 && common.IsProcessAlive(pid) {
-				fmt.Printf("NatPunch 已在运行 (PID %d)，本实例退出（单实例保护）\n", pid)
-				os.Exit(0)
-			}
-		}
-		if werr := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); werr == nil {
-			defer os.Remove(pidFile)
+		if err := common.OwnPidFile(pidFile); err != nil {
+			fmt.Printf("NatPunch 已在运行或无法占用 pid 文件（%v），本实例退出（单实例保护）\n", err)
+			os.Exit(0)
 		}
 	}
 
