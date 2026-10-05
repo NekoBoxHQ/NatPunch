@@ -21,10 +21,10 @@ MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0
 # 必须内嵌于本脚本：若改用「同渠道下载的 SHA256SUMS」去校验校验器，在镜像被控时
 # 攻击者可同时替换 包 / SHA256SUMS / 校验器 三者，构成循环信任，等于没有校验（复评⚠️1）。
 # 留空 = 不启用内置校验器（仅告警跳过，SHA256 仍强制校验）；填入 = 锚定后才执行。
-MSC_SHA256_amd64="32cf3cf0ff392a0fa82979346919157f93233c05b3c38ca99753d6bae8dea1a2"
-MSC_SHA256_arm64="37a7e8ff82d5a6a81b1ce36fb24cc40a2a0182944ed23dab7eb0327658a8ce3f"
-MSC_SHA256_arm="1b58fe53f6625d9845db6ef51d9a2ce7f30cbf9936972a23d5bdae1a67d4864d"
-MSC_SHA256_mipsle="d924ed170c0a9bf9c5ce4db712f4fcd71fe522a1f8daa28de8cc11c96638cf11"
+MSC_SHA256_amd64="e20c81421e5833c07a6c9c3d077650f7591effc63c1565b7086d9e133ea73576"
+MSC_SHA256_arm64="152434e6f6d5aab0e8cafef602fc1a069b57b6d805d4954c5edb88550c6b9a9c"
+MSC_SHA256_arm="517c7d12adeea6af6682b5957b81bb3f450cfdab1d7b7ade6abe7108e303ace1"
+MSC_SHA256_mipsle="a4c2e73ac3a2810190882ecbf50d0a26accafe42843f48c73cb0709e83558865"
 # ================= 输出样式 =================
 C_RESET='\033[0m'
 C_BOLD='\033[1m'
