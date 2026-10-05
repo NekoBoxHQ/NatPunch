@@ -250,6 +250,9 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
+        # softprops 上传 14 个资产偶发 "other side closed"（连接中断），失败不阻断 job：
+        # 由下一段 Ensure 步骤用 gh CLI 校验资产并补传兜底（v26.9.108 实测踩坑）。
+        continue-on-error: true
         with:
           files: |
             dist/*.tar.gz
@@ -266,6 +269,48 @@ jobs:
 
             ### 校验
             - 发布物附 `SHA256SUMS`（强制校验）与 `SHA256SUMS.minisig`（minisign 签名，目标机无签名工具时自动使用随包发布的静态校验器）
+
+      - name: Ensure all release assets uploaded
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          cd dist
+          TAG="${{ github.ref_name }}"
+          # 等待 softprops 创建的 release 可被发现（最多约 60s）
+          found=0
+          for i in $(seq 1 12); do
+            if gh release view "$TAG" >/dev/null 2>&1; then found=1; break; fi
+            sleep 5
+          done
+          if [ "$found" -ne 1 ]; then
+            echo "::warning::softprops 未创建 release，用 gh 兜底创建"
+            gh release create "$TAG" --title "NatPunch $TAG" --latest \
+              --notes "## NatPunch $TAG"
+          fi
+          # 逐个确保资产已上传：缺失（含上传中断的残留）→ 补传，每个重试 3 次
+          missing=0
+          for f in *; do
+            if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qxF "$f"; then
+              continue
+            fi
+            echo "补传缺失资产: $f"
+            uploaded=0
+            for i in 1 2 3; do
+              if gh release upload "$TAG" "$f" --clobber; then uploaded=1; break; fi
+              echo "上传 $f 失败（第 ${i} 次），5 秒后重试"
+              sleep 5
+            done
+            if [ "$uploaded" -ne 1 ]; then
+              echo "::error::资产 $f 补传失败"
+              missing=1
+            fi
+          done
+          # 最终校验资产数 == dist 文件数
+          expect=$(ls -1 | wc -l)
+          actual=$(gh release view "$TAG" --json assets -q '.assets | length')
+          echo "release 资产: $actual / 期望 $expect"
+          [ "$missing" -eq 0 ] || exit 1
 
       - name: Notify Telegram Group
         continue-on-error: true
