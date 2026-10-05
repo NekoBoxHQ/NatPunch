@@ -22,3 +22,4 @@ issues:
     - linters:
         - staticcheck
       text: "SA6002"
+ 

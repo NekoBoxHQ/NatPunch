@@ -514,3 +514,4 @@ func (s *TRPClient) closing() {
 	}
 	s.signal = nil // 复位：IsConnected 在关闭后返回 false（阶段三 #6）
 }
+ 

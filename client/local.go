@@ -217,3 +217,4 @@ func newUdpConn(localAddr string, config *config.CommonConfig, l *config.LocalSe
 	muxSession = natpunch_mux.NewMux(udpConn, "kcp", config.DisconnectTime)
 	p2pNetBridge = &p2pBridge{}
 }
+ 

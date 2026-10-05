@@ -222,3 +222,4 @@ func runDocker(dockerName, networkName, ip, testFunName, nowDir string) error {
 func stopDocker(dockerName string) error {
 	return runCmd(exec.Command("docker", "stop", dockerName))
 }
+ 
