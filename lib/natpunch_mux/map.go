@@ -59,4 +59,3 @@ func (s *connMap) Delete(id int32) {
 	delete(s.cMap, id)
 	s.Unlock()
 }
- 

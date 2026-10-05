@@ -692,4 +692,3 @@ func (Self *writeBandwidth) Get() (bw float64) {
 func (Self *writeBandwidth) GrowRatio() {
 	atomic.AddUint32(&Self.ratio, 1)
 }
- 

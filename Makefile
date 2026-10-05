@@ -63,4 +63,3 @@ smoke:
 
 clean:
 	rm -f natpunch natpunch-client
- 

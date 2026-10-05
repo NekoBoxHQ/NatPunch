@@ -98,4 +98,3 @@ var (
 	windowBuff = newWindowBufferPool()
 	listEle    = newListElementPool()
 )
- 

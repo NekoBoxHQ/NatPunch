@@ -130,4 +130,3 @@ func (conn *Conn) SetReadDeadline(t time.Time) error {
 func (conn *Conn) Close() error {
 	return conn.conn.Close()
 }
- 

@@ -164,4 +164,3 @@ func (Self *muxPackager) reset() {
 	Self.window = 0
 	Self.buf = nil
 }
- 
