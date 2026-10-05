@@ -2,29 +2,82 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
-## [未发布]（v26.9.98 候选）
+## v26.9.111（已发布）
 
 ### 变更
-- **README 完全品牌化**：README/README_zh 移除顶部与 License 章节的显著派生声明、发布说明模板同步；上游相关仅保留在 LICENSE / NOTICE（法律声明）。对外呈现完全为 NatPunch。
-- **OpenWrt 签名校验落地（静态校验器）**：新增 `cmd/minisign-check`（Go 版 go-minisign 库，约 40 行极简校验器），CI 随发布物静态交叉编译 4 架构（`minisign-check-linux-<arch>`）；`install.sh` / `install_server.sh` 签名校验升级为三级——系统 minisign → 自动下载内置静态校验器 → 降级 SHA256 兜底。**工具可得但校验失败即终止**，只有校验工具完全不可得才警告跳过（OpenWrt 无 minisign 软件包场景首次获得完整签名校验能力）。
+- **CI 增加 `-race` 门禁**：`check` job 新增 `go test -race ./...`。本项目修复集中于并发路径（pidfile 原子化、sourcepool 池淘汰、p2p 清扫、mux 队列、globalconn 计数），无 `-race` 时数据竞争无法被自动发现。
+- **Go 自更新增加 minisign 签名校验**：`lib/install` 用 `go-minisign` + 内嵌公钥校验 `SHA256SUMS.minisig`，与 install.sh / install_server.sh 同策略（有签名强制校验、未提供则告警放行）。此前仅比对未签名的 SHA256SUMS，等价于只信任 HTTPS 传输。
+- **修复「从不限速改为限速」不生效**：`UpdateClient` 改为比较旧值决定是否重建 Rate，并停掉被替换对象的 ticker（避免 goroutine 泄漏）。
+- **客户端 web 密码统一哈希**：修复 bridge pub 模式注册以明文覆盖已哈希值；`NewClient` / `UpdateClient` 集中处理，`$2` 前缀不二次哈希。
+- **并发修复**：`UdpModeServer.sweeper` 改用 `ready` 通道判定会话就绪，消除对 `sess.target` 的无同步读取；`sourcePoolSet` 在 `Close` 后不再被 `Submit` 复活无人清扫的池；`HttpsListener.Close` 排空 `acceptConn` 缓冲，避免最多 8 个已建立连接泄漏。
+- **pid 文件改用 flock（Unix）**：锁由内核在进程退出时自动释放，消除陈旧文件与 PID 复用误判；不支持文件锁的平台退回 `O_CREATE|O_EXCL` 路径。
+- `quick_cmds.json` 权限由 0644 收紧为 0600，与其余写入口一致。
+
+### 工程化 / CI
+- master 推送现在会触发 `check`（vet / test / -race / govulncheck / lint）；`build` / `minisign-check` / `release` 仅由 `v*` 标签触发，避免 master 推送误建 release。
+- 新增回归测试：pidfile 四项（存活拒绝 / 陈旧接管 / 空文件保守拒绝 / 并发仅一个成功）、sourcepool 两项（Close 后拒绝提交 / 重复 Close 幂等）。
+
+## v26.9.110（已发布）
+
+### 变更
+- **单实例 pid 文件原子化**：以 `O_CREATE|O_EXCL` 主张所有权，消除原「读文件判断存活 → 无条件覆盖」的 TOCTOU 竞态（两个进程可同时通过检查、各持内存副本互写 clients.json）。
+- `web/controllers/base.go` fail-closed 加固：`isAdmin` 缺失/非法的会话不再放行动作执行。
+- `CheckUserAuth` 对 `index/reorder` 一律拒绝：该动作参数为 `ids`（无 `id`），且会重写全部任务的 Sort，无法按归属校验。
+
+## v26.9.109（已发布）
+- CI release 上传加固：softprops 偶发 `other side closed` 中断上传，新增 `gh` 兜底步骤——校验资产数、对缺失项重试补传（v26.9.108 实测踩坑）。
+
+## v26.9.108（已发布）
+- 校验器信任锚更新为 CI 实测哈希（此前锚点由本地构建填入，与 CI 产物不符）。
+
+## v26.9.107（已发布）
+- 校验器产物改用 `-buildvcs=false -trimpath` 构建，使产物跨 VCS 状态可复现（Go 默认会把 git revision/modified 编进二进制，导致本地与 CI 哈希必然不同、锚点永远对不上）。
+- release job 补 `actions/checkout`，使信任锚守卫真正生效（此前缺该步骤，守卫会因读不到脚本而静默走 warning 分支）。
+- 守卫把本次产物的锚点值写入 job summary，便于直接粘贴。
+
+## v26.9.106（已发布）
+- **校验器信任锚内嵌脚本**：不再用同渠道下载的 SHA256SUMS 校验校验器（镜像被控时可同时替换包 / 清单 / 校验器，构成循环信任）。
+- **`max_clients` 配额豁免合成条目**：`GetClientCount` 跳过 `NoStore` 客户端，修复 `max_clients=N` 实际只能注册 N-1 个。
+- **p2p 条目硬上限**：`p2pMaxEntries=4096`，防「不同 key 高速发包」绕过 TTL 清扫造成内存增长。
+
+## v26.9.105（已发布）
+- 复评「发布前必修 3 项」+ 建议项 + 文档对齐：
+  - 安装脚本在发布未提供 `.minisig` 时改为告警放行（原实现因内置公钥非空而恒为真，导致无签名发布的安装全部失败）。
+  - 文档与代码对齐：integration 门禁、重置 VKEY 入口、安装器权限实际值、`max_global_conn` 覆盖范围等。
+
+## v26.9.104（已发布）
+- **程序级单实例保护**：直接运行服务时若已有实例则退出，根治双进程各自持内存互写 clients.json 导致 vkey 丢失。
+
+## v26.9.103（已发布）
+- 双进程互覆盖数据库根因修复——systemd 优先单进程管理。
+
+## v26.9.102（已发布）
+- **vkey 不可变防呆**（升级掉线保护）：编辑客户端留空即保持原值、手填 <8 位拒绝、查重；移除面板「重置 VKEY」入口（避免误操作导致批量掉线）。存量 40bit vkey 的手动轮换步骤见 `docs/security-hardening.md`。
+- 升级前备份 conf 目录；clients.json 缺失/为空时自动从备份恢复。
+
+## v26.9.101（已发布）
+- CI integration job 移除（路径过期 + 默认 skip）；安装菜单空输入优化。
+
+## v26.9.100（已发布）
+- 版本发现改为按版本号取最高（`releases/latest` 按发布时间排序，跨分支时可能取到较低版本）。
+
+## v26.9.99（已发布）
+- **全仓库 nps/NPS 标识清零**，仅 LICENSE / NOTICE 保留法律声明。
+- `lib/crypt` 移除旧版前缀快速命令的解析兼容（存量客户端用面板重新生成命令即可）。
+
+## v26.9.98（已发布）
+
+### 变更
+- **README 完全品牌化**：README / README_zh 移除顶部与 License 章节的显著派生声明，发布说明模板同步；上游相关仅保留在 LICENSE / NOTICE（法律声明）。
+- **OpenWrt 签名校验落地（静态校验器）**：新增 `cmd/minisign-check`（Go 版 go-minisign 库），CI 随发布物静态交叉编译 4 架构（`minisign-check-linux-<arch>`）；`install.sh` / `install_server.sh` 签名校验升级为三级——系统 minisign → 自动下载内置静态校验器 → 降级 SHA256 兜底。**工具可得但校验失败即终止**，仅工具完全不可得才警告跳过（OpenWrt 无 minisign 软件包场景首次获得完整签名校验能力）。
 - CI 新增 shell 语法门禁（`sh -n install.sh install_server.sh`）。
 
-### 工程化 / 依赖 / 合规 / 文档
-
-## v26.9.96（已发布）
-
-### 变更
-- 客户端列表页移除服务端桥接证书指纹展示条（TLS 一键命令仍自动携带指纹，功能不变）。
-- install.sh：TLS_FLAG 写入 /etc/natpunch.conf 时整体加单引号——init.d 用 `. /etc/natpunch.conf` source 配置，值含空格时无引号会被拆成多条命令执行（多参数 TLS_FLAG 安装崩溃修复）。
-- minisign 签名启用：CI 签名改 apt C 版 minisign（原 go-minisign `@v0.1.0` 子目录版本不存在，是未验证的死代码路径，密钥一配必炸）；发布方公钥内置 `install.sh` / `install_server.sh`（`MINISIGN_PUBKEY` 环境变量可覆盖），目标机有 minisign 工具即强制校验签名。
-
-## [未发布]（v26.9.97 候选）
+## v26.9.97（已发布）
 
 ### 变更
 - **项目完全 NatPunch 化**：module path 全面改为 `github.com/NekoBoxHQ/NatPunch`（go.mod + 全部 import）；`cmd` 目录改名 `cmd/natpunch`。
-- 清理代码/配置/界面残留上游标识：Windows 服务名、服务安装/卸载/启停菜单、HTTP 代理 404 页、桥接证书 CN、日志路径与文件名、`/etc` 兼容路径、默认配置模板等。
-- **legacy 移除（v26.9.99）**：`lib/crypt` 删除旧版前缀快速命令的解析兼容（存量客户端以面板重新生成命令即可，无前缀新格式为默认）。
-- GPLv3 合规声明保留于 LICENSE / NOTICE（法律义务），docs/comparison 保留同类工具对比。
+- 清理代码 / 配置 / 界面残留上游标识：Windows 服务名、服务安装/卸载/启停菜单、HTTP 代理 404 页、桥接证书 CN、日志路径与文件名、`/etc` 兼容路径、默认配置模板等。
+- GPLv3 合规声明保留于 LICENSE / NOTICE（法律义务），`docs/comparison` 保留同类工具对比。
 
 ### 工程化 / 依赖 / 合规 / 文档
 - CI 门禁：`check`（vet / go test / govulncheck / golangci-lint）→ `build`（linux amd64/arm64/armv7/mipsle × server/client 共 8 组合，产物架构自检）→ `release`（SHA256SUMS + minisign 签名 + 发布说明带 GPL 声明）。go-version 1.26。mux 集成测试（需 Docker+tc）为本地可选项（`NP_MUX_INTEGRATION=1`），不在 CI 门禁内。
@@ -37,6 +90,13 @@
 - GPLv3 声明式合规：README 顶部声明派生自上游、LICENSE 补版权行、新增 NOTICE。
 - README 措辞："静默管理/免凭据 SSH" 调整为"自动化运维管理/授权终端 + 审计日志"，新增 AUP 段落。
 - 终端审计日志：`TERMINAL AUDIT`（操作人 / 时间 / 目标客户端 / 来源 IP）。
+
+## v26.9.96（已发布）
+
+### 变更
+- 客户端列表页移除服务端桥接证书指纹展示条（TLS 一键命令仍自动携带指纹，功能不变）。
+- install.sh：TLS_FLAG 写入 /etc/natpunch.conf 时整体加单引号——init.d 用 `. /etc/natpunch.conf` source 配置，值含空格时无引号会被拆成多条命令执行（多参数 TLS_FLAG 安装崩溃修复）。
+- minisign 签名启用：CI 签名改 apt C 版 minisign（原 go-minisign `@v0.1.0` 子目录版本不存在，是未验证的死代码路径，密钥一配必炸）；发布方公钥内置 `install.sh` / `install_server.sh`（`MINISIGN_PUBKEY` 环境变量可覆盖），目标机有 minisign 工具即强制校验签名。
 
 ## 阶段三（commit 5aa65a0）稳定性
 - mux 死锁修复（connStatusOkCh/FailCh 有缓冲 + select 超时）；写队列容量上限（默认 4096 chunk，超限断连并打独立日志）。

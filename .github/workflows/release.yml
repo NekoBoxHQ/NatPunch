@@ -1,7 +1,12 @@
 name: Build & Release
 
 on:
+  # master 推送只触发 check（vet / test / -race / govulncheck / lint），用于日常验证；
+  # 构建与发布仅由 v* 标签触发（由下方 build / minisign-check / release 的 if 条件保证），
+  # 避免 master 推送误建 release。
   push:
+    branches:
+      - master
     tags:
       - 'v*'
 
@@ -51,6 +56,8 @@ jobs:
 
   build:
     needs: check
+    # 仅标签触发构建：master 推送只跑 check，避免每次提交都做 8 组交叉编译
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -142,6 +149,7 @@ jobs:
     # 静态签名校验器：OpenWrt 等无 minisign 软件包的环境，由安装脚本下载本工具做签名校验。
     # Go 版（go-minisign 库），静态交叉编译覆盖全部发布架构。
     needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -175,6 +183,9 @@ jobs:
 
   release:
     needs: [build, minisign-check]
+    # 双保险：master 推送下 build 已跳过，这里再显式限定标签，
+    # 避免 "Ensure all release assets" 步骤以 github.ref_name（如 master）误建 release。
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       # 必须 checkout：下面的信任锚守卫要读取 install.sh / install_server.sh。
