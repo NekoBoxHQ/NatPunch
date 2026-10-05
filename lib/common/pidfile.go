@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -12,23 +13,58 @@ import (
 // 验证单实例判定的完整逻辑（见 pidfile_test.go）。
 var isProcessAlive = IsProcessAlive
 
+// heldPidFile 持有中的 pid 文件句柄。
+// 走 flock 路径时**必须保持打开**：锁随句柄关闭而释放，进程退出（含 SIGKILL）由内核回收。
+var heldPidFile *os.File
+
 // OwnPidFile 以原子方式占用 pid 文件；成功返回 nil，失败返回原因（通常表示已有实例在运行）。
 //
-// 原实现是「先 ReadFile 判断存活，再 WriteFile 覆盖」，两步之间存在 TOCTOU 竞态：
-// 两个进程可同时通过存活检查，随后各自无条件截断写入，双双认为自己拿到单实例，
-// 结果是两个进程同时运行、各持内存副本互写 clients.json（复评🟡）。
+// 先尝试 OS 级排他文件锁（flock，见 pidfile_lock_unix.go）：锁由内核在进程退出时
+// 自动释放，因此既无 TOCTOU 窗口，也不存在陈旧文件与 PID 复用误判。
+// 平台不支持锁时退回 ownPidFilePortable（O_CREATE|O_EXCL + 存活判断），
+// 该路径可消除 TOCTOU，但残留"pid 复用导致误判已在运行"（失败方向安全）。
 //
-// 现改为用 O_CREATE|O_EXCL 主张所有权：内核保证同一路径只有一个创建者成功，
-// 不存在"两者都通过"的窗口。若文件已存在，读出其中的 pid：
-//   - 进程存活   → 拒绝启动（返回错误）；
-//   - 进程已死   → 视为陈旧文件（例如被 SIGKILL，defer 未执行），删除后重试一次独占创建。
-//
-// 文件**不在退出时删除**：unlink 与"另一进程已打开同一 inode 并接管"之间会形成竞态
-// （unlink 后第三方可创建新文件，从而出现两个持有者）。保留文件时，下一实例打开同一路径继续判断。
-//
-// 已知残余：pid 复用 —— 陈旧文件中的 pid 恰被无关进程占用时会误判为"已在运行"。
-// 该情形失败方向是安全的（拒绝启动，而非双实例）；彻底消除需 OS 级文件锁（flock）。
+// 注意：不支持锁的平台**必须直接走可移植路径**，不可先 open(O_CREATE) 再判断 ——
+// open 本身就会创建文件，会让后续的 O_EXCL 永远拿到 EEXIST。
 func OwnPidFile(path string) error {
+	if !pidFileLockSupported {
+		return ownPidFilePortable(path)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	if !lockPidFile(f) {
+		b, _ := io.ReadAll(f)
+		_ = f.Close()
+		owner := strings.TrimSpace(string(b))
+		if owner == "" {
+			owner = "unknown"
+		}
+		return fmt.Errorf("already running (pid %s)", owner)
+	}
+	if err := f.Truncate(0); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0); err != nil {
+		_ = f.Close()
+		return err
+	}
+	_ = f.Sync()
+	heldPidFile = f // 保持打开以持有锁，直到进程退出
+	return nil
+}
+
+// ownPidFilePortable 不支持文件锁的平台所用的占用方式：
+// O_CREATE|O_EXCL 主张所有权（内核保证同一路径只有一个创建者成功，消除 TOCTOU）。
+// 若文件已存在，读出其中的 pid：
+//   - 进程存活 → 拒绝启动；
+//   - 进程已死 → 视为陈旧文件（例如被 SIGKILL），删除后重试一次独占创建。
+//
+// 文件**不在退出时删除**：unlink 与"另一进程已打开同一 inode 并接管"之间会形成竞态。
+// 已知残余：pid 复用会误判为"已在运行"（失败方向安全）。
+func ownPidFilePortable(path string) error {
 	err := tryCreateExclusive(path)
 	if err == nil {
 		return nil

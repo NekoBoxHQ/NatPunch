@@ -273,6 +273,16 @@ func (s *DbUtils) NewClient(c *Client) error {
 		return errors.New(fmt.Sprintf("client count %d >= max_clients %d", s.GetClientCount(), MaxClients))
 	}
 	var isNotSet bool
+	// 客户端 web 密码统一哈希：bridge 的 pub 模式注册会将客户端配置里的明文
+	// WebPassword 原样带入并覆盖已哈希值。集中在此处理可覆盖全部入口；
+	// 已哈希（$2 前缀）的不二次哈希，面板路径预先哈希过，同样不受影响（复评🟡）。
+	if c.WebPassword != "" && !strings.HasPrefix(c.WebPassword, "$2") {
+		h, herr := common.HashPassword(c.WebPassword)
+		if herr != nil {
+			return herr
+		}
+		c.WebPassword = h
+	}
 	if c.WebUserName != "" && !s.VerifyUserName(c.WebUserName, c.Id) {
 		return errors.New("web login username duplicate, please reset")
 	}
@@ -332,12 +342,45 @@ func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
 }
 
 func (s *DbUtils) UpdateClient(t *Client) error {
-	s.JsonDb.Clients.Store(t.Id, t)
-	if t.RateLimit == 0 {
-		if t.Rate != nil {
-			t.Rate.Stop() // 重建前先停旧 ticker，避免 goroutine 泄漏（F1-8）
+	// 先取旧条目：既要比较 RateLimit 变化，也要停掉被替换对象的限速器
+	var old *Client
+	if v, ok := s.JsonDb.Clients.Load(t.Id); ok {
+		old = v.(*Client)
+	}
+	oldRateLimit := -1
+	if old != nil {
+		oldRateLimit = old.RateLimit
+	}
+
+	// web 密码防呆：与 NewClient 同口径，避免经编辑接口写入明文（复评🟡）
+	if t.WebPassword != "" && !strings.HasPrefix(t.WebPassword, "$2") {
+		h, herr := common.HashPassword(t.WebPassword)
+		if herr != nil {
+			return herr
 		}
-		t.Rate = rate.NewRate(int64((2 << 23) * 1024))
+		t.WebPassword = h
+	}
+
+	s.JsonDb.Clients.Store(t.Id, t)
+
+	// 旧对象被替换时停掉其限速器，避免 ticker 泄漏
+	if old != nil && old != t && old.Rate != nil {
+		old.Rate.Stop()
+	}
+
+	// 仅在限速值变化或新对象尚未持有限速器时重建。
+	// 原实现只在 RateLimit==0 时重建，导致「从不限速改为限速」不生效（复评🟡）。
+	if oldRateLimit != t.RateLimit || t.Rate == nil {
+		if t.Rate != nil {
+			t.Rate.Stop()
+			t.Rate = nil
+		}
+		if t.RateLimit == 0 {
+			t.Rate = rate.NewRate(int64((2 << 23) * 1024))
+		} else {
+			// RateLimit 单位 Mbps（比特，1024 进制），与 NewClient 口径一致
+			t.Rate = rate.NewRate(int64(t.RateLimit * 1024 * 1024 / 8))
+		}
 		t.Rate.Start()
 	}
 	return nil

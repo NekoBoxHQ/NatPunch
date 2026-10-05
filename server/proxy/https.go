@@ -345,6 +345,19 @@ func (httpsListener *HttpsListener) Accept() (net.Conn, error) {
 func (httpsListener *HttpsListener) Close() error {
 	httpsListener.closeOnce.Do(func() {
 		close(httpsListener.closeCh)
+		// 排空缓冲中尚未被 Accept 取走的连接并关闭。
+		// 只关 closeCh 时，Accept 返回错误后调用方不再调用 Accept，
+		// 缓冲里最多 8 个已建立的连接将永不释放 → socket 泄漏（复评🟡）。
+		for {
+			select {
+			case c := <-httpsListener.acceptConn:
+				if c != nil {
+					_ = c.Close()
+				}
+			default:
+				return
+			}
+		}
 	})
 	return nil
 }

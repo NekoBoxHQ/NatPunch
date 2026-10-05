@@ -19,10 +19,15 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/jedisct1/go-minisign"
 )
 
 // repo 为发布与更新所指向的 GitHub 仓库（组织/仓库名）
 const repo = "NekoBoxHQ/NatPunch"
+
+// natpunchMinisignPubKey 发布方 minisign 公钥，须与 install.sh / install_server.sh 内嵌值一致。
+const natpunchMinisignPubKey = "RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660"
 
 // Keep it in sync with the template from service_sysv_linux.go file
 // Use "ps | grep -v grep | grep $(get_pid)" because "ps PID" may not work on OpenWrt
@@ -312,6 +317,10 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取 SHA256SUMS 失败: %w", err)
 	}
+	// 签名校验：有签名则强制校验（与 shell 安装器对齐，见 verifyReleaseSignature）
+	if err := verifyReleaseSignature(ver, sumsRaw); err != nil {
+		return "", err
+	}
 	sums := parseSha256Sums(sumsRaw)
 	want, ok := sums[filename]
 	if !ok {
@@ -368,6 +377,37 @@ func fetchReleaseFile(ver, asset string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// verifyReleaseSignature 校验 SHA256SUMS 的 minisign 签名。
+//
+// 与 shell 安装器策略保持一致（复评🟡：此前 Go 自更新只比对未签名的 SHA256SUMS，
+// 等价于仅信任 HTTPS 传输，弱于 install.sh / install_server.sh 的 minisign 校验）：
+//   - 发布方提供了 SHA256SUMS.minisig → 强制校验，失败即中止更新；
+//   - 未提供签名文件（CI 未配置 MINISIGN_SECRET_KEY）→ 告警放行，此时仍有 SHA256 强制校验。
+func verifyReleaseSignature(ver, sumsRaw string) error {
+	sigRaw, err := fetchReleaseFile(ver, "SHA256SUMS.minisig")
+	if err != nil {
+		log.Printf("未获取到 SHA256SUMS.minisig，跳过签名校验（SHA256 已强制校验）: %v", err)
+		return nil
+	}
+	pk, err := minisign.NewPublicKey(natpunchMinisignPubKey)
+	if err != nil {
+		return fmt.Errorf("内置 minisign 公钥解析失败: %w", err)
+	}
+	sig, err := minisign.DecodeSignature(sigRaw)
+	if err != nil {
+		return fmt.Errorf("SHA256SUMS.minisig 解析失败: %w", err)
+	}
+	ok, err := pk.Verify([]byte(sumsRaw), sig)
+	if err != nil {
+		return fmt.Errorf("minisign 签名校验失败: %w", err)
+	}
+	if !ok {
+		return errors.New("minisign 签名与 SHA256SUMS 不匹配，已中止更新")
+	}
+	log.Println("minisign signature verified: SHA256SUMS")
+	return nil
 }
 
 // parseSha256Sums 解析 sha256sum 格式："<hash>  <filename>"（忽略空行与 # 注释）

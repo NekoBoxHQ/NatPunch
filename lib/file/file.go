@@ -195,7 +195,8 @@ func (s *JsonDb) StoreQuickCmdsToJsonFile() {
 	if err != nil {
 		return
 	}
-	file, err := os.Create(s.QuickCmdsFilePath + ".tmp")
+	// 0600：与 clients.json / hosts.json 的写入口径一致（原 os.Create 为 0644，见复评🟡）
+	file, err := os.OpenFile(s.QuickCmdsFilePath+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		logs.Error("store quick cmds: create tmp file error: %v", err)
 		return

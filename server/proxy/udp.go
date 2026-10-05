@@ -290,8 +290,12 @@ func (s *UdpModeServer) sweeper() {
 			now := time.Now().UnixNano()
 			s.addrMap.Range(func(k, v interface{}) bool {
 				sess := v.(*udpSession)
-				// 跳过仍在建立中的占位（target 尚未填充）
-				if sess.target == nil {
+				// 跳过仍在建立中的占位：以 ready 是否已关闭判定，而**不要**直接读 sess.target。
+				// target 由 runSession 在 close(ready) 之前写入，直接读会与写构成数据竞争
+				// （-race 可复现）；经 ready 判定后，后续对 target 的读取才有 happens-before 保证。
+				select {
+				case <-sess.ready:
+				default:
 					return true
 				}
 				if now-atomic.LoadInt64(&sess.lastActive) > idleNs {

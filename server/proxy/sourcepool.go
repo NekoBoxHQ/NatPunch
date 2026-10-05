@@ -31,6 +31,7 @@ type sourcePoolSet struct {
 	worker   func(interface{})
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	closed   bool  // Close 后置位（在 mu 保护下读写），阻止 Submit 复活池
 	dropped  int64 // 丢包计数（告警用）
 }
 
@@ -49,6 +50,11 @@ func newSourcePoolSet(capacity, maxPools int, worker func(interface{})) *sourceP
 // Submit 提交任务；池满或池 map 超上限时返回 false，调用方负责丢包与资源归还。
 func (s *sourcePoolSet) Submit(key string, item interface{}) bool {
 	s.mu.Lock()
+	if s.closed {
+		// 已 Close：不再接受任务。否则会新建一个无人清扫的池（sweep 已退出）→ 泄漏（复评🟡）
+		s.mu.Unlock()
+		return false
+	}
 	p, ok := s.pools[key]
 	if !ok {
 		if len(s.pools) >= s.maxPools {
@@ -110,6 +116,7 @@ func (s *sourcePoolSet) Close() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 		s.mu.Lock()
+		s.closed = true
 		stale := make([]*udpSourcePool, 0, len(s.pools))
 		for k, p := range s.pools {
 			delete(s.pools, k)

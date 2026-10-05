@@ -29,6 +29,13 @@ jobs:
       - name: Unit tests (exclude integration)
         run: go test ./...
 
+      - name: Unit tests (race detector)
+        # 本项目近期修复集中在并发路径（pidfile 原子化、sourcepool 池淘汰、p2p 清扫、
+        # mux 队列、globalconn 计数），且此类缺陷典型特征是"平时不发作、高负载随机崩"。
+        # 无 -race 时数据竞争无法被自动发现（如 udpSession.target、sourcePoolSet.Close 后复活）。
+        # ubuntu runner 自带 gcc，go test -race 开箱可用。
+        run: go test -race ./...
+
       - name: Govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
