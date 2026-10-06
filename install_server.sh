@@ -645,7 +645,15 @@ USE_PROCD=1
 start_service() {
     procd_open_instance
     procd_set_param command /opt/natpunch/natpunch
-    procd_set_param respawn 3600 5 5
+    # respawn <threshold> <timeout> <retry>
+    # retry 必须是 0。procd 源码 service/instance.c 的判定是：
+    #     if (respawn_count > respawn_retry && respawn_retry > 0) {
+    #         respawn = 0; halt = 1;      // 彻底放手，不再拉起
+    #     }
+    # 写成 5 就是"一小时内崩 6 次就永久停止守护"。客户端那份（install.sh）早就改成 0 了，
+    # 服务端这边一直漏着 —— 而服务端被守护放弃 = **所有客户端同时掉线且不会自愈**，
+    # 只能人工上机把服务拉起来。retry=0 走 else 分支，永不放弃。
+    procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_set_param cwd /opt/natpunch
@@ -696,6 +704,11 @@ EOL
 Description=NatPunch Server
 After=network-online.target
 Wants=network-online.target
+# StartLimitIntervalSec=0：关掉启动频率限制，语义就是"永远重启"。
+# 默认值（10s / burst 5）+ RestartSec=3 目前恰好不会触发（10 秒窗口内最多 4 次），
+# 但那是靠 3 > 10/5 这个巧合撑着的：谁把 RestartSec 调到 2 秒以内，systemd 就会把
+# 服务打成 failed 并永久停止重启 —— 服务端停 = 所有客户端全掉线。别赌默认值。
+StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=$DIR

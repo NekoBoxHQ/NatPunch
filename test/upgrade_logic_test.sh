@@ -74,17 +74,30 @@ for f in "$INSTALL" "$SRC"; do
 done
 rm -f /tmp/_selfcheck_err
 
-echo "== 4. 守护配置不能被改回会放弃重启的值 =="
+echo "== 4. 守护配置不能被改回会放弃重启的值（客户端与服务端都要查） =="
 # procd 的 respawn <threshold> <timeout> <retry>：retry > 0 时崩够次数就永久放手。
-if grep -q 'procd_set_param respawn 3600 5 0' "$INSTALL"; then
-    ok "procd respawn 的 retry 是 0（永不放弃）"
+# 两个脚本都必须查 —— 上一版只查了 install.sh，服务端 install_server.sh 里那句
+# `respawn 3600 5 5` 就这么一路漏了过去，直到上真机看 procd 状态才发现。
+# 服务端被守护放弃 = 所有客户端同时掉线且不会自愈，比客户端那边更严重。
+SERVER_UNIT="install_server.sh"
+for f in "$INSTALL" "$SERVER_UNIT"; do
+    # 注意：install_server.sh 的 procd 段在 heredoc 里带缩进，所以这里不能锚 ^
+    if grep -q 'procd_set_param respawn 3600 5 0' "$f"; then
+        ok "$f 的 procd respawn retry 是 0（永不放弃）"
+    else
+        bad "$f 的 procd respawn retry 不是 0 —— 崩够次数后 procd 会彻底停止守护"
+    fi
+    if grep -qE '^[[:space:]]*StartLimitIntervalSec=0' "$f"; then
+        ok "$f 的 systemd 关掉了启动频率限制"
+    else
+        bad "$f 的 systemd unit 缺 StartLimitIntervalSec=0 —— 多次重启后会被打成 failed 并停止重启"
+    fi
+done
+# 反向断言：两个脚本里都不该再出现 retry>0 的 respawn 写法
+if grep -qE 'procd_set_param respawn [0-9]+ [0-9]+ [1-9][0-9]*' "$INSTALL" "$SERVER_UNIT"; then
+    bad "仍有 retry>0 的 respawn 写法 —— 那等于「崩够次数就永久放手」"
 else
-    bad "procd respawn 的 retry 不是 0 —— 崩溃超过 retry 次后 procd 会彻底停止守护"
-fi
-if grep -q '^StartLimitIntervalSec=0' "$INSTALL"; then
-    ok "systemd 关掉了启动频率限制"
-else
-    bad "systemd unit 缺 StartLimitIntervalSec=0 —— 短时间多次重启后会被打成 failed 并停止重启"
+    ok "两个脚本都没有 retry>0 的 respawn 写法"
 fi
 
 echo "== 5. 签名链不能被改回「拿不到签名就放行」 =="

@@ -133,6 +133,24 @@ func (s *TerminalController) checkWsOrigin(r *http.Request) bool {
 // 浏览器 <-> 服务端 <-> 隧道(shell link) <-> 客户端本地 shell（PTY）
 // 文本帧=控制(JSON resize)，二进制帧=终端数据
 func (s *TerminalController) Ws() {
+	// 关掉 beego 的模板渲染。beego 在 action 返回后有这么一段：
+	//
+	//	if !context.ResponseWriter.Started && context.Output.Status == 0 {
+	//	    if BConfig.WebConfig.AutoRender { execController.Render() }
+	//	}
+	//
+	// 而 WebSocket 的 hijack 不经过 beego 的 Write/WriteHeader —— Started 一直是 false，
+	// Status 也还是 0，于是它认定"这个响应还没写过"，按 控制器名/动作名 去渲染
+	// views/terminalcontroller/ws.tpl。那个模板不存在 → template.go:75 panic
+	// → 被 beego 的 recover 抓住，打一整串 [C] 级别堆栈。
+	//
+	// 成功的终端会话结束时也会走一遍（就是上面那个条件），所以**每开一次终端就 panic 一次**，
+	// 把日志灌满 [C] 堆栈、把真错误埋掉。功能不受影响（连接已经 hijack 走了），但日志没法看。
+	//
+	// 下面两处 SetStatus(403/400) 之所以没这个问题，是因为 Output.Status != 0 让 beego 跳过了渲染；
+	// 它们只覆盖 Upgrade 之前的路径，Upgrade 之后的三个 return 都管不到 —— 靠这一行统一收口。
+	s.EnableRender = false
+
 	// 注意：BaseController.Prepare 会把会话 clientId 写入 Ctx.Input 参数（base.go SetParam），
 	// 覆盖 URL 的 client_id；这里必须读原始 URL query，否则归属校验永远比对到会话自身（F2-6）
 	clientId, _ := strconv.Atoi(s.Ctx.Request.URL.Query().Get("client_id"))

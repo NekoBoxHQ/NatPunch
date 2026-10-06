@@ -590,6 +590,7 @@ client_running() {
 sleep "$DELAY"
 if client_running; then
     log "客户端在运行，看门狗不介入"
+    rm -f "$0" 2>/dev/null || true
     exit 0
 fi
 log "等待 ${DELAY}s 后客户端仍不在，尝试拉起"
@@ -604,6 +605,10 @@ if client_running; then
 else
     log "看门狗拉起失败，需要人工介入"
 fi
+# 自删：原先没有任何地方删它，每升级一次就在 /tmp 留一份 natpunch_guard.<pid>，只增不减。
+# 删的是自己（$0 就是 /tmp/natpunch_guard.$$），与 apply 那条链路无关；
+# 放最后 + || true，删不掉也不影响看门狗已经做完的事。
+rm -f "$0" 2>/dev/null || true
 GUARD
     chmod 755 "$GUARD"
     echo "==> 升级文件已就绪，流程转入后台执行"
