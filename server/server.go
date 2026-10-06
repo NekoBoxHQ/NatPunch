@@ -64,11 +64,19 @@ func DealBridgeTask() {
 			StopServer(t.Id)
 		case id := <-Bridge.CloseClient:
 			DelTunnelAndHostByClientId(id, true)
-			if v, ok := file.GetDb().JsonDb.Clients.Load(id); ok {
-				if v.(*file.Client).NoStore {
-					file.GetDb().DelClient(id)
-				}
-			}
+			// **这里不能再删 NoStore 条目。**
+			//
+			// 删掉的是客户端的「身份」：GetIdByVerifyKey 就是靠库里这条记录认 vkey 的。
+			// 而验证发生在"客户端上报配置"之前 —— 条目一没，客户端每次重连都卡在
+			// "Validation key ... incorrect"，**自己没机会把条目重建回来**。
+			// 也就是：这类客户端**断一次线就永久失联**。对一个专门管「无公网设备」的
+			// 工具来说，这是最不能有的一种故障。
+			//
+			// NoStore 的语义本来就只是「不落盘」—— 不用它保证重启后不留垃圾：
+			// 进程一起一落，内存里的临时条目自然就没了。连接断开只是暂时状态，不该毁身份。
+			//
+			// 2026-10-06 真机复现：sg 的 clientId 3 一断开就被这里删掉，之后一直
+			// "Validation key 41d6370f... incorrect"，只在服务端补回一条正式条目才恢复。
 		}
 	}
 }

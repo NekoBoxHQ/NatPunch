@@ -490,6 +490,21 @@ loop:
 				c.WriteAddFail()
 				break loop
 			} else {
+				// **客户端自报配置注册进来的，同样是一条真实设备，必须落盘。**
+				//
+				// GetConfigInfo() 会把它标成 NoStore（历史语义：这条路上来的都当临时件），
+				// 而 server.go 的 CloseClient 分支会在连接断开时**删掉 NoStore 条目**。
+				// 删掉之后 GetIdByVerifyKey 再也找不到它 —— 客户端**永久失联**：
+				// 每次重连都停在"验证失败"，因为它连自报配置的机会都拿不到（验证在配置之前）。
+				// 也就是说这类客户端**断一次线就再也回不来**，对一个专门管「无公网设备」的
+				// 工具来说是最不能有的故障。
+				//
+				// 2026-10-06 在 sg 上真机复现：clientId 3 断开后被删，之后一直
+				// "Validation key ... incorrect"，直到在服务端补回一条正式条目才好。
+				//
+				// 合成条目（public_vkey 那条，server.go 里 NewClient(vkey,true,true)）不走这里，
+				// 仍然是 NoStore —— 它每次开机重建，且从不建立连接，不会被这条路径删掉。
+				client.NoStore = false
 				// 注册上限校验（F1-8）：max_clients=0 表示不限（沿用存量语义）
 				if maxClients := beego.AppConfig.DefaultInt("max_clients", 0); maxClients > 0 && file.GetDb().GetClientCount() >= maxClients {
 					fail = true
