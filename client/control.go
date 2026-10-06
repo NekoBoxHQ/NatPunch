@@ -92,9 +92,6 @@ func GetTaskStatus(path string) {
 		}
 		for _, v := range cnf.Tasks {
 			ports := common.GetPorts(v.Ports)
-			if v.Mode == "secret" {
-				ports = append(ports, 0)
-			}
 			for _, vv := range ports {
 				var remark string
 				if len(ports) > 1 {

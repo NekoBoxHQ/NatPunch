@@ -392,12 +392,6 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 		if target, err = tunnel.NewConn(); err != nil {
 			return
 		}
-		if t != nil && t.Mode == "file" {
-			//TODO if t.mode is file ,not use crypt or compress
-			link.Crypt = false
-			link.Compress = false
-			return
-		}
 		if _, err = conn.NewConn(target).SendInfo(link, ""); err != nil {
 			logs.Info("new connect error ,the target %s refuse to connect", link.Host)
 			return
