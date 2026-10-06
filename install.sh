@@ -50,6 +50,19 @@ trap cleanup EXIT INT TERM
 # 维护者的 SSH 常常是「服务端 → 客户端隧道 → 目标机」进来的：客户端一停，承载这次
 # 会话的隧道就断，前台脚本被 SIGHUP 带走 —— 后面的「写配置 / 起服务」一步都执行不到。
 # 所以凡是会碰运行中客户端的动作，要么挪到非破坏性的位置，要么交给脱离会话的进程。
+# 客户端此刻在不在跑？—— 这是「这次安装会不会切断承载自己的那条隧道」的唯一判据。
+#
+# **这里故意不做「是不是从隧道进来的」判断。** 一开始是做的（看 SSH_CONNECTION 的对端
+# 是不是本机地址），但那要靠推断 sshd 眼里的对端长什么样，而「SSH 真从隧道进来」这个
+# 场景在测试机上造不出来 —— 留下的就是一个**永远验不到**的判断，而它一旦判错，
+# 后果是静默的。与其留个赌，不如不赌：
+#
+#   · 只要客户端在跑就脱离（面板网页终端那条 PTY 也是客户端自己 fork 的，一样会被杀掉，
+#     所以「在跑」就是唯一的条件）；
+#   · 父进程随后**等收尾脚本给结果、并照它的结果设置退出码**。
+#
+# 这样就没有「判错了」这一说。代价只是覆盖安装时结果落在 /tmp/natpunch-install.log 里，
+# 而不是直接打在终端上 —— 脚本会替你把结论打出来，所以这一步也补上了。
 client_running() {
     if command -v pgrep >/dev/null 2>&1; then
         pgrep -f "$BIN" >/dev/null 2>&1
@@ -58,22 +71,6 @@ client_running() {
     else
         ps w 2>/dev/null | grep -v grep | grep -q "$BIN"
     fi
-}
-needs_detach() {
-    client_running || return 1
-    # 没有 SSH_CONNECTION = 不是 SSH 会话。面板的网页终端就是客户端自己 fork 出来的
-    # PTY（conn type=shell），杀掉客户端一样会断，按「会断」处理。
-    [ -z "${SSH_CONNECTION:-}" ] && return 0
-    _peer="${SSH_CONNECTION%% *}"
-    # 隧道拨到 127.0.0.1:22 时，sshd 看到的对端就是本机回环
-    case "$_peer" in
-        127.*|::1|0.0.0.0) return 0 ;;
-    esac
-    # 隧道转发到某个本机地址（LAN IP）时，对端会是本机自己的地址
-    for _ip in $(hostname -I 2>/dev/null) $(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1); do
-        [ -n "$_ip" ] && [ "$_peer" = "$_ip" ] && return 0
-    done
-    return 1
 }
 # ---------- 参数解析 ----------
 # 兼容三种写法：带 -- 分隔、带 --openwrt 前缀、或都不带（推荐）
@@ -510,7 +507,7 @@ fi
 # 所以先做完这些、再动 stop —— 就算脚本在这里被 SIGHUP 带走，**新版本也已经躺在磁盘上了**：
 # systemd 用 EnvironmentFile，任何一次重启都会读到新配置；procd/systemd 本来就会把进程拉回来
 # （真机实测：killall 之后 systemd 6 秒、procd 8 秒把它拉回来）。
-if needs_detach; then
+if client_running; then
     APPLY="/tmp/natpunch_install_run.$$"
     DETACH_LOG="/tmp/natpunch-install.log"
     cat > "$APPLY" <<'APPLYEOF'
@@ -604,6 +601,8 @@ else
         journalctl -u natpunch-client -n 20 --no-pager 2>/dev/null
     fi
 fi
+# 给还在等的父进程一个「我做完了」的信号（会话没被切断时它会替你把结论打出来）
+echo "__NATPUNCH_INSTALL_DONE__"
 # 同步自删，且只删自己那个名字。
 # **不能写成 `( sleep 1; rm -f "$0" ) &`**：在 systemd-run --collect 之下，主进程一退
 # cgroup 立刻清场，还在 sleep 的子 shell 会被一起 SIGTERM，rm 永远执行不到
@@ -631,8 +630,26 @@ APPLYEOF
     # 备份移交给脱离会话的收尾脚本：本脚本退出时别再删（它可能还没跑完）
     KEEP_BAK=1
     echo "==> 二进制 / 配置 / 自启都已就位"
-    echo "==> 「停旧 + 起新」已交给一个脱离会话的进程执行"
-    echo "==> 本会话若正走这台客户端的隧道，约 1 秒后断开；重连后执行："
+    echo "==> 「停旧 + 起新」已交给脱离会话的进程执行"
+    echo "==> 本会话若正走这台客户端的隧道，会先断开；断不了就在这里等结果："
+    # 等收尾脚本给结论（最多 90 秒）。
+    # 本会话真被切断时这里根本走不到 —— 那也没关系，脚本是脱离的，日志会留着。
+    _i=0
+    while [ "$_i" -lt 90 ]; do
+        grep -q '__NATPUNCH_INSTALL_DONE__' "$DETACH_LOG" 2>/dev/null && break
+        _i=$((_i + 1))
+        sleep 1
+    done
+    if grep -q '__NATPUNCH_INSTALL_DONE__' "$DETACH_LOG" 2>/dev/null; then
+        grep 'install: ' "$DETACH_LOG" | grep -v '^+' | tail -n 3
+        echo "      （完整日志：$DETACH_LOG）"
+        if grep -q 'install: client restarted with the new build' "$DETACH_LOG" \
+                || grep -q 'install: rolled back' "$DETACH_LOG"; then
+            exit 0
+        fi
+        exit 1
+    fi
+    echo "==> 没等到结果（本会话大概已经被切断了）—— 重连后执行："
     echo "      cat $DETACH_LOG"
     exit 0
 fi

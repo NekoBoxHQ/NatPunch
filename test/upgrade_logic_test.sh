@@ -380,10 +380,23 @@ extract_heredoc_from() {   # <结束标记> <文件>
         grab { print }
     ' "$2"
 }
-if grep -q '^needs_detach()' "$INSTALL"; then
-    ok "install.sh 有 needs_detach 判定"
+if grep -q '^client_running()' "$INSTALL"; then
+    ok "install.sh 用「客户端在不在跑」决定要不要脱离"
 else
-    bad "install.sh 没有 needs_detach —— 从隧道进来跑会把自己切断"
+    bad "install.sh 没有 client_running —— 从隧道进来跑会把自己切断"
+fi
+# 反向断言：不许再回到「猜 SSH 是不是从隧道进来」那套。
+# 它真的测不了（测试机上造不出"SSH 从隧道进来"），而判错的后果是静默的。
+# 现在「客户端在跑」就是唯一条件 —— 面板网页终端那条 PTY 也是客户端自己 fork 的，一样会被杀。
+if grep -v '^[[:space:]]*#' "$INSTALL" | grep -q 'SSH_CONNECTION'; then
+    bad "install.sh 又在猜隧道路径（SSH_CONNECTION）—— 那个判断验不到，判错还静默"
+else
+    ok "install.sh 不猜隧道路径（在跑就脱离，没有判错这一说）"
+fi
+if grep -q '__NATPUNCH_INSTALL_DONE__' "$INSTALL"; then
+    ok "收尾脚本给完成信号，父进程等它并照它的结果设退出码"
+else
+    bad "父进程不等收尾结果 —— 覆盖安装只会报「已交给…」，成没成都不说"
 fi
 n_bin="$(grep -n 'mv -f "\$BIN_TMP" "\$BIN"' "$INSTALL" | head -n1 | cut -d: -f1)"
 n_cfg="$(grep -n '^cat > "\$CONF" <<EOF' "$INSTALL" | head -n1 | cut -d: -f1)"
@@ -432,6 +445,16 @@ else
         bad "内嵌脚本把自删丢回后台子 shell —— --collect 会连坐掉它"
     else
         ok "内嵌脚本的自删是同步的"
+    fi
+    # 父进程判成功用的字符串必须和收尾脚本打的一模一样。
+    # 真机上踩过：收尾脚本 echo 的是 "install: client restarted with the new build"，
+    # 父进程 grep 的是 "install: restarted with the new build" —— 少了 "client"，
+    # 结果安装明明成功却 exit 1。两行静态看都很正常，只有跑起来才露。
+    if printf '%s\n' "$ih" | grep -q 'install: client restarted with the new build' \
+       && grep -q "grep -q 'install: client restarted with the new build'" "$INSTALL"; then
+        ok "父进程判成功的字符串与收尾脚本打印的完全一致"
+    else
+        bad "父进程判成功的字符串对不上收尾脚本打印的 —— 成功了也会 exit 1"
     fi
     # 健康判据不能用 systemctl is-active：Restart=always 的崩溃循环里进程每隔几秒活一下，
     # 采样恰好落在那一下就会返回 active。真机验过：sg 上一个"拒绝启动"的坏配置
