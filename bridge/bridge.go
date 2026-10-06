@@ -30,16 +30,14 @@ type Client struct {
 	mu        sync.Mutex // 保护 signal/tunnel/Version 等字段的并发读写
 	tunnel    *natpunch_mux.Mux
 	signal    *conn.Conn
-	file      *natpunch_mux.Mux
 	Version   string
 	retryTime atomic.Int32 // it will be add 1 when ping not ok until to 3 will close the client
 }
 
-func NewClient(t, f *natpunch_mux.Mux, s *conn.Conn, vs string) *Client {
+func NewClient(t *natpunch_mux.Mux, s *conn.Conn, vs string) *Client {
 	return &Client{
 		signal:  s,
 		tunnel:  t,
-		file:    f,
 		Version: vs,
 	}
 }
@@ -52,7 +50,6 @@ type Bridge struct {
 	OpenTask       chan *file.Tunnel
 	CloseTask      chan *file.Tunnel
 	CloseClient    chan int
-	SecretChan     chan *conn.Secret
 	ipVerify       bool
 	runList        *sync.Map //map[int]interface{}
 	disconnectTime int
@@ -66,7 +63,6 @@ func NewTunnel(tunnelPort int, tunnelType string, ipVerify bool, runList *sync.M
 		OpenTask:       make(chan *file.Tunnel, 128),
 		CloseTask:      make(chan *file.Tunnel, 128),
 		CloseClient:    make(chan int, 128),
-		SecretChan:     make(chan *conn.Secret, 128),
 		ipVerify:       ipVerify,
 		runList:        runList,
 		disconnectTime: disconnectTime,
@@ -311,7 +307,7 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 			_ = tcpConn.SetKeepAlivePeriod(5 * time.Second)
 		}
 		//the vKey connect by another ,close the client of before
-		if v, ok := s.Client.LoadOrStore(id, NewClient(nil, nil, c, vs)); ok {
+		if v, ok := s.Client.LoadOrStore(id, NewClient(nil, c, vs)); ok {
 			cl := v.(*Client)
 			cl.mu.Lock()
 			oldSignal := cl.signal
@@ -329,7 +325,7 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 		logs.Info("clientId %d connection succeeded, address:%s ", id, c.Conn.RemoteAddr())
 	case common.WORK_CHAN:
 		muxConn := natpunch_mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime)
-		if v, ok := s.Client.LoadOrStore(id, NewClient(muxConn, nil, nil, vs)); ok {
+		if v, ok := s.Client.LoadOrStore(id, NewClient(muxConn, nil, vs)); ok {
 			cl := v.(*Client)
 			cl.mu.Lock()
 			oldTunnel := cl.tunnel
@@ -353,61 +349,6 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 		go s.getConfig(c, isPub, client)
 	case common.WORK_REGISTER:
 		go s.register(c)
-	case common.WORK_SECRET:
-		if b, err := c.GetShortContent(32); err == nil {
-			s.SecretChan <- conn.NewSecret(string(b), c)
-		} else {
-			logs.Error("secret error, failed to match the key successfully")
-		}
-	case common.WORK_FILE:
-		muxConn := natpunch_mux.NewMux(c.Conn, s.tunnelType, s.disconnectTime)
-		if v, ok := s.Client.LoadOrStore(id, NewClient(nil, muxConn, nil, vs)); ok {
-			cl := v.(*Client)
-			cl.mu.Lock()
-			oldFile := cl.file
-			cl.file = muxConn
-			cl.mu.Unlock()
-			if oldFile != nil {
-				oldFile.Close()
-			}
-		}
-	case common.WORK_P2P:
-		//read md5 secret
-		if b, err := c.GetShortContent(32); err != nil {
-			logs.Error("p2p error,", err.Error())
-		} else if t := file.GetDb().GetTaskByMd5Password(string(b)); t == nil {
-			logs.Error("p2p error, failed to match the key successfully")
-		} else {
-			if v, ok := s.Client.Load(t.Client.Id); !ok {
-				return
-			} else {
-				cl := v.(*Client)
-				cl.mu.Lock()
-				sig := cl.signal
-				cl.mu.Unlock()
-				if sig == nil {
-					return
-				}
-				//向密钥对应的客户端发送与服务端udp建立连接信息，地址，密钥
-				if _, err := sig.Write([]byte(common.NEW_UDP_CONN)); err != nil {
-					logs.Warn("p2p write NEW_UDP_CONN error: %v", err)
-					return
-				}
-				svrAddr := beego.AppConfig.String("p2p_ip") + ":" + beego.AppConfig.String("p2p_port")
-				if err := sig.WriteLenContent([]byte(svrAddr)); err != nil {
-					logs.Warn("p2p write svrAddr error: %v", err)
-					return
-				}
-				if err := sig.WriteLenContent(b); err != nil {
-					logs.Warn("p2p write secret error: %v", err)
-					return
-				}
-				//向该请求者发送建立连接请求,服务器地址
-				if err := c.WriteLenContent([]byte(svrAddr)); err != nil {
-					logs.Warn("p2p write requester svrAddr error: %v", err)
-				}
-			}
-		}
 	}
 	c.SetAlive(s.tunnelType)
 	return
@@ -442,11 +383,7 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 		var tunnel *natpunch_mux.Mux
 		cl := v.(*Client)
 		cl.mu.Lock()
-		if t != nil && t.Mode == "file" {
-			tunnel = cl.file
-		} else {
-			tunnel = cl.tunnel
-		}
+		tunnel = cl.tunnel
 		cl.mu.Unlock()
 		if tunnel == nil {
 			err = errors.New("the client connect error")
@@ -572,7 +509,7 @@ loop:
 				c.WriteAddOk()
 				c.Write([]byte(client.VerifyKey))
 				// LoadOrStore：不覆盖活跃条目，旧连接（signal/tunnel/file）显式关闭（阶段三 G6）
-				if old, loaded := s.Client.LoadOrStore(client.Id, NewClient(nil, nil, nil, "")); loaded {
+				if old, loaded := s.Client.LoadOrStore(client.Id, NewClient(nil, nil, "")); loaded {
 					cl := old.(*Client)
 					cl.mu.Lock()
 					if cl.signal != nil {
@@ -582,10 +519,6 @@ loop:
 					if cl.tunnel != nil {
 						_ = cl.tunnel.Close()
 						cl.tunnel = nil
-					}
-					if cl.file != nil {
-						_ = cl.file.Close()
-						cl.file = nil
 					}
 					cl.mu.Unlock()
 				}
@@ -625,8 +558,6 @@ loop:
 					fail = true
 					c.WriteAddFail()
 					break loop
-				} else if t.Mode == "secret" || t.Mode == "p2p" {
-					ports = append(ports, 0)
 				}
 				if len(ports) == 0 {
 					fail = true
@@ -673,7 +604,7 @@ loop:
 							c.WriteAddFail()
 							break loop
 						}
-						if b := tool.TestServerPort(tl.Port, tl.Mode); !b && t.Mode != "secret" && t.Mode != "p2p" {
+						if b := tool.TestServerPort(tl.Port, tl.Mode); !b {
 							fail = true
 							c.WriteAddFail()
 							break loop

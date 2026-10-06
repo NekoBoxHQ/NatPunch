@@ -45,12 +45,11 @@
 | `log_level` | `6` | 日志级别：0 Emergency … 6 Informational … 7 Debug |
 | `log_path` | `natpunch.log` | 日志文件路径 |
 
-### IP 限制 / P2P
+### IP 限制
 
 | 配置项 | 默认 | 说明 |
 |---|---|---|
 | `ip_limit` | 注释 | `true/false` 限制注册来源 IP（配合面板 IP 白名单） |
-| `p2p_ip` / `p2p_port` | 注释 | P2P 打洞协调监听地址/端口 |
 
 ### Web 管理面板
 

@@ -19,12 +19,10 @@ import (
 
 	"github.com/astaxie/beego/logs"
 	"github.com/creack/pty"
-	"github.com/xtaci/kcp-go"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/config"
 	"github.com/NekoBoxHQ/NatPunch/lib/conn"
-	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 )
 
 // shellPtyMap：ShellID -> *os.File(pty)，供 shellresize 控制消息定位对应终端（带外控制，与数据零混流）
@@ -35,7 +33,6 @@ type TRPClient struct {
 	bridgeConnType string
 	proxyUrl       string
 	vKey           string
-	p2pAddr        map[string]string
 	tunnel         atomic.Pointer[natpunch_mux.Mux]
 	signal         atomic.Pointer[conn.Conn]
 	ticker         *time.Ticker
@@ -60,7 +57,6 @@ type Logger interface {
 func NewRPClient(svraddr string, vKey string, bridgeConnType string, proxyUrl string, cnf *config.Config, disconnectTime int) *TRPClient {
 	return &TRPClient{
 		svrAddr:        svraddr,
-		p2pAddr:        make(map[string]string, 0),
 		vKey:           vKey,
 		bridgeConnType: bridgeConnType,
 		proxyUrl:       proxyUrl,
@@ -163,7 +159,6 @@ func (s *TRPClient) handleMain() {
 	if sig == nil {
 		return
 	}
-mainLoop:
 	for {
 		flags, err := sig.ReadFlag()
 		if err != nil {
@@ -179,65 +174,11 @@ mainLoop:
 			} else {
 				s.logInfo("reported local addr: %s", localIPs)
 			}
-		case common.NEW_UDP_CONN:
-			//read server udp addr and password
-			if lAddr, err := sig.GetShortLenContent(); err != nil {
-				s.logWarn(err.Error())
-				break mainLoop
-			} else if pwd, err := sig.GetShortLenContent(); err == nil {
-				var localAddr string
-				//The local port remains unchanged for a certain period of time
-				if v, ok := s.p2pAddr[crypt.Md5(string(pwd)+strconv.Itoa(int(time.Now().Unix()/100)))]; !ok {
-					tmpConn, err := common.GetLocalUdpAddr()
-					if err != nil {
-						s.logError(err.Error())
-						break mainLoop
-					}
-					localAddr = tmpConn.LocalAddr().String()
-				} else {
-					localAddr = v
-				}
-				go s.newUdpConn(localAddr, string(lAddr), string(pwd))
-			}
 		}
 	}
 	s.Close()
 }
 
-func (s *TRPClient) newUdpConn(localAddr, rAddr string, md5Password string) {
-	var localConn net.PacketConn
-	var err error
-	var remoteAddress string
-	if remoteAddress, localConn, err = handleP2PUdp(localAddr, rAddr, md5Password, common.WORK_P2P_PROVIDER); err != nil {
-		s.logError(err.Error())
-		return
-	}
-	l, err := kcp.ServeConn(nil, 150, 3, localConn)
-	if err != nil {
-		s.logError(err.Error())
-		return
-	}
-	s.logTrace("start local p2p udp listen, local address %s", localConn.LocalAddr().String())
-	for {
-		udpTunnel, err := l.AcceptKCP()
-		if err != nil {
-			s.logError(err.Error())
-			l.Close()
-			return
-		}
-		if udpTunnel.RemoteAddr().String() == string(remoteAddress) {
-			conn.SetUdpSession(udpTunnel)
-			s.logTrace("successful connection with client ,address %s", udpTunnel.RemoteAddr().String())
-			//read link info from remote
-			conn.Accept(natpunch_mux.NewMux(udpTunnel, s.bridgeConnType, s.disconnectTime), func(c net.Conn) {
-				go s.handleChan(c)
-			})
-			break
-		}
-	}
-}
-
-// pmux tunnel
 func (s *TRPClient) newChan() {
 	tunnel, err := NewConn(s.bridgeConnType, s.vKey, s.svrAddr, common.WORK_CHAN, s.proxyUrl)
 	if err != nil {

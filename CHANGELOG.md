@@ -65,6 +65,17 @@
 
 **本次未动**：`file` / `secret` / `p2p` 三种隧道模式在服务端与客户端的实现。它们在界面上确实建不出来，但客户端的配置文件与 `-local_type=` 仍能创建（随包的客户端样例里就写着 `mode=file`），属于配置 / CLI 可达，不是「界面弃用」。
 
+### 移除 p2p / secret / file 三种隧道模式
+这三种模式的面板上都没有入口，只能靠客户端配置文件或 CLI 触发；服务端的 p2p 打洞协调器在随包配置里本身就是注释掉的（`#p2p_port`），默认从未启动。按「界面没有的就是弃用的」一并删除：
+
+- **服务端**：`server/proxy/p2p.go` 整文件（UDP 打洞协调）、`NewP2PServer` 的启动、`p2p_ip` / `p2p_port` 配置、`SecretChan` 通道及其处理分支、`bridge` 里 secret / file / p2p 三个工作分支、file 模式的隧道分发。
+- **客户端**：`client/local.go` 整文件（本地监听 / p2p 打洞 / 本地文件服务）、`handleP2PUdp` 等整套打洞辅助（`client/control.go` 尾部）、`-password` / `-local_type` / `-local_port` / `-target` 四个 CLI 参数及其启动分支、`bridge.Client` 的 file mux 与 `p2pAddr` 字段。
+- **协议与配置**：`WORK_SECRET` / `WORK_FILE` / `WORK_P2P*` / `NEW_UDP_CONN` 常量、`conn.Secret` 类型、`config.LocalServer` 结构及配置文件里 `[secret_*]` / `[p2p_*]` 段的解析。
+
+客户端现在只有一条启动路径：`-server` + `-vkey`（`install.sh` 装出来的就是这条），或 `-config` 配置文件模式。
+
+**没有动 `udp5`**：SOCKS5 的 UDP 转发与它共用这个连接类型（`server/proxy/socks5.go` 构造、`client/client.go` 的 `udp5 → handleUdp` 分支），原样保留。UDP 隧道、SOCKS5、HTTP 代理、终端均不受影响。
+
 ## v26.9.111（已发布）
 
 ### 变更

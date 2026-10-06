@@ -9,8 +9,6 @@ import (
 
 	"github.com/NekoBoxHQ/NatPunch/client"
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
-	"github.com/NekoBoxHQ/NatPunch/lib/config"
-	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/NekoBoxHQ/NatPunch/lib/install"
 	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/astaxie/beego/logs"
@@ -26,10 +24,6 @@ var (
 	proxyUrl       = flag.String("proxy", "", "proxy socks5 url(eg:socks5://111:222@127.0.0.1:9007)")
 	logLevel       = flag.String("log_level", "7", "log level 0~7")
 	registerTime   = flag.Int("time", 2, "register time long /h")
-	localPort      = flag.Int("local_port", 2000, "p2p local port")
-	password       = flag.String("password", "", "p2p password flag")
-	target         = flag.String("target", "", "p2p target")
-	localType      = flag.String("local_type", "p2p", "p2p target")
 	logPath        = flag.String("log_path", "", "natpunch-client log path")
 	debug          = flag.Bool("debug", true, "natpunch-client debug")
 	pprofAddr      = flag.String("pprof", "", "PProf debug addr (ip:port)")
@@ -114,29 +108,6 @@ func firstEnv(env map[string]string, keys ...string) string {
 
 func run() {
 	common.InitPProfFromArg(*pprofAddr)
-	//p2p or secret command
-	if *password != "" {
-		client.SetTlsEnable(*tlsEnable)
-		client.SetTlsFingerprint(*tlsFingerprint)
-		if *tlsEnable && *tlsStrict && *tlsFingerprint == "" {
-			logs.Error("tls_strict=true 但未配置 tls_fingerprint，拒绝启动（F2-2）")
-			os.Exit(0)
-		}
-		logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), client.GetTlsEnable())
-		commonConfig := new(config.CommonConfig)
-		commonConfig.Server = *serverAddr
-		commonConfig.VKey = *verifyKey
-		commonConfig.Tp = *connType
-		localServer := new(config.LocalServer)
-		localServer.Type = *localType
-		localServer.Password = *password
-		localServer.Target = *target
-		localServer.Port = *localPort
-		commonConfig.Client = new(file.Client)
-		commonConfig.Client.Cnf = new(file.Config)
-		go client.StartLocalServer(localServer, commonConfig)
-		return
-	}
 	env := common.GetEnvMap()
 	if *serverAddr == "" {
 		*serverAddr = firstEnv(env, "NATPUNCH_SERVER_ADDR", "NPC_SERVER_ADDR")

@@ -23,14 +23,6 @@ type CommonConfig struct {
 	DisconnectTime   int
 }
 
-type LocalServer struct {
-	Type     string
-	Port     int
-	Ip       string
-	Password string
-	Target   string
-}
-
 type Config struct {
 	content      string
 	title        []string
@@ -38,7 +30,6 @@ type Config struct {
 	Hosts        []*file.Host
 	Tasks        []*file.Tunnel
 	Healths      []*file.Health
-	LocalServer  []*LocalServer
 }
 
 func NewConfig(path string) (c *Config, err error) {
@@ -65,19 +56,6 @@ func NewConfig(path string) (c *Config, err error) {
 			}
 			nowContent = c.content[nowIndex:nextIndex]
 
-			if strings.Index(getTitleContent(c.title[i]), "secret") == 0 && !strings.Contains(nowContent, "mode") {
-				local := delLocalService(nowContent)
-				local.Type = "secret"
-				c.LocalServer = append(c.LocalServer, local)
-				continue
-			}
-			//except mode
-			if strings.Index(getTitleContent(c.title[i]), "p2p") == 0 && !strings.Contains(nowContent, "mode") {
-				local := delLocalService(nowContent)
-				local.Type = "p2p"
-				c.LocalServer = append(c.LocalServer, local)
-				continue
-			}
 			//health set
 			if strings.Index(getTitleContent(c.title[i]), "health") == 0 {
 				c.Healths = append(c.Healths, dealHealth(nowContent))
@@ -284,29 +262,6 @@ func dealMultiUser(s string) map[string]string {
 		multiUserMap[strings.TrimSpace(item[0])] = item[1]
 	}
 	return multiUserMap
-}
-
-func delLocalService(s string) *LocalServer {
-	l := new(LocalServer)
-	for _, v := range splitStr(s) {
-		item := strings.Split(v, "=")
-		if len(item) == 0 {
-			continue
-		} else if len(item) == 1 {
-			item = append(item, "")
-		}
-		switch item[0] {
-		case "local_port":
-			l.Port = common.GetIntNoErrByStr(item[1])
-		case "local_ip":
-			l.Ip = item[1]
-		case "password":
-			l.Password = item[1]
-		case "target_addr":
-			l.Target = item[1]
-		}
-	}
-	return l
 }
 
 func getAllTitle(content string) (arr []string, err error) {

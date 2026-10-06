@@ -386,15 +386,6 @@ func CopyBuffer(dst io.Writer, src io.Reader, label ...string) (written int64, e
 }
 
 // send this ip forget to get a local udp port
-func GetLocalUdpAddr() (net.Conn, error) {
-	tmpConn, err := net.Dial("udp", "114.114.114.114:53")
-	if err != nil {
-		return nil, err
-	}
-	return tmpConn, tmpConn.Close()
-}
-
-// parse template
 func ParseStr(str string) (string, error) {
 	tmp := template.New("natpunch-client")
 	var err error

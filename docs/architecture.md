@@ -24,11 +24,11 @@
 |---|---|---|
 | Web 面板 | `web/` | beego 控制器 + 视图；客户端/隧道/流量/系统信息管理，SSH 终端（WebSocket） |
 | 桥接服务 bridge | `bridge/` | 客户端注册、鉴权（vkey）、版本握手、隧道建连（SendLinkInfo）、心跳 |
-| 隧道代理 | `server/proxy/` | tcp/udp/http(s)/socks5/p2p 协议代理；连接数/流量/带宽限制 |
+| 隧道代理 | `server/proxy/` | tcp/udp/http(s)/socks5 协议代理；连接数/流量/带宽限制 |
 | 多路复用 mux | `lib/natpunch_mux/` | 单条桥接连接上复用多条逻辑连接（connStatusOkCh/FailCh 事件、优先队列） |
-| 客户端 | `client/` | 注册、重连、本地监听（socks5/p2p/secret）、健康检查 |
+| 客户端 | `client/` | 注册、重连、shell 终端、健康检查 |
 | 密码学 | `lib/crypt/` | 隧道 TLS（三态指纹）、证书持久化、随机密钥（crypto/rand） |
-| 安装/守护 | `lib/install/` `lib/daemon/` | 服务注册、升级（SHA256 强制校验 + minisign 分级）、kill 安全封装 |
+| 安装/升级 | `lib/install/` | `update` 子命令升级（SHA256 强制校验 + minisign 分级）；开机自启与守护由安装脚本写的 procd / systemd 单元负责 |
 
 ## 3. 连接与数据流
 
@@ -49,9 +49,8 @@
               流量记账(Flow/Rate)                                  本地目标端口
 ```
 
-### 3.3 UDP / P2P
+### 3.3 UDP
 - UDP 隧道：服务端 UDP 监听，每源地址一个工作池（阶段一 F1-7：ants 池 + TTL 淘汰 + 4096 源上限，满即丢包），报文长度字段带硬上界（F1-3）。
-- P2P：服务端做打洞协调（`p2p_ip:p2p_port`），map 读写有锁（F1-4），provider 条目带 TTL。
 
 ## 4. 加密与认证（阶段二之后）
 
@@ -78,7 +77,7 @@
 ## 6. 关键安全边界（代码评审阶段一~三已修复）
 
 - 认证：面板纯会话鉴权（fail-closed 三路分支），无 `auth_key` 旁路。
-- 崩溃面：SOCKS5 长度字段 nil 解引用、UDP 长度越界、p2p/connMap 并发 map、nil task 均已封堵。
+- 崩溃面：SOCKS5 长度字段 nil 解引用、UDP 长度越界、connMap 并发 map、nil task 均已封堵。
 - 终端：仅管理员/本人客户端可开 shell；WebSocket Origin 白名单；操作留审计日志（TERMINAL AUDIT）。
 - 日志/接口：密码不落日志、DTO 脱敏（不下发 WebPassword/VerifyKey）。
 - 升级：发布物 SHA256SUMS（强制）+ minisign（分级），解包防路径逃逸。

@@ -69,19 +69,6 @@ func DealBridgeTask() {
 					file.GetDb().DelClient(id)
 				}
 			}
-		case s := <-Bridge.SecretChan:
-			logs.Trace("New secret connection, addr", s.Conn.Conn.RemoteAddr())
-			if t := file.GetDb().GetTaskByMd5Password(s.Password); t != nil {
-				if t.Status {
-					go proxy.NewBaseServer(Bridge, t).DealClient(s.Conn, t.Client, t.Target.TargetStr, nil, common.CONN_TCP, nil, t.Flow, t.Target.LocalProxy, t, nil)
-				} else {
-					s.Conn.Close()
-					logs.Trace("This key %s cannot be processed,status is close", s.Password)
-				}
-			} else {
-				logs.Trace("This key %s cannot be processed", s.Password)
-				s.Conn.Close()
-			}
 		}
 	}
 }
@@ -103,11 +90,6 @@ func StartNewServer(bridgePort int, cnf *file.Tunnel, bridgeType string, bridgeD
 			os.Exit(0)
 		}
 	}()
-	if p, err := beego.AppConfig.Int("p2p_port"); err == nil {
-		go proxy.NewP2PServer(p).Start()
-		go proxy.NewP2PServer(p + 1).Start()
-		go proxy.NewP2PServer(p + 2).Start()
-	}
 	go DealBridgeTask()
 	go dealClientFlow()
 	go dealClientExpire()
@@ -203,7 +185,7 @@ func (m *multiService) Close() error {
 func NewMode(Bridge *bridge.Bridge, c *file.Tunnel) proxy.Service {
 	var service proxy.Service
 	switch c.Mode {
-	case "tcp", "file":
+	case "tcp":
 		service = proxy.NewTunnelModeServer(proxy.ProcessTunnel, Bridge, c)
 	case "socks5":
 		service = proxy.NewSock5ModeServer(Bridge, c)
@@ -302,12 +284,6 @@ func StopServer(id int) error {
 
 // add task
 func AddTask(t *file.Tunnel) error {
-	if t.Mode == "secret" || t.Mode == "p2p" {
-		logs.Info("secret task %s start ", t.Remark)
-		//RunList[t.Id] = nil
-		RunList.Store(t.Id, nil)
-		return nil
-	}
 	if t.Mode != "httpHostServer" {
 		if t.Mode == "tcp+udp" {
 			if !tool.TestServerPort(t.Port, "tcp") || !tool.TestServerPort(t.Port, "udp") {
@@ -507,7 +483,7 @@ func GetDashboardData() map[string]interface{} {
 	data["clientOnlineCount"] = c
 	data["inletFlowCount"] = int(in)
 	data["exportFlowCount"] = int(out)
-	var tcp, udp, secret, socks5, p2p, http int
+	var tcp, udp, socks5, http int
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		switch value.(*file.Tunnel).Mode {
 		case "tcp", "tcp+udp":
@@ -518,10 +494,6 @@ func GetDashboardData() map[string]interface{} {
 			http += 1
 		case "udp":
 			udp += 1
-		case "p2p":
-			p2p += 1
-		case "secret":
-			secret += 1
 		}
 		return true
 	})
@@ -530,8 +502,6 @@ func GetDashboardData() map[string]interface{} {
 	data["udpCount"] = udp
 	data["socks5Count"] = socks5
 	data["httpProxyCount"] = http
-	data["secretCount"] = secret
-	data["p2pCount"] = p2p
 	data["bridgeType"] = beego.AppConfig.String("bridge_type")
 	data["httpProxyPort"] = beego.AppConfig.String("http_proxy_port")
 	data["httpsProxyPort"] = beego.AppConfig.String("https_proxy_port")
@@ -564,16 +534,12 @@ func GetDashboardData() map[string]interface{} {
 			}
 		}
 	}
-	if localV4 == "" {
-		localV4 = beego.AppConfig.String("p2p_ip")
-	}
 	displayV4 := localV4
 	if ip := cachedPublicIP(); ip != "" {
 		displayV4 = ip
 	}
 	data["serverIp"] = displayV4
 	data["serverIpv6"] = localV6
-	data["p2pPort"] = beego.AppConfig.String("p2p_port")
 	data["logLevel"] = map[string]string{
 		"0": "Emergency",
 		"1": "Alert",

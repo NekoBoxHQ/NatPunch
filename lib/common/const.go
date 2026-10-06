@@ -8,19 +8,9 @@ const (
 	WORK_CHAN         = "chan"
 	WORK_CONFIG       = "conf"
 	WORK_REGISTER     = "rgst"
-	WORK_SECRET       = "sert"
-	WORK_FILE         = "file"
-	WORK_P2P          = "p2pm"
-	WORK_P2P_VISITOR  = "p2pv"
-	WORK_P2P_PROVIDER = "p2pp"
-	WORK_P2P_CONNECT  = "p2pc"
-	WORK_P2P_SUCCESS  = "p2ps"
-	WORK_P2P_END      = "p2pe"
-	WORK_P2P_LAST     = "p2pl"
 	WORK_STATUS       = "stus"
 	RES_MSG           = "msg0"
 	RES_CLOSE         = "clse"
-	NEW_UDP_CONN      = "udpc" //p2p udp conn
 	// REPORT_LOCAL_IP: server requests client local/private IPs on WORK_MAIN.
 	// New clients reply with WriteLenContent; old clients ignore the flag (server times out).
 	REPORT_LOCAL_IP   = "rlip"

@@ -103,14 +103,6 @@ func (s *DbUtils) NewTask(t *Tunnel) (err error) {
 	if MaxTunnelsPerClient > 0 && t.Client != nil && s.GetTaskCountByClient(t.Client.Id) >= MaxTunnelsPerClient {
 		return errors.New(fmt.Sprintf("client %d task count >= max_tunnels_per_client %d", t.Client.Id, MaxTunnelsPerClient))
 	}
-	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
-		v := value.(*Tunnel)
-		if (v.Mode == "secret" || v.Mode == "p2p") && v.Password == t.Password && t.Password != "" {
-			err = errors.New(fmt.Sprintf("secret mode keys %s must be unique", t.Password))
-			return false
-		}
-		return true
-	})
 	if err != nil {
 		return
 	}
@@ -139,17 +131,6 @@ func (s *DbUtils) DelTask(id int) error {
 }
 
 // md5 password
-func (s *DbUtils) GetTaskByMd5Password(p string) (t *Tunnel) {
-	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
-		if crypt.Md5(value.(*Tunnel).Password) == p {
-			t = value.(*Tunnel)
-			return false
-		}
-		return true
-	})
-	return
-}
-
 func (s *DbUtils) GetTask(id int) (t *Tunnel, err error) {
 	if v, ok := s.JsonDb.Tasks.Load(id); ok {
 		t = v.(*Tunnel)
