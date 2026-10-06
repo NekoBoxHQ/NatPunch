@@ -243,6 +243,12 @@ func (s *TRPClient) handleChan(src net.Conn) {
 	if lk.ConnType == "udp5" {
 		s.logTrace("new %s connection with the goal of %s, remote address:%s", lk.ConnType, lk.Host, lk.RemoteAddr)
 		s.handleUdp(src)
+		// 必须 return：handleUdp 跑完 = 这条 UDP 会话已经结束（它自己 defer 关掉了 src）。
+		// 少了这一句会掉到最下面的 net.DialTimeout(lk.ConnType, ...)，而 udp5 不是合法的
+		// 网络类型（只有 udp/udp4/udp6）→ 必然报 "unknown network udp5" 并打成一条 [W]，
+		// 再对已经关掉的 src 补一次 Close。真机上这个误导性告警每小时刷 20 多条，
+		// 还被误当成"连接失败"排查过。兄弟分支 http / shellresize / shell 都有 return。
+		return
 	}
 	// shellresize: 服务端下发的终端尺寸控制消息（带外通道，不经过数据流，零混流风险）
 	// 定位对应 pty 应用新尺寸；旧客户端不认识此类型会走默认分支忽略，不影响现有功能
