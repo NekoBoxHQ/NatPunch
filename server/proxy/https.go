@@ -87,61 +87,6 @@ func (https *HttpsServer) Start() error {
 			}
 		}
 	})
-
-	//var err error
-	//if https.errorContent, err = common.ReadAllFromFile(filepath.Join(common.GetRunPath(), "web", "static", "page", "error.html")); err != nil {
-	//	https.errorContent = []byte("natpunch 404")
-	//}
-	//if b, err := beego.AppConfig.Bool("https_just_proxy"); err == nil && b {
-	//	conn.Accept(https.listener, func(c net.Conn) {
-	//		https.handleHttps(c)
-	//	})
-	//} else {
-	//	//start the default listener
-	//	certFile := beego.AppConfig.String("https_default_cert_file")
-	//	keyFile := beego.AppConfig.String("https_default_key_file")
-	//	if common.FileExists(certFile) && common.FileExists(keyFile) {
-	//		l := NewHttpsListener(https.listener)
-	//		https.NewHttps(l, certFile, keyFile)
-	//		https.httpsListenerMap.Store("default", l)
-	//	}
-	//	conn.Accept(https.listener, func(c net.Conn) {
-	//		serverName, rb := GetServerNameFromClientHello(c)
-	//		//if the clientHello does not contains sni ,use the default ssl certificate
-	//		if serverName == "" {
-	//			serverName = "default"
-	//		}
-	//		var l *HttpsListener
-	//		if v, ok := https.httpsListenerMap.Load(serverName); ok {
-	//			l = v.(*HttpsListener)
-	//		} else {
-	//			r := buildHttpsRequest(serverName)
-	//			if host, err := file.GetDb().GetInfoByHost(serverName, r); err != nil {
-	//				c.Close()
-	//				logs.Notice("the url %s can't be parsed!,remote addr %s", serverName, c.RemoteAddr().String())
-	//				return
-	//			} else {
-	//				if !common.FileExists(host.CertFilePath) || !common.FileExists(host.KeyFilePath) {
-	//					//if the host cert file or key file is not set ,use the default file
-	//					if v, ok := https.httpsListenerMap.Load("default"); ok {
-	//						l = v.(*HttpsListener)
-	//					} else {
-	//						c.Close()
-	//						logs.Error("the key %s cert %s file is not exist", host.KeyFilePath, host.CertFilePath)
-	//						return
-	//					}
-	//				} else {
-	//					l = NewHttpsListener(https.listener)
-	//					https.NewHttps(l, host.CertFilePath, host.KeyFilePath)
-	//					https.httpsListenerMap.Store(serverName, l)
-	//				}
-	//			}
-	//		}
-	//		acceptConn := conn.NewConn(c)
-	//		acceptConn.Rb = rb
-	//		l.acceptConn <- acceptConn
-	//	})
-	//}
 	return nil
 }
 
