@@ -2,6 +2,20 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.7（已发布）
+
+### 工程化
+- **三个脚本统一用 `pick_highest_version` 挑版本，不再用 `sort -V`**。busybox 的 sort 直到
+  1.32 才支持 `-V`，更老的 OpenWrt 上会静默退化成字典序，于是 `v26.9.9` 排在 `v26.9.111`
+  后面 —— 「升级」反而降级。`uninstall_client.sh` 早就有这份 busybox 安全的实现，
+  `install.sh` / `install_server.sh` 一直没跟上。三个脚本各自独立下发（raw 一行 `wget|sh`）、
+  没法共享文件，所以是三份复制 —— 自检里加了一条**比对三份代码体的 md5**，只改一处就会红，
+  另加一条禁止任何脚本再出现非注释的 `sort -V`。
+- 新增 `web/controllers/terminal_test.go`：把「面板终端 panic 的闸门」钉住 —— 同一个不存在的
+  模板名，`EnableRender=true` 必须 panic、`false` 必须安静返回 nil。它验证的是 beego 的
+  `Render()` 在闸门关闭时确实不再去渲染（也就不会再 panic），已在本机用真 beego 跑通。
+  配套的自检第 9 节再钉「`Ws()` 有没有用这个闸门」（直接从源码里取 `Ws()` 的函数体看）。
+
 ## v26.10.6（已发布）
 
 ### 修复
