@@ -327,12 +327,13 @@ func getAllTitle(content string) (arr []string, err error) {
 	return
 }
 
+// splitStr 按行切分配置文本块，顺带剥掉行尾的 \r。
+// 这样从 Windows 编辑器传过来的 CRLF 配置文件也能被正确解析，
+// 不用再按运行平台分两套切法。
 func splitStr(s string) (configDataArr []string) {
-	if common.IsWindows() {
-		configDataArr = strings.Split(s, "\r\n")
-	}
-	if len(configDataArr) < 3 {
-		configDataArr = strings.Split(s, "\n")
+	configDataArr = strings.Split(s, "\n")
+	for i := range configDataArr {
+		configDataArr[i] = strings.TrimRight(configDataArr[i], "\r")
 	}
 	return
 }

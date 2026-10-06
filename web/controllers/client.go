@@ -158,8 +158,11 @@ func (s *ClientController) GetClient() {
 			// 显式字段映射，避免整体拷贝内嵌 sync.RWMutex 触发 lock copy 告警。
 			admin, _ := s.GetSession("isAdmin").(bool)
 			vkey := c.VerifyKey
+			ipWhitePass := c.IpWhitePass
 			if !admin {
+				// 与 VerifyKey 同样的脱敏口径：两者都是可用于接入的凭据。
 				vkey = ""
+				ipWhitePass = ""
 			}
 			// 字段名与 Client struct 序列化一致（前端 bootstrap-table 使用 Go 字段名）
 			data["data"] = map[string]interface{}{
@@ -181,7 +184,7 @@ func (s *ClientController) GetClient() {
 				"CreateTime":        c.CreateTime,
 				"LastOnlineTime":    c.LastOnlineTime,
 				"IpWhite":           c.IpWhite,
-				"IpWhitePass":       c.IpWhitePass,
+				"IpWhitePass":       ipWhitePass,
 				"IpWhiteList":       c.IpWhiteList,
 			}
 		}

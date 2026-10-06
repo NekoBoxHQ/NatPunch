@@ -67,13 +67,13 @@ func (https *HttpsServer) Start() error {
 						return
 					}
 
-					cert, err := common.ReadAllFromFile(host.CertFilePath)
+					cert, err := common.ReadCertFile(host.CertFilePath)
 					if err != nil {
 						c.Close()
 						logs.Error("加载证书失败", err)
 						return
 					}
-					key, err := common.ReadAllFromFile(host.KeyFilePath)
+					key, err := common.ReadCertFile(host.KeyFilePath)
 					if err != nil {
 						c.Close()
 						logs.Error("加载证书秘钥失败", err)

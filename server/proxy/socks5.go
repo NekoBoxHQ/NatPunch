@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/conn"
@@ -277,7 +278,9 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 		return
 	}
 
-	var clientAddr net.Addr
+	// clientAddr 由下面的上行 goroutine 写、下行 goroutine 读。原实现是裸变量，
+	// 两个 goroutine 并发读写接口值属于数据竞争（-race 可复现），还可能读到撕裂的地址。
+	var clientAddr atomic.Value // net.Addr
 	// copy buffer
 	go func() {
 		b := common.BufPoolUdp.Get().([]byte)
@@ -290,8 +293,8 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 				logs.Error("read data from %s err %s", reply.LocalAddr().String(), err.Error())
 				return
 			}
-			if clientAddr == nil {
-				clientAddr = laddr
+			if clientAddr.Load() == nil {
+				clientAddr.Store(laddr)
 			}
 			if _, err := target.Write(b[:n]); err != nil {
 				logs.Error("write data to client error", err.Error())
@@ -318,7 +321,12 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 				logs.Warn("read data: %v", err)
 				return
 			}
-			if _, err := reply.WriteTo(b[:l], clientAddr); err != nil {
+			// 用户端还没发过第一包时无从知道回发地址，直接丢弃（原实现会把 nil 传进去）
+			addr := clientAddr.Load()
+			if addr == nil {
+				continue
+			}
+			if _, err := reply.WriteTo(b[:l], addr.(net.Addr)); err != nil {
 				logs.Warn("write data to user ", err.Error())
 				return
 			}
@@ -434,11 +442,12 @@ func (s *Sock5ModeServer) Auth(c net.Conn) error {
 	ok := false
 	if s.task.MultiAccount != nil && len(s.task.MultiAccount.AccountMap) > 0 {
 		// multi-user auth
-		if expected, found := s.task.MultiAccount.AccountMap[string(user)]; found && string(pass) == expected {
+		if expected, found := s.task.MultiAccount.AccountMap[string(user)]; found && common.ConstantTimeStrEq(string(pass), expected) {
 			ok = true
 		}
 	} else {
-		ok = string(user) == s.task.Client.Cnf.U && string(pass) == s.task.Client.Cnf.P
+		ok = common.ConstantTimeStrEq(string(user), s.task.Client.Cnf.U) &&
+			common.ConstantTimeStrEq(string(pass), s.task.Client.Cnf.P)
 	}
 
 	if ok {

@@ -211,7 +211,11 @@ reset:
 	}
 
 	if host.Client.IpWhite && host.Client.IpWhitePass != "" {
-		if common.IsAuthIp(c.RemoteAddr().String(), host.Client.VerifyKey, host.Client.IpWhiteList) {
+		// IpWhiteList 会被授权成功路径并发 append，这里在锁下取快照再用
+		host.Client.RLock()
+		whiteList := host.Client.IpWhiteList
+		host.Client.RUnlock()
+		if common.IsAuthIp(c.RemoteAddr().String(), host.Client.VerifyKey, whiteList) {
 
 			if r.URL.Path == "/authIp" {
 				rawQuery := r.URL.RawQuery
@@ -223,7 +227,10 @@ reset:
 					// 截取 = 后面的值
 					pass := strings.Split(rawQuery, "pass=")[1]
 					if pass == host.Client.IpWhitePass {
-						host.Client.IpWhiteList = append(host.Client.IpWhiteList, ip)
+						// copy-on-write：不要原地改已经发布出去的切片（读者正持有它）
+						host.Client.Lock()
+						host.Client.IpWhiteList = append(append([]string(nil), host.Client.IpWhiteList...), ip)
+						host.Client.Unlock()
 						file.GetDb().UpdateClient(host.Client)
 						logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
 						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})

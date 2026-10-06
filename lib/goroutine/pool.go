@@ -71,7 +71,11 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 		if task != nil {
 			if task.Client.IpWhite && task.Client.IpWhitePass != "" {
 
-				if common.IsAuthIp(remote, task.Client.VerifyKey, task.Client.IpWhiteList) {
+				// IpWhiteList 会被授权成功路径并发 append，这里在锁下取快照再用
+				task.Client.RLock()
+				whiteList := task.Client.IpWhiteList
+				task.Client.RUnlock()
+				if common.IsAuthIp(remote, task.Client.VerifyKey, whiteList) {
 					ip := common.GetIpByAddr(remote)
 					var jsonBytes []byte
 
@@ -98,7 +102,10 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 							}
 						}
 						if pass == task.Client.IpWhitePass {
-							task.Client.IpWhiteList = append(task.Client.IpWhiteList, ip)
+							// copy-on-write：不要原地改已经发布出去的切片（读者正持有它）
+							task.Client.Lock()
+							task.Client.IpWhiteList = append(append([]string(nil), task.Client.IpWhiteList...), ip)
+							task.Client.Unlock()
 							file.GetDb().UpdateClient(task.Client)
 							logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s] password [%s]", task.Client.VerifyKey, ip, pass)
 							jsonBytes, err = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})

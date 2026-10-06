@@ -84,7 +84,7 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if common.Getverifyval(v.VerifyKey) == vKey && v.Status {
+		if common.ConstantTimeStrEq(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
 			v.Addr = common.GetIpByAddr(addr)
 			id = v.Id
 			exist = true
@@ -424,7 +424,7 @@ func (s *DbUtils) GetClientIdByVkey(vkey string) (id int, err error) {
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if crypt.Md5(v.VerifyKey) == vkey {
+		if common.ConstantTimeStrEq(crypt.Md5(v.VerifyKey), vkey) {
 			exist = true
 			id = v.Id
 			return false

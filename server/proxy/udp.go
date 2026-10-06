@@ -270,8 +270,16 @@ func (s *UdpModeServer) removeSession(key string, sess *udpSession) {
 	if v, ok := s.addrMap.Load(key); ok && v.(*udpSession) == sess {
 		s.addrMap.Delete(key)
 	}
-	if sess.target != nil {
-		sess.target.Close()
+	// 与 sweeper 同一口径：只有 ready 已关闭（说明 runSession 已完成对 target 的写入）
+	// 才能安全读 sess.target。Close() 会对**全部**条目调用这里，其中包含仍在建立中的
+	// 占位会话，直接读就与 runSession 的写构成数据竞争（-race 可复现）。
+	select {
+	case <-sess.ready:
+		if sess.target != nil {
+			sess.target.Close()
+		}
+	default:
+		// 仍在建立中：此时 target 必然还是 nil，赢家 goroutine 会自己走 defer 收尾
 	}
 }
 

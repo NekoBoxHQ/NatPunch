@@ -17,6 +17,33 @@
 - **自行构建 GUI / SDK 的命令需同步改**：`go build -tags natpunchgui ...`、`go build -tags natpunchsdk ...`（CI 与 Makefile 已更新）。
 - 安装脚本里对 OpenWrt `firewall.allow-npc-download` / `/opt/npc_download` 的清理**保持不变**：那是上游安装器留下的历史残留，改名会让清理失效。
 
+### 平台与代码清理（只保留 OpenWrt / Linux）
+- **删除全部 Windows 专用代码**：`lib/common/pid_windows.go`、`lib/natpunch_mux/sysGetsock_windows.go`、`server/proxy/transport_windows.go` 三个平台垫片，以及 22 处 `IsWindows()` 分支（日志/安装/临时目录路径、`.exe` 后缀、`splitStr` 的 CRLF 分叉、`tasklist` / `taskkill` 等）。其中 `pid_windows.go` 的 `IsProcessAlive` 恒返回 false，等于 Windows 上单实例保护形同虚设。
+- **删除二进制自带的「服务自安装」整套**：`install` / `start` / `stop` / `restart` / `uninstall` / `status` / `reload` / `service` 子命令、两个交互式菜单（客户端 `printSlogan`/`inputCmd`/`systemService`/`systemPro`，服务端 `-server` 管理脚本）、`lib/daemon` 整个包，以及 `github.com/kardianos/service` 依赖（连带 `fatih/color`、`go-colorable`、`go-isatty`）。
+  开机自启与守护从来都由 `install.sh` / `install_server.sh` 写的 procd / systemd 单元负责，这层自安装是纯冗余；它还带来一个隐患：二进制自装的服务名与脚本装的单元名不同，两者可能各跑一个实例、抢同一个 vkey。
+  保留 `-version`（安装器用来比对版本）、`update`（就地替换二进制）、`register` / `nat` / `status`（诊断）。
+- **客户端无参数启动不再进交互菜单**：原来找不到配置文件就打印菜单等 stdin 输入，而服务化部署下没有 stdin，表现是「进程起来了但什么都没干」。现在明确报错并以非零码退出。
+- **面板展示的客户端命令改为绝对路径** `/usr/bin/natpunch-client`（`install.sh` 的安装位置）。原来的 `./natpunch-client` 只在当前工作目录恰好是二进制所在目录时才有效，而 SSH 进去默认在 `/root`。
+- 合计 **−1499 / +381 行**。
+
+### 安全修复（全面审计后）
+- **跨租户越权（严重）**：`server.GetTunnel` 的 `type=tcp+udp` 分支完全没有 `clientId` 归属过滤，非管理员只要把 `type` 传成 `tcp+udp` 就能列出**全部客户端**的 tcp/udp 隧道，而返回体每一行都内嵌完整 `Client`（含明文 `VerifyKey` 与 `WebPassword` 哈希）。已补齐过滤；同时 `IndexController.GetTunnel` 在非管理员拿不到会话 `clientId` 时改为拒绝，不再退化成 0（0 在 `GetTunnel` 里表示「不限客户端」）。
+- **跨租户越权（中）**：`tunnelBelongsToMe` 用 Tasks / Hosts 两套彼此独立的自增 id 做「或」判定，两者都从 1 起各自增长、必然重号 —— 自己名下有 `Host #N` 就能操作别人的 `Task #N`。`web/` 里没有任何地方操作 Host，该分支没有正当用途，已改为只查 Tasks。
+- **远程 DoS（严重）**：`lib/conn/conn.go` 的 `GetHostInfo` / `GetConfigInfo` / `GetTaskInfo` 在底层读取失败时仍解引用指针（此时为 nil），任何通过 vkey 校验的客户端发一个畸形帧即可打崩服务端进程（调用点在无 `recover` 的 goroutine 里）。已改为检测错误与 nil 并返回，并上报此前被吞掉的 `json.Unmarshal` 错误（畸形配置原被当成「零值客户端」照单全收）。
+- **远程 DoS（高）**：客户端对服务端下发的 `RemoteAddr` 直接 `strings.Split(...,":")[1]`，不含冒号时越界 panic —— 该 goroutine 无 `recover`，整个以 root 运行的客户端会退出。改用 `net.SplitHostPort`，解析失败时回退到真实远端地址。
+- **存储型 XSS（高）**：客户端列表的 `Version` / `LocalAddr` 由客户端上报、绕过了入库时的 HTML 转义，而 bootstrap-table 默认不转义单元格 → 管理员打开列表页即执行脚本。两列已加显式转义 formatter。
+- **验证码可绕过（中）**：登录校验验证码失败时只调用了 `ServeJSON`（它不终止执行）而缺 `return`，凭据正确时仍会建立会话，`open_captcha` 等于没开。
+- **服务端 OOM / 任意文件读（中）**：HTTPS 监听按客户端注册 host 时上报的 `CertFilePath` / `KeyFilePath` 做无界读取（指向 `/dev/zero`、`/proc/kcore` 或大文件即可）。新增 `common.ReadCertFile`：只认普通文件、上限 1MB。
+- **资源泄漏（中）**：客户端 `handleUdpMonitor` 是永不退出的 `for-select`，而每次重连都会重新 `StartLocalServer` → 每重连一次泄漏一个 goroutine + ticker，新旧实例还会一起抢 `udpConn` / `udpConnStatus`。改为由停止通道收口，`CloseLocalServer`（每次重连前都会调用）统一结束。
+- **数据竞争**：SOCKS5 UDP 的 `clientAddr`（改 `atomic.Value`，用户端首包到达前丢弃下行包而非传 nil）；`UdpModeServer.removeSession` 对 `sess.target` 的无同步读（改为与 sweeper 同一口径，经 `ready` 判定）；客户端 `s.signal` / `s.tunnel`（改 `atomic.Pointer`，`handleMain` 持本地引用，消除关闭时的 nil 解引用）；`Client.IpWhiteList` 的并发读写（读侧 `RLock` 取快照，写侧 copy-on-write）；`common.in()` 不再就地排序调用方切片（改线性扫描）。
+- **凭据处理**：`vkey`、SOCKS5 账密、配置模式重连 vkey 的比较改用常量时间（新增 `common.ConstantTimeStrEq`）；`IpWhiteAuth` 日志里的完整 vkey 只保留前 4 位；`GetClient` 对非管理员同时抹掉 `IpWhitePass`（此前只抹了 `VerifyKey`）；客户端 vkey 临时文件改用 `O_NOFOLLOW` 打开（`/tmp` 若可被非特权用户写入，预置同名符号链接即可让 root 客户端覆盖任意文件）。
+- **更新 / 文件路径加固**：更新路径 4 处 `http.Get` 改用带 60s 超时的 client（原来走 `DefaultClient`，卡住的连接会让更新永久挂起）；`chMod` / `CopyDir` 不再吞掉 `os.Chmod` 与拷贝错误；新建文件先以 0600 落地，目录用 0755 而非 0777。
+
+### 已知未修（需单独决策）
+- `lib/install` 的 `verifyReleaseSignature` 在 `SHA256SUMS.minisig` 缺失时放行（fail-open），与两个 shell 安装器策略一致。若 CI 已配置 `MINISIGN_SECRET_KEY`，可收紧为 fail-closed。
+- TLS 未配置 `tls_fingerprint` 时仍以 `InsecureSkipVerify` 放行（只防被动窃听），需 `tls_strict=true` 才拒绝启动。
+- `server/proxy/http.go` keep-alive 切换 host 时 `isReset` / `connClient` 跨 goroutine 复用。
+
 ## v26.9.111（已发布）
 
 ### 变更

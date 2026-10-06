@@ -57,6 +57,9 @@ func (self *LoginController) Verify() {
 		if !cpt.VerifyReq(self.Ctx.Request) {
 			self.Data["json"] = map[string]interface{}{"status": 0, "msg": "the verification code is wrong, please get it again and try again"}
 			self.ServeJSON()
+			// ServeJSON 只写响应体，不 panic 也不 StopRun：少了这个 return，
+			// 控制流会继续走到下面的 doLogin，凭据正确时照样建立会话 —— 验证码被完全绕过。
+			return
 		}
 	}
 	if self.doLogin(username, password, true) {

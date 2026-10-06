@@ -88,8 +88,8 @@
                 + '<b langtag="word-expiretime"></b>: ' + (row.ExpireTime || '<span langtag="info-unrestricted"></span>') + '&emsp;<br/><br/>'
                 + '<b langtag="word-quicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.p}}|' + row.VerifyKey + '|false')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
                 + '<b langtag="word-tlsquicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.tls_p}}|' + row.VerifyKey + '|true{{if .bridge_fingerprint}}|{{.bridge_fingerprint}}{{end}}')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
-                + '<b langtag="word-commandclient"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.VerifyKey + " -type=" +{{.bridgeType}} +"</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button><br/>"
-                + '<b langtag="word-commandclient-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.VerifyKey + " -tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button>"
+                + '<b langtag="word-commandclient"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + row.VerifyKey + " -type=" +{{.bridgeType}} +"</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button><br/>"
+                + '<b langtag="word-commandclient-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.VerifyKey + " -tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button>"
         },
         //表格的列
         columns: [
@@ -117,7 +117,14 @@
                 title: '<span langtag="word-version"></span>',//标题
                 halign: 'center',
                 sortable: true,
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) {
+                    // 本列内容由客户端上报（见 bridge 层），未经过入库时的 HTML 转义；
+                    // bootstrap-table 默认不转义单元格 → 必须在此显式转义，否则是存储型 XSS。
+                    return String(value == null ? '' : value)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                }
             },
             {
                 field: 'VerifyKey',//域值
@@ -145,7 +152,14 @@
                 title: '<span langtag="word-localaddr"></span>',//标题
                 halign: 'center',
                 sortable: true,
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) {
+                    // 本列内容由客户端上报（见 bridge 层），未经过入库时的 HTML 转义；
+                    // bootstrap-table 默认不转义单元格 → 必须在此显式转义，否则是存储型 XSS。
+                    return String(value == null ? '' : value)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                }
             },
             {
                 field: 'InletFlow',//域值

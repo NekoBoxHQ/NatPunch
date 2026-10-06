@@ -286,13 +286,51 @@ func GetPortByAddr(addr string) int {
 	return p
 }
 
+// in 判断 target 是否在 str_array 中。
+// 用线性扫描，而不是 sort + SearchStrings：原实现会就地排序**调用方传入的切片**，
+// 而该切片（Client.BlackIpList / IpWhiteList）会被多个转发 goroutine 并发读取，
+// 就地排序等于在共享数据上做无同步写（-race 可复现）。IP 名单通常只有个位数项，
+// 线性扫描的成本可以忽略。
 func in(target string, str_array []string) bool {
-	sort.Strings(str_array)
-	index := sort.SearchStrings(str_array, target)
-	if index < len(str_array) && str_array[index] == target {
-		return true
+	for _, s := range str_array {
+		if s == target {
+			return true
+		}
 	}
 	return false
+}
+
+// ConstantTimeStrEq 常量时间字符串比较，用于 vkey / 口令这类逐字符可试探的凭据。
+// （长度不等时 subtle 会立即返回 0，这一点与标准库既有实现一致。）
+func ConstantTimeStrEq(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// maxCertFileSize 证书 / 私钥文件的读取上限。正常 PEM 远小于此。
+const maxCertFileSize = 1 << 20
+
+// ReadCertFile 读取证书 / 私钥文件，要求必须是普通文件且不超过 maxCertFileSize。
+//
+// 证书路径来自客户端注册 host 时上报的配置（file.Host.CertFilePath / KeyFilePath），
+// 服务端不能对任意路径做无界读取：把路径指向 /dev/zero、/proc/kcore 或大文件即可
+// 让服务端一直读到 OOM（OpenWrt 内存受限，影响被放大），同时还能当文件存在性探针用。
+func ReadCertFile(path string) ([]byte, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("证书路径不是普通文件: %s", path)
+	}
+	if fi.Size() > maxCertFileSize {
+		return nil, fmt.Errorf("证书文件过大（%d 字节，上限 %d）: %s", fi.Size(), maxCertFileSize, path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxCertFileSize))
 }
 
 // 判断访问地址是否在黑名单内

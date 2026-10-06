@@ -201,7 +201,12 @@ func (s *Conn) GetHealthInfo() (info string, status bool, err error) {
 
 // get task info
 func (s *Conn) GetHostInfo() (h *file.Host, err error) {
-	err = s.getInfo(&h)
+	if err = s.getInfo(&h); err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, errors.New("empty host info")
+	}
 	h.Id = int(file.GetDb().JsonDb.GetHostId())
 	h.Flow = new(file.Flow)
 	h.NoStore = true
@@ -210,7 +215,12 @@ func (s *Conn) GetHostInfo() (h *file.Host, err error) {
 
 // get task info
 func (s *Conn) GetConfigInfo() (c *file.Client, err error) {
-	err = s.getInfo(&c)
+	if err = s.getInfo(&c); err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, errors.New("empty config info")
+	}
 	c.NoStore = true
 	c.Status = true
 	if c.Flow == nil {
@@ -222,7 +232,12 @@ func (s *Conn) GetConfigInfo() (c *file.Client, err error) {
 
 // get task info
 func (s *Conn) GetTaskInfo() (t *file.Tunnel, err error) {
-	err = s.getInfo(&t)
+	if err = s.getInfo(&t); err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, errors.New("empty task info")
+	}
 	t.Id = int(file.GetDb().JsonDb.GetTaskId())
 	t.NoStore = true
 	t.Flow = new(file.Flow)
@@ -262,12 +277,12 @@ func (s *Conn) getInfo(t interface{}) (err error) {
 	defer common.PutBufPoolMax(buf)
 	if l, err = s.GetLen(); err != nil {
 		return
-	} else if _, err = s.ReadLen(l, buf); err != nil {
-		return
-	} else {
-		json.Unmarshal(buf[:l], &t)
 	}
-	return
+	if _, err = s.ReadLen(l, buf); err != nil {
+		return
+	}
+	// 原来这里把 Unmarshal 的错误彻底吞掉：畸形的配置会被当成"零值客户端"照单全收。
+	return json.Unmarshal(buf[:l], &t)
 }
 
 // close

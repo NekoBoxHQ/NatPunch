@@ -3,53 +3,40 @@ package common
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 var ConfPath string
 
-// Get the currently selected configuration file directory
-// For non-Windows systems, select the /etc/natpunch as config directory if exist, or select ./
-// windows system, select the C:\Program Files\NatPunch as config directory if exist, or select ./
+// GetRunPath 返回运行期使用的配置目录。
+// 优先级：显式 -conf_path（ConfPath）> 约定的安装目录 > 可执行文件所在目录。
 func GetRunPath() string {
 	if ConfPath != "" {
 		return ConfPath
 	}
 
-	var path string
 	if len(os.Args) == 1 {
-		if !IsWindows() {
-			dir, _ := filepath.Abs(filepath.Dir(os.Args[0])) //返回
-			return dir + "/"
-		} else {
-			return "./"
-		}
-	} else {
-		if path = GetInstallPath(); !FileExists(path) {
-			return GetAppPath()
-		}
+		// 无额外参数（服务端由 procd/systemd 直接 exec）→ 用可执行文件所在目录
+		dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+		return dir + "/"
 	}
-	return path
+	if path := GetInstallPath(); !FileExists(path) {
+		return GetAppPath()
+	} else {
+		return path
+	}
 }
 
-// Different systems get different installation paths
+// GetInstallPath 返回约定的安装目录。
+// 服务端由 install_server.sh 装在 /opt/natpunch，客户端由 install.sh 装在 /usr/bin；
+// 这里保留 /etc/natpunch 作为「配置集中存放」的约定位置。
 func GetInstallPath() string {
-	var path string
-
 	if ConfPath != "" {
 		return ConfPath
 	}
-
-	if IsWindows() {
-		path = `C:\Program Files\NatPunch`
-	} else {
-		path = "/etc/natpunch"
-	}
-
-	return path
+	return "/etc/natpunch"
 }
 
-// Get the absolute path to the running directory
+// GetAppPath 返回当前可执行文件所在目录的绝对路径
 func GetAppPath() string {
 	if path, err := filepath.Abs(filepath.Dir(os.Args[0])); err == nil {
 		return path
@@ -57,60 +44,23 @@ func GetAppPath() string {
 	return os.Args[0]
 }
 
-// Determine whether the current system is a Windows system?
-func IsWindows() bool {
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	return false
-}
-
-// interface log file path
+// GetLogPath 服务端日志路径
 func GetLogPath() string {
-	var path string
-	if IsWindows() {
-		path = filepath.Join(GetAppPath(), "natpunch.log")
-	} else {
-		path = "/var/log/natpunch.log"
-	}
-	return path
+	return "/var/log/natpunch.log"
 }
 
-func GetLogPathCurrentPath() string {
-	var path string
-	path = filepath.Join(GetAppPath(), "natpunch.log")
-	return path
-}
-
-// interface natpunch-client log file path
+// GetClientLogPath 客户端日志路径
 func GetClientLogPath() string {
-	var path string
-	if IsWindows() {
-		path = filepath.Join(GetAppPath(), "natpunch-client.log")
-	} else {
-		path = "/var/log/natpunch-client.log"
-	}
-	return path
+	return "/var/log/natpunch-client.log"
 }
 
-// interface pid file path
+// GetTmpPath 临时目录。OpenWrt 上 /tmp 是 tmpfs，重启即清空。
 func GetTmpPath() string {
-	var path string
-	if IsWindows() {
-		path = GetAppPath()
-	} else {
-		path = "/tmp"
-	}
-	return path
+	return "/tmp"
 }
 
-// config file path
+// GetConfigPath 无 -server / -vkey 时回退查找的配置文件（相对当前工作目录）。
+// 注意：服务化部署不会走到这里 —— install.sh 写的单元用的是显式参数。
 func GetConfigPath() string {
-	var path string
-	if IsWindows() {
-		path = filepath.Join(GetAppPath(), "conf/natpunch.conf")
-	} else {
-		path = "conf/natpunch.conf"
-	}
-	return path
+	return "conf/natpunch.conf"
 }

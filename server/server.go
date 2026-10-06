@@ -384,6 +384,12 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 			if v.Mode != "tcp+udp" && v.Mode != "tcp" && v.Mode != "udp" {
 				return true
 			}
+			// 本分支原来完全不看 clientId：非管理员只要把 type 传成 "tcp+udp"
+			// 就能列出全部客户端的 tcp/udp 隧道，而每一行都内嵌完整 Client
+			// （含明文 VerifyKey 与 WebPassword 哈希）。这里补齐归属过滤。
+			if clientId != 0 && (v.Client == nil || v.Client.Id != clientId) {
+				return true
+			}
 		} else if (typeVal != "" && v.Mode != typeVal || (clientId != 0 && v.Client.Id != clientId)) || (typeVal == "" && clientId != v.Client.Id) {
 			return true
 		}

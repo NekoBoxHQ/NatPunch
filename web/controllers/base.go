@@ -98,11 +98,10 @@ func (s *BaseController) display(tpl ...string) {
 	}
 
 	s.Data["bridgeType"] = beego.AppConfig.String("bridge_type")
-	if common.IsWindows() {
-		s.Data["win"] = "natpunch-client.exe"
-	} else {
-		s.Data["win"] = "./natpunch-client"
-	}
+	// 面板展示的是在「客户端设备」上执行的命令。install.sh 把客户端装到 /usr/bin/natpunch-client，
+	// 用绝对路径才能在任何工作目录下直接粘贴执行（原来的 ./natpunch-client 只有在 CWD 正好是
+	// 二进制所在目录时才有效，而 SSH 进去默认在 /root）。
+	s.Data["clientCmd"] = "/usr/bin/natpunch-client"
 
 	s.Data["p"] = strconv.Itoa(server.Bridge.TunnelPort)
 	s.Data["version"] = version.VERSION
@@ -266,26 +265,34 @@ func (s *BaseController) CheckUserAuth() {
 	}
 }
 
+// maskKey 日志用脱敏：只保留前 4 位，避免完整连接凭据落进日志。
+func maskKey(s string) string {
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:4] + "****"
+}
+
 // deny 拒绝非授权请求：beego 1.12 的 StopRun 是 panic，会跳过 WriteHeader
 // （仅 SetStatus 不落 header，响应仍为 200）；CustomAbort 立即写状态码+body 再中止（F2-9 门禁）。
 func (s *BaseController) deny() {
 	s.CustomAbort(403, "forbidden")
 }
 
-// tunnelBelongsToMe 显式归属校验：任务或 host 任一属于本人即放行。
-// 替代原 strings.Contains(actionName, "h") 字符串猜谜（"help"/"http" 会被误判，F2-9）。
+// tunnelBelongsToMe 显式归属校验。
+//
+// 只查任务表：Tasks 与 Hosts 是两套彼此独立的自增 id，都从 1 起各自增长、必然重号。
+// 原实现"两者任一命中即放行"，于是只要自己名下有 Host #N，就能用 id=N 去
+// del / stop / start / edit / getonetunnel / copy 别人的 Task #N。
+// 而 index 控制器的这些动作全部只操作 Task（web/ 里没有任何地方操作 Host），
+// 所以 Host 分支没有任何正当用途，只会增加攻击面，这里直接去掉。
 func (s *BaseController) tunnelBelongsToMe(id, myClientId int) bool {
-	if v, ok := file.GetDb().JsonDb.Tasks.Load(id); ok {
-		if v.(*file.Tunnel).Client.Id == myClientId {
-			return true
-		}
+	v, ok := file.GetDb().JsonDb.Tasks.Load(id)
+	if !ok {
+		return false
 	}
-	if v, ok := file.GetDb().JsonDb.Hosts.Load(id); ok {
-		if v.(*file.Host).Client.Id == myClientId {
-			return true
-		}
-	}
-	return false
+	t, ok := v.(*file.Tunnel)
+	return ok && t.Client != nil && t.Client.Id == myClientId
 }
 
 // getPublicIP 返回本机第一个公网 IPv4，找不到返回空串

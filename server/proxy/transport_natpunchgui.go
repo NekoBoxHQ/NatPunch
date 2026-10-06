@@ -1,5 +1,5 @@
-//go:build natpunchgui && !windows
-// +build natpunchgui,!windows
+//go:build natpunchgui
+// +build natpunchgui
 
 package proxy
 

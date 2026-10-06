@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
@@ -77,6 +78,10 @@ func GetTaskStatus(path string) {
 	binary.Read(c, binary.LittleEndian, &isPub)
 	if l, err := c.GetLen(); err != nil {
 		log.Fatalln(err)
+	} else if l < 0 || l > 4<<20 {
+		// 长度字段来自服务端，GetShortContent 会直接 make([]byte, l)：
+		// 不给上界的话一个 2^31 的返回值就能让本进程申请 2GB（OOM）。
+		log.Fatalln("响应长度非法:", l)
 	} else if b, err := c.GetShortContent(l); err != nil {
 		log.Fatalln(err)
 	} else {
@@ -186,7 +191,17 @@ re:
 		}
 		vkey = string(b)
 	}
-	os.WriteFile(filepath.Join(common.GetTmpPath(), "natpunch-client-vkey.txt"), []byte(vkey), 0600)
+	// O_NOFOLLOW：/tmp 若可被非特权用户写入，攻击者可以预置同名符号链接，
+	// 让以 root 身份运行的客户端把 vkey 写到任意文件上（os.WriteFile 是跟随链接的）。
+	vkeyFile := filepath.Join(common.GetTmpPath(), "natpunch-client-vkey.txt")
+	if vf, verr := os.OpenFile(vkeyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0600); verr != nil {
+		logs.Error("写入 vkey 文件失败:", verr)
+	} else {
+		if _, werr := vf.Write([]byte(vkey)); werr != nil {
+			logs.Error("写入 vkey 文件失败:", werr)
+		}
+		vf.Close()
+	}
 
 	//send hosts to server
 	for _, v := range cnf.Hosts {

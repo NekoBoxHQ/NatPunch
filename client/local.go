@@ -27,7 +27,35 @@ var (
 	p2pNetBridge  *p2pBridge
 	lock          sync.RWMutex
 	udpConnStatus bool
+	// 本轮连接启动的 UDP 监控协程的停止通道（每次重连重建一套，由 CloseLocalServer 统一收掉）
+	udpMonitorMu    sync.Mutex
+	udpMonitorStops []chan struct{}
 )
+
+// startUdpMonitor 启动绑定到本轮连接的 UDP 监控协程，并登记停止通道。
+//
+// handleUdpMonitor 原本是永不退出的 for-select（只等 ticker），而客户端每次重连
+// 都会重新执行 StartLocalServer —— 于是每重连一次就多一个常驻 goroutine 和一个 ticker，
+// 新旧实例还会一起抢 udpConn / udpConnStatus 这些全局变量。现在由一个停止通道收口，
+// CloseLocalServer（每次重连前都会调用）负责把它们全部结束。
+func startUdpMonitor(config *config.CommonConfig, l *config.LocalServer) {
+	stop := make(chan struct{})
+	udpMonitorMu.Lock()
+	udpMonitorStops = append(udpMonitorStops, stop)
+	udpMonitorMu.Unlock()
+	go handleUdpMonitor(config, l, stop)
+}
+
+// stopUdpMonitors 结束当前登记的全部 UDP 监控协程
+func stopUdpMonitors() {
+	udpMonitorMu.Lock()
+	stops := udpMonitorStops
+	udpMonitorStops = nil
+	udpMonitorMu.Unlock()
+	for _, ch := range stops {
+		close(ch)
+	}
+}
 
 type p2pBridge struct {
 }
@@ -54,6 +82,7 @@ func (p2pBridge *p2pBridge) SendLinkInfo(clientId int, link *conn.Link, t *file.
 }
 
 func CloseLocalServer() {
+	stopUdpMonitors()
 	for _, v := range LocalServer {
 		v.Close()
 	}
@@ -79,7 +108,7 @@ func startLocalFileServer(config *config.CommonConfig, t *file.Tunnel, vkey stri
 
 func StartLocalServer(l *config.LocalServer, config *config.CommonConfig) error {
 	if l.Type != "secret" {
-		go handleUdpMonitor(config, l)
+		startUdpMonitor(config, l)
 	}
 	task := &file.Tunnel{
 		Port:     l.Port,
@@ -125,11 +154,13 @@ func StartLocalServer(l *config.LocalServer, config *config.CommonConfig) error 
 	return nil
 }
 
-func handleUdpMonitor(config *config.CommonConfig, l *config.LocalServer) {
+func handleUdpMonitor(config *config.CommonConfig, l *config.LocalServer, stop <-chan struct{}) {
 	ticker := time.NewTicker(time.Second * 1)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-stop:
+			return
 		case <-ticker.C:
 			if !udpConnStatus {
 				udpConn = nil

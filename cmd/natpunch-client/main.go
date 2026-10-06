@@ -1,15 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/NekoBoxHQ/NatPunch/client"
@@ -20,8 +15,6 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/astaxie/beego/logs"
 	"github.com/ccding/go-stun/stun"
-	"github.com/fatih/color"
-	"github.com/kardianos/service"
 )
 
 var (
@@ -48,6 +41,10 @@ var (
 	tlsStrict      = flag.Bool("tls_strict", false, "require tls_fingerprint when tls_enable, refuse to start otherwise (F2-2)")
 )
 
+// 客户端是「被安装器拉起的常驻进程」，不做任何自安装 / 服务管理：
+// 开机自启与进程守护由 install.sh 写的 procd / systemd 单元负责，
+// 升级由 uninstall_client.sh 负责。这样二进制里只有一条启动路径，
+// 不会出现「二进制自装的服务」和「脚本装的服务」并存、互抢同一个 vkey 的情况。
 func main() {
 	flag.Parse()
 	logs.Reset()
@@ -60,53 +57,13 @@ func main() {
 	if *logPath == "" {
 		*logPath = common.GetClientLogPath()
 	}
-	if common.IsWindows() {
-		*logPath = strings.Replace(*logPath, "\\", "\\\\", -1)
-	}
 	if *debug {
 		logs.SetLogger(logs.AdapterConsole, `{"level":`+*logLevel+`,"color":true}`)
 	} else {
 		logs.SetLogger(logs.AdapterFile, `{"level":`+*logLevel+`,"filename":"`+*logPath+`","daily":false,"maxlines":100000,"color":true}`)
 	}
 
-	// init service
-	options := make(service.KeyValue)
-	svcConfig := &service.Config{
-		Name:        "natpunch-client",
-		DisplayName: "NatPunch 内网穿透客户端",
-		Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
-		Option:      options,
-	}
-	if !common.IsWindows() {
-		svcConfig.Dependencies = []string{
-			"Requires=network.target",
-			"After=network-online.target syslog.target"}
-		svcConfig.Option["SystemdScript"] = install.SystemdScript
-		svcConfig.Option["SysvScript"] = install.SysvScript
-	}
-	for _, v := range os.Args[1:] {
-		switch v {
-		case "install", "start", "stop", "uninstall", "restart":
-			continue
-		}
-		if !strings.Contains(v, "-service=") && !strings.Contains(v, "-debug=") {
-			svcConfig.Arguments = append(svcConfig.Arguments, v)
-		}
-	}
-	svcConfig.Arguments = append(svcConfig.Arguments, "-debug=false")
-	prg := &clientApp{
-		exit: make(chan struct{}),
-	}
-	s, err := service.New(prg, svcConfig)
-	if err != nil {
-		logs.Error(err, "service function disabled")
-		run()
-		// run without service
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		wg.Wait()
-		return
-	}
+	// 辅助子命令：都不建立隧道，执行完即退出
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
 		case "status":
@@ -114,9 +71,11 @@ func main() {
 				path := strings.Replace(os.Args[2], "-config=", "", -1)
 				client.GetTaskStatus(path)
 			}
+			return
 		case "register":
 			flag.CommandLine.Parse(os.Args[2:])
 			client.RegisterLocalIp(*serverAddr, *verifyKey, *connType, *proxyUrl, *registerTime)
+			return
 		case "update":
 			install.UpdateClient()
 			return
@@ -130,56 +89,14 @@ func main() {
 				return
 			}
 			fmt.Printf("nat type: %s \npublic address: %s\n", nat.String(), host.String())
-			os.Exit(0)
-		case "start", "stop", "restart":
-			// support busyBox and sysV, for openWrt
-			if service.Platform() == "unix-systemv" {
-				logs.Info("unix-systemv service")
-				cmd := exec.Command("/etc/init.d/"+svcConfig.Name, os.Args[1])
-				err := cmd.Run()
-				if err != nil {
-					logs.Error(err)
-				}
-				return
-			}
-			err := service.Control(s, os.Args[1])
-			if err != nil {
-				logs.Error("Valid actions: %q\n%s", service.ControlAction, err.Error())
-			}
-			return
-		case "install":
-			service.Control(s, "stop")
-			service.Control(s, "uninstall")
-			install.InstallClient()
-			err := service.Control(s, os.Args[1])
-			if err != nil {
-				logs.Error("Valid actions: %q\n%s", service.ControlAction, err.Error())
-			}
-			if service.Platform() == "unix-systemv" {
-				logs.Info("unix-systemv service")
-				confPath := "/etc/init.d/" + svcConfig.Name
-				os.Symlink(confPath, "/etc/rc.d/S90"+svcConfig.Name)
-				os.Symlink(confPath, "/etc/rc.d/K02"+svcConfig.Name)
-			}
-			return
-		case "uninstall":
-			err := service.Control(s, os.Args[1])
-			if err != nil {
-				logs.Error("Valid actions: %q\n%s", service.ControlAction, err.Error())
-			}
-			if service.Platform() == "unix-systemv" {
-				logs.Info("unix-systemv service")
-				os.Remove("/etc/rc.d/S90" + svcConfig.Name)
-				os.Remove("/etc/rc.d/K02" + svcConfig.Name)
-			}
 			return
 		}
 	}
-	s.Run()
-}
 
-type clientApp struct {
-	exit chan struct{}
+	run()
+	// run() 只负责把连接 goroutine 拉起来就返回；主 goroutine 必须驻留，
+	// 否则进程会立刻退出（原来靠 kardianos 的 s.Run() 阻塞，现在显式阻塞）。
+	select {}
 }
 
 // firstEnv 按顺序返回第一个非空环境变量值。
@@ -193,35 +110,6 @@ func firstEnv(env map[string]string, keys ...string) string {
 		}
 	}
 	return ""
-}
-
-func (p *clientApp) Start(s service.Service) error {
-	go p.run()
-	return nil
-}
-func (p *clientApp) Stop(s service.Service) error {
-	close(p.exit)
-	if service.Interactive() {
-		os.Exit(0)
-	}
-	return nil
-}
-
-func (p *clientApp) run() error {
-	defer func() {
-		if err := recover(); err != nil {
-			const size = 64 << 10
-			buf := make([]byte, size)
-			buf = buf[:runtime.Stack(buf, false)]
-			logs.Warning("natpunch-client: panic serving %v: %v\n%s", err, string(buf))
-		}
-	}()
-	run()
-	select {
-	case <-p.exit:
-		logs.Warning("stop...")
-	}
-	return nil
 }
 
 func run() {
@@ -288,311 +176,11 @@ func run() {
 			logs.Info("配置文件模式启动")
 			go client.StartFromFile(*configPath)
 		} else {
-			// 无配置文件模式双击运行
-			printSlogan()
-			inputCmd()
+			// 原来是 printSlogan()+inputCmd() 的交互式菜单。服务化部署下没有 stdin，
+			// 进程会静静地卡在等输入上，表现为「启动了但什么都没干」。
+			// 现在明确报错并以非零码退出，让 procd / systemd 的日志里能直接看到原因。
+			logs.Error("未提供 -server/-vkey，且找不到配置文件 %s；请用 install.sh 安装，或显式传参启动", *configPath)
+			os.Exit(1)
 		}
-	}
-}
-
-func printSlogan() {
-	green := color.New(color.FgGreen).SprintFunc()
-	// 第一次输入，如果输入 1,2,3，4 则需要输入秘钥，否则
-
-	fmt.Printf("%s", green(""))
-
-	fmt.Printf("\033[32;0m###########################################################\n")
-	fmt.Printf("\033[32;0m#                   \033[31mNatPunch 内网穿透客户端\033[0m              #\n")
-	fmt.Printf("\033[32;0m#                            			          #\n")
-	fmt.Printf("\033[32;0m#\033[32m 服务：\033[31;0m自建内网穿透\033[0m                     #\n")
-	fmt.Printf("\033[32;0m#\033[32m 提示：\033[32;0m1、涉及到系统服务的需要以管理员身份运行\033[0m\033[32;0m	          #\n")
-	fmt.Printf("\033[32;0m#\033[32m       \033[32;0m2、直接启动或[注册系统服务]需要使用[快捷启动命令]\033[0m\033[32;0m #\n")
-	fmt.Printf("\033[32;0m#\033[32m       \033[32;0m3、其他命令如卸载/启动/停止只需要输入[vkey]\033[0m\033[32;0m	  #\n")
-	fmt.Printf("\033[32;0m###########################################################\n")
-	fmt.Printf("\033[0m") // 重置颜色
-
-	fmt.Printf("\n")
-
-	fmt.Printf("\u001B[32m输入[1]\u001B[0m - 注册系统服务\n")
-	fmt.Printf("\u001B[32m输入[2]\u001B[0m - 卸载系统服务\n")
-	fmt.Printf("---------------------\n")
-	fmt.Printf("\u001B[32m输入[3]\u001B[0m - 启动系统服务\n")
-	fmt.Printf("\u001B[32m输入[4]\u001B[0m - 停止系统服务\n")
-	fmt.Printf("---------------------\n")
-	fmt.Printf("\u001B[32m输入[5]\u001B[0m - 更新客户端\n")
-	fmt.Printf("\u001B[32m输入[0]\u001B[0m - 退出\n")
-	fmt.Printf("---------------------\n")
-	fmt.Printf("\u001B[32m当前版本：%s\u001B[0m\n", version.VERSION)
-	fmt.Printf("直接输入[快捷启动命令]则是启动隧道,多个[快捷启动命令]用英文逗号拼接\n")
-	fmt.Printf("\n")
-}
-
-func inputCmd() {
-
-	var flag string
-	fmt.Printf("请输入：")
-
-	stdin := bufio.NewReader(os.Stdin)
-	_, err := fmt.Fscanln(stdin, &flag)
-	if err != nil {
-		fmt.Println("输入有误")
-	} else {
-		if flag == "0" {
-			os.Exit(0)
-		}
-
-		flag := strings.Replace(flag, " ", "", -1)
-
-		// 如果输入不等于 1,2,3,4,5，则启动隧道
-		if flag != "1" && flag != "2" && flag != "3" && flag != "4" && flag != "5" {
-
-			vkeys := strings.Split(flag, `,`)
-			var cmdArray []string
-
-			for _, key := range vkeys {
-				startCmd, err := crypt.Base64Decoding(key)
-				if err != nil {
-					fmt.Println("快捷启动命令解析失败")
-					inputCmd()
-					return
-				}
-
-				cmdArray = append(cmdArray, startCmd)
-			}
-
-			for _, item := range cmdArray {
-				startClientServer(item)
-			}
-
-		} else {
-			if flag == "5" {
-				install.UpdateClientNew()
-				inputCmd()
-			} else {
-				systemService(flag)
-			}
-		}
-	}
-}
-
-func startClientServer(startCmd string) {
-	var serAddr string
-	var vkey string
-	var tls string
-	var fp string
-	array := strings.Fields(startCmd)
-	serAddr = array[0]
-	vkey = array[1]
-	if len(array) > 2 {
-		tls = array[2]
-	}
-	if len(array) > 3 {
-		fp = array[3] // 可选：服务端桥接证书指纹（F2-2）
-	}
-	go func() {
-		for {
-			if tls == "-tls_enable=true" || tls == "true" {
-				client.SetTlsEnable(true)
-				client.SetTlsFingerprint(fp)
-				logs.Info("start cmd:-server=" + serAddr + " -vkey=" + vkey + " " + tls)
-				logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), client.GetTlsEnable())
-			} else {
-				client.SetTlsEnable(false)
-				logs.Info("start cmd:-server=" + serAddr + " -vkey=" + vkey)
-				logs.Info("the version of client is %s, the core version of client is %s", version.VERSION, version.GetVersion())
-			}
-
-			client.NewRPClient(serAddr, vkey, *connType, *proxyUrl, nil, *disconnectTime).Start()
-			logs.Info("Client closed! It will be reconnected in five seconds")
-			time.Sleep(time.Second * 5)
-		}
-	}()
-}
-
-func systemService(flag string) {
-
-	if flag == "1" {
-		fmt.Printf("请输入[快捷启动命令],多个[快捷启动命令]用英文逗号拼接：")
-	} else {
-		fmt.Printf("请输入[VKEY],多个[VKEY]用英文逗号拼接：")
-	}
-
-	var vkey string
-	stdin := bufio.NewReader(os.Stdin)
-	_, err := fmt.Fscanln(stdin, &vkey)
-
-	if err != nil {
-		fmt.Println("输入错误，请重试")
-		systemService(flag)
-		return
-	} else {
-		if vkey == "0" {
-			os.Exit(0)
-		}
-	}
-
-	vkey = strings.Replace(vkey, " ", "", -1)
-
-	vkeys := strings.Split(vkey, `,`)
-
-	if flag == "1" {
-		var cmdArray []string
-		for _, key := range vkeys {
-			startCmd, err := crypt.Base64Decoding(key)
-			if err != nil {
-				fmt.Println("快捷启动命令解析失败")
-				systemService(flag)
-				return
-			}
-			cmdArray = append(cmdArray, startCmd)
-		}
-
-		for _, item := range cmdArray {
-			array := strings.Fields(item)
-
-			tls := "false"
-			if len(array) > 2 {
-				tls = array[2]
-			}
-			// tls
-			if tls == "-tls_enable=true" || tls == "true" {
-				systemPro(flag, array[0], array[1], true)
-			} else {
-				systemPro(flag, array[0], array[1], false)
-			}
-		}
-	} else {
-		for _, key := range vkeys {
-			systemPro(flag, "", key, false)
-		}
-
-	}
-
-	inputCmd()
-	return
-}
-
-func systemPro(flag string, serAddr string, vkey string, tls bool) {
-	// init service
-	prg := &clientApp{
-		exit: make(chan struct{}),
-	}
-	options := make(service.KeyValue)
-	svcConfig := &service.Config{
-		Name:        "natpunch-client-" + vkey,
-		DisplayName: "natpunch-client-" + vkey,
-		Description: "NatPunch内网穿透客户端，支持tcp、udp流量转发，支持内网http代理",
-		Option:      options,
-	}
-	s, _ := service.New(prg, svcConfig)
-
-	switch flag {
-	case "1":
-		svcConfig.Arguments = append(svcConfig.Arguments, "-server="+serAddr)
-		svcConfig.Arguments = append(svcConfig.Arguments, "-vkey="+vkey)
-		if tls {
-			svcConfig.Arguments = append(svcConfig.Arguments, "-tls_enable=true")
-		}
-		svcConfig.Arguments = append(svcConfig.Arguments, "-debug=false")
-
-		*logPath = common.GetClientLogPath()
-		if common.IsWindows() {
-			*logPath = strings.Replace(*logPath, "\\", "\\\\", -1)
-		}
-
-		*logPath = strings.Replace(*logPath, "natpunch-client.log", "natpunch-client-"+vkey+".log", -1)
-		svcConfig.Arguments = append(svcConfig.Arguments, "-log_path="+*logPath)
-
-		logs.NewLogger()
-		logs.Reset()
-		logs.EnableFuncCallDepth(true)
-		logs.SetLogFuncCallDepth(3)
-		logs.SetLogger(logs.AdapterFile, `{"level":`+*logLevel+`,"filename":"`+*logPath+`","daily":false,"maxlines":100000,"color":true}`)
-
-		install.InstallClient()
-		err := service.Control(s, "install")
-		if err != nil {
-			fmt.Println("隧道["+vkey+"]安装到系统服务失败", err)
-			return
-		} else {
-			fmt.Println("隧道[" + vkey + "]已经安装到系统")
-		}
-		if service.Platform() == "unix-systemv" {
-			logs.Info("unix-systemv service")
-			confPath := "/etc/init.d/" + svcConfig.Name
-			os.Symlink(confPath, "/etc/rc.d/S90"+svcConfig.Name)
-			os.Symlink(confPath, "/etc/rc.d/K02"+svcConfig.Name)
-		}
-
-		err2 := service.Control(s, "start")
-		if err2 != nil {
-			fmt.Println("隧道["+vkey+"]启动服务失败", err2)
-		} else {
-			fmt.Println("隧道[" + vkey + "]服务已启动")
-		}
-
-		return
-	case "2":
-		// 卸载系统服务
-		err := service.Control(s, "stop")
-		if err != nil {
-			fmt.Println("隧道["+vkey+"]服务停止失败", err)
-		} else {
-			fmt.Println("隧道[" + vkey + "]服务已停止")
-		}
-
-		err = service.Control(s, "uninstall")
-		if err != nil {
-			fmt.Println("隧道["+vkey+"]服务卸载失败", err)
-		}
-		if service.Platform() == "unix-systemv" {
-			fmt.Println("unix-systemv service")
-			os.Remove("/etc/rc.d/S90" + svcConfig.Name)
-			os.Remove("/etc/rc.d/K02" + svcConfig.Name)
-		}
-
-		if err == nil {
-			fmt.Println("隧道[" + vkey + "]服务已卸载成功")
-		}
-
-		return
-
-	case "3":
-		//启动系统服务
-		if service.Platform() == "unix-systemv" {
-			logs.Info("unix-systemv service")
-			cmd := exec.Command("/etc/init.d/"+svcConfig.Name, "start")
-			err := cmd.Run()
-			if err != nil {
-				logs.Error(err)
-			}
-			return
-		}
-		err := service.Control(s, "start")
-		if err != nil {
-			fmt.Println("隧道["+vkey+"]服务启动失败", err)
-		} else {
-			fmt.Println("隧道[" + vkey + "]服务启动成功")
-		}
-
-		return
-	case "4":
-		if service.Platform() == "unix-systemv" {
-			logs.Info("unix-systemv service")
-			cmd := exec.Command("/etc/init.d/"+svcConfig.Name, "stop")
-			err := cmd.Run()
-			if err != nil {
-				logs.Error(err)
-			}
-			return
-		}
-		err := service.Control(s, "stop")
-		if err != nil {
-			fmt.Println("隧道["+vkey+"]服务停止失败", err)
-		} else {
-			fmt.Println("隧道[" + vkey + "]服务停止成功")
-		}
-
-		return
 	}
 }

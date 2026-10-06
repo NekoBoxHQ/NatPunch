@@ -93,11 +93,14 @@ func (s *IndexController) GetTunnel() {
 	clientId := s.GetIntNoErr("client_id")
 	// 非管理员仅可查看自己的隧道（F2-9 IDOR）
 	if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
-		if cid, ok := s.GetSession("clientId").(int); ok {
-			clientId = cid
-		} else {
-			clientId = 0
+		cid, ok := s.GetSession("clientId").(int)
+		if !ok {
+			// 拿不到归属客户端时不能退化成 0：0 在 GetTunnel 里表示"不限客户端"，
+			// 那等于把别人的隧道全给出去。宁可不显示。
+			s.deny()
+			return
 		}
+		clientId = cid
 	}
 	list, cnt := server.GetTunnel(start, length, taskType, clientId, s.getEscapeString("search"), s.getEscapeString("sort"), s.getEscapeString("order"))
 	s.AjaxTable(list, cnt, cnt, nil)

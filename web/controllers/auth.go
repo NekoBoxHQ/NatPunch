@@ -48,14 +48,14 @@ func (s *AuthController) IpWhiteAuth() {
 		s.Data["json"] = map[string]interface{}{"success": false, "message": "认证失败"}
 		s.ServeJSON()
 		// 不打印密码（阶段三 #18 日志脱敏）
-		logs.Error("客户端IP白名单认证失败,密钥不存在:vkey [%s] ip [%s]", vkey, ip)
+		logs.Error("客户端IP白名单认证失败,密钥不存在:vkey [%s] ip [%s]", maskKey(vkey), ip)
 		return
 	}
 
 	if c.IpWhitePass != password {
 		s.Data["json"] = map[string]interface{}{"success": false, "message": "认证失败"}
 		s.ServeJSON()
-		logs.Error("客户端IP白名单认证失败,授权密码错误:vkey [%s] ip [%s]", vkey, ip)
+		logs.Error("客户端IP白名单认证失败,授权密码错误:vkey [%s] ip [%s]", maskKey(vkey), ip)
 		return
 	}
 
@@ -75,7 +75,7 @@ func (s *AuthController) IpWhiteAuth() {
 	s.Data["json"] = map[string]interface{}{"success": true, "message": "授权成功"}
 	s.ServeJSON()
 
-	logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", vkey, ip)
+	logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", maskKey(vkey), ip)
 
 }
 

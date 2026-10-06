@@ -36,8 +36,8 @@ type TRPClient struct {
 	proxyUrl       string
 	vKey           string
 	p2pAddr        map[string]string
-	tunnel         *natpunch_mux.Mux
-	signal         *conn.Conn
+	tunnel         atomic.Pointer[natpunch_mux.Mux]
+	signal         atomic.Pointer[conn.Conn]
 	ticker         *time.Ticker
 	cnf            *config.Config
 	disconnectTime int
@@ -112,7 +112,7 @@ func (s *TRPClient) logTrace(format string, v ...interface{}) {
 
 // IsConnected 返回客户端是否已成功连接到服务器
 func (s *TRPClient) IsConnected() bool {
-	return s.signal != nil
+	return s.signal.Load() != nil
 }
 
 // Status 返回当前连接状态（0=未连接，1=已连接；原包级 NowStatus，阶段三 #6）
@@ -142,12 +142,12 @@ retry:
 	s.logInfo("Successful connection with server %s", s.svrAddr)
 	//monitor the connection
 	go s.ping()
-	s.signal = c
+	s.signal.Store(c)
 	//start a channel connection
 	go s.newChan()
 	//start health check if the it's open
 	if s.cnf != nil && len(s.cnf.Healths) > 0 {
-		go heathCheck(s.cnf.Healths, s.signal)
+		go heathCheck(s.cnf.Healths, c)
 	}
 	s.nowStatus.Store(1)
 	//msg connection, eg udp
@@ -156,9 +156,16 @@ retry:
 
 // handle main connection
 func (s *TRPClient) handleMain() {
+	// 循环外取一次本地引用：closing() 会把 s.signal 置空（关闭后 IsConnected 返回 false），
+	// 如果每轮都从字段读，关闭恰好卡在读取之前就会 nil 解引用 panic。
+	// 持有本地引用不受影响 —— 连接被 Close 后 ReadFlag 会返回错误，循环自然退出。
+	sig := s.signal.Load()
+	if sig == nil {
+		return
+	}
 mainLoop:
 	for {
-		flags, err := s.signal.ReadFlag()
+		flags, err := sig.ReadFlag()
 		if err != nil {
 			s.logError("Accept server data error %s, end this service", err.Error())
 			break
@@ -166,18 +173,18 @@ mainLoop:
 		switch flags {
 		case common.REPORT_LOCAL_IP:
 			// server requests private/LAN IPs (new natpunch); ignore failures so main loop continues
-			localIPs := common.GetLocalIPs(s.signal.Conn)
-			if err := s.signal.WriteLenContent([]byte(localIPs)); err != nil {
+			localIPs := common.GetLocalIPs(sig.Conn)
+			if err := sig.WriteLenContent([]byte(localIPs)); err != nil {
 				s.logWarn("report local ip failed: %s", err.Error())
 			} else {
 				s.logInfo("reported local addr: %s", localIPs)
 			}
 		case common.NEW_UDP_CONN:
 			//read server udp addr and password
-			if lAddr, err := s.signal.GetShortLenContent(); err != nil {
+			if lAddr, err := sig.GetShortLenContent(); err != nil {
 				s.logWarn(err.Error())
 				break mainLoop
-			} else if pwd, err := s.signal.GetShortLenContent(); err == nil {
+			} else if pwd, err := sig.GetShortLenContent(); err == nil {
 				var localAddr string
 				//The local port remains unchanged for a certain period of time
 				if v, ok := s.p2pAddr[crypt.Md5(string(pwd)+strconv.Itoa(int(time.Now().Unix()/100)))]; !ok {
@@ -240,9 +247,10 @@ func (s *TRPClient) newChan() {
 		s.Close()
 		return
 	}
-	s.tunnel = natpunch_mux.NewMux(tunnel.Conn, s.bridgeConnType, s.disconnectTime)
+	mux := natpunch_mux.NewMux(tunnel.Conn, s.bridgeConnType, s.disconnectTime)
+	s.tunnel.Store(mux)
 	for {
-		src, err := s.tunnel.Accept()
+		src, err := mux.Accept()
 		if err != nil {
 			s.logWarn(err.Error())
 			s.Close()
@@ -372,11 +380,16 @@ func (s *TRPClient) handleChan(src net.Conn) {
 		if lk.ProtoVersion == "V1" || lk.ProtoVersion == "V2" {
 			var addr = targetConn.RemoteAddr()
 			if lk.RemoteAddr != "" {
-				s := strings.Split(lk.RemoteAddr, ":")[1]
-				port, _ := strconv.Atoi(s)
-				addr = &net.TCPAddr{
-					IP:   net.ParseIP(strings.Split(lk.RemoteAddr, ":")[0]),
-					Port: port,
+				// RemoteAddr 完全由服务端下发的 link 决定。原实现盲切
+				// strings.Split(..., ":")[1]，不含冒号时直接越界 panic；
+				// 这里跑在独立 goroutine 里，外层 recover 覆盖不到，
+				// 结果是 root 守护进程整个退出（远程可触发）。
+				if host, portStr, err := net.SplitHostPort(lk.RemoteAddr); err == nil {
+					if port, perr := strconv.Atoi(portStr); perr == nil {
+						addr = &net.TCPAddr{IP: net.ParseIP(host), Port: port}
+					}
+				} else {
+					s.logWarn("服务端下发的 RemoteAddr 非法（%q），回退到真实远端地址", lk.RemoteAddr)
 				}
 			}
 
@@ -483,7 +496,7 @@ func (s *TRPClient) ping() {
 		case <-s.ticker.C:
 			// tunnel still nil: newChan failed or still connecting; if Close already ran, closeCh fires.
 			// tunnel established then closed: tear down so outer loop can reconnect.
-			if s.tunnel != nil && s.tunnel.IsClose() {
+			if mux := s.tunnel.Load(); mux != nil && mux.IsClose() {
 				s.Close()
 				return
 			}
@@ -506,11 +519,11 @@ func (s *TRPClient) closing() {
 	default:
 		close(s.closeCh)
 	}
-	if s.tunnel != nil {
-		_ = s.tunnel.Close()
+	if mux := s.tunnel.Load(); mux != nil {
+		_ = mux.Close()
 	}
-	if s.signal != nil {
-		_ = s.signal.Close()
+	if sig := s.signal.Load(); sig != nil {
+		_ = sig.Close()
 	}
-	s.signal = nil // 复位：IsConnected 在关闭后返回 false（阶段三 #6）
+	s.signal.Store(nil) // 复位：IsConnected 在关闭后返回 false（阶段三 #6）
 }

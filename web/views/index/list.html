@@ -84,28 +84,28 @@
             var copyBtn = '<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button>'
             if (row.Mode == "p2p") {
                 var p2pCmd = tmp + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2p"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
+                        + '<b langtag="word-commandaccessp2p"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -target=" + row.Target.TargetStr + "</code>" + copyBtn + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2ps"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
+                        + '<b langtag="word-commandaccessp2ps"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2ps" + "</code>" + copyBtn + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2pt"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
+                        + '<b langtag="word-commandaccessp2pt"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2pt" + "</code>" + copyBtn
                 {{if .tls_enable}}
                 p2pCmd += "<br/><br>"
-                        + '<b langtag="word-commandaccessp2p-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
+                        + '<b langtag="word-commandaccessp2p-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -target=" + row.Target.TargetStr + " -tls_enable=true</code>" + copyBtn + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2ps-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
+                        + '<b langtag="word-commandaccessp2ps-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2ps -tls_enable=true</code>" + copyBtn + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2pt-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
+                        + '<b langtag="word-commandaccessp2pt-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2pt -tls_enable=true</code>" + copyBtn
                 {{end}}
                 return p2pCmd
             }
             if (row.Mode == "secret") {
-                var secretCmd = tmp + "<br/><br>" + '<b langtag="word-commandaccess"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
+                var secretCmd = tmp + "<br/><br>" + '<b langtag="word-commandaccess"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=secret" + "</code>" + copyBtn
                 {{if .tls_enable}}
-                secretCmd += "<br/><br>" + '<b langtag="word-commandaccess-tls"></b>: ' + "<code>{{.win}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
+                secretCmd += "<br/><br>" + '<b langtag="word-commandaccess-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.Client.VerifyKey
                         + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=secret -tls_enable=true</code>" + copyBtn
                 {{end}}
                 return secretCmd

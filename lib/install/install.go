@@ -19,9 +19,15 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jedisct1/go-minisign"
 )
+
+// httpClient 带超时的 HTTP 客户端。更新路径必须能在网络半死时退出：
+// 原来直接用 http.Get（走 DefaultClient，无任何超时），一个卡住的连接会让
+// “更新客户端”永久挂起，既没有报错也无法中断。
+var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 // repo 为发布与更新所指向的 GitHub 仓库（组织/仓库名）
 const repo = "NekoBoxHQ/NatPunch"
@@ -29,139 +35,7 @@ const repo = "NekoBoxHQ/NatPunch"
 // natpunchMinisignPubKey 发布方 minisign 公钥，须与 install.sh / install_server.sh 内嵌值一致。
 const natpunchMinisignPubKey = "RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660"
 
-// Keep it in sync with the template from service_sysv_linux.go file
-// Use "ps | grep -v grep | grep $(get_pid)" because "ps PID" may not work on OpenWrt
-const SysvScript = `#!/bin/sh
-# For RedHat and cousins:
-# chkconfig: - 99 01
-# description: {{.Description}}
-# processname: {{.Path}}
-### BEGIN INIT INFO
-# Provides:          {{.Path}}
-# Required-Start:
-# Required-Stop:
-# Default-Start:     2 3 4 5
-# Default-Stop:      0 1 6
-# Short-Description: {{.DisplayName}}
-# Description:       {{.Description}}
-### END INIT INFO
-cmd="{{.Path}}{{range .Arguments}} {{.|cmd}}{{end}}"
-name=$(basename $(readlink -f $0))
-pid_file="/var/run/$name.pid"
-stdout_log="/var/log/$name.log"
-stderr_log="/var/log/$name.err"
-[ -e /etc/sysconfig/$name ] && . /etc/sysconfig/$name
-get_pid() {
-    cat "$pid_file"
-}
-is_running() {
-    [ -f "$pid_file" ] && ps | grep -v grep | grep $(get_pid) > /dev/null 2>&1
-}
-case "$1" in
-    start)
-        if is_running; then
-            echo "Already started"
-        else
-            echo "Starting $name"
-            {{if .WorkingDirectory}}cd '{{.WorkingDirectory}}'{{end}}
-            $cmd >> "$stdout_log" 2>> "$stderr_log" &
-            echo $! > "$pid_file"
-            if ! is_running; then
-                echo "Unable to start, see $stdout_log and $stderr_log"
-                exit 1
-            fi
-        fi
-    ;;
-    stop)
-        if is_running; then
-            echo -n "Stopping $name.."
-            kill $(get_pid)
-            for i in $(seq 1 10)
-            do
-                if ! is_running; then
-                    break
-                fi
-                echo -n "."
-                sleep 1
-            done
-            echo
-            if is_running; then
-                echo "Not stopped; may still be shutting down or shutdown may have failed"
-                exit 1
-            else
-                echo "Stopped"
-                if [ -f "$pid_file" ]; then
-                    rm "$pid_file"
-                fi
-            fi
-        else
-            echo "Not running"
-        fi
-    ;;
-    restart)
-        $0 stop
-        if is_running; then
-            echo "Unable to stop, will not attempt to start"
-            exit 1
-        fi
-        $0 start
-    ;;
-    status)
-        if is_running; then
-            echo "Running"
-        else
-            echo "Stopped"
-            exit 1
-        fi
-    ;;
-    *)
-    echo "Usage: $0 {start|stop|restart|status}"
-    exit 1
-    ;;
-esac
-exit 0
-`
-
-const SystemdScript = `[Unit]
-Description={{.Description}}
-ConditionFileIsExecutable={{.Path|cmdEscape}}
-{{range $i, $dep := .Dependencies}} 
-{{$dep}} {{end}}
-[Service]
-LimitNOFILE=65536
-StartLimitInterval=5
-StartLimitBurst=10
-ExecStart={{.Path|cmdEscape}}{{range .Arguments}} {{.|cmd}}{{end}}
-{{if .ChRoot}}RootDirectory={{.ChRoot|cmd}}{{end}}
-{{if .WorkingDirectory}}WorkingDirectory={{.WorkingDirectory|cmdEscape}}{{end}}
-{{if .UserName}}User={{.UserName}}{{end}}
-{{if .ReloadSignal}}ExecReload=/bin/kill -{{.ReloadSignal}} "$MAINPID"{{end}}
-{{if .PIDFile}}PIDFile={{.PIDFile|cmd}}{{end}}
-{{if and .LogOutput .HasOutputFileSupport -}}
-StandardOutput=file:/var/log/{{.Name}}.out
-StandardError=file:/var/log/{{.Name}}.err
-{{- end}}
-Restart=always
-RestartSec=120
-[Install]
-WantedBy=multi-user.target
-`
-
 func UpdateNatpunch() {
-	destPath, err := downloadLatest("server")
-	if err != nil {
-		log.Println("下载更新失败：", err)
-		return
-	}
-	//复制文件到对应目录
-	if _, err := copyStaticFile(destPath, "natpunch"); err != nil {
-		log.Println("替换服务端文件失败：", err)
-		return
-	}
-	fmt.Println("Update completed, please restart")
-}
-
-func UpdateNatpunchNew() {
 	latest, err := fetchLatestVersion()
 	if err != nil {
 		log.Println("获取最新版本失败：", err)
@@ -173,7 +47,7 @@ func UpdateNatpunchNew() {
 		return
 	}
 	tempDir := filepath.Join(common.GetAppPath(), "temp")
-	destPath, err := downloadLatest2("server", tempDir)
+	destPath, err := downloadLatest("server", tempDir)
 	if err != nil {
 		log.Println("下载更新失败：", err)
 		return
@@ -187,7 +61,7 @@ func UpdateNatpunchNew() {
 }
 
 func fetchLatestVersion() (string, error) {
-	resp, err := http.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	resp, err := httpClient.Get("https://api.github.com/repos/" + repo + "/releases/latest")
 	if err != nil {
 		return "", err
 	}
@@ -233,20 +107,6 @@ func compareVersion(a, b string) int {
 }
 
 func UpdateClient() {
-	destPath, err := downloadLatest("client")
-	if err != nil {
-		log.Println("下载更新失败：", err)
-		return
-	}
-	//复制文件到对应目录
-	if _, err := copyStaticFile(destPath, "natpunch-client"); err != nil {
-		log.Println("替换客户端文件失败：", err)
-		return
-	}
-	fmt.Println("Update completed, please restart")
-}
-
-func UpdateClientNew() {
 	latest, err := fetchLatestVersion()
 	if err != nil {
 		log.Println("获取最新版本失败：", err)
@@ -258,7 +118,7 @@ func UpdateClientNew() {
 		return
 	}
 	tempDir := filepath.Join(common.GetAppPath(), "temp")
-	destPath, err := downloadLatest2("client", tempDir)
+	destPath, err := downloadLatest("client", tempDir)
 	if err != nil {
 		log.Println("下载更新失败：", err)
 		return
@@ -274,11 +134,7 @@ type release struct {
 	TagName string `json:"tag_name"`
 }
 
-func downloadLatest(bin string) (string, error) {
-	return downloadAndUnpack(bin, "")
-}
-
-func downloadLatest2(bin string, path string) (string, error) {
+func downloadLatest(bin string, path string) (string, error) {
 	return downloadAndUnpack(bin, path)
 }
 
@@ -287,7 +143,7 @@ func downloadLatest2(bin string, path string) (string, error) {
 // F2-8：强制校验 SHA256SUMS（同一 release 资产），校验失败即中止；解包弃用 unpackit，
 // 改用标准库 archive/tar + gzip，并拒绝路径逃逸条目。
 func downloadAndUnpack(bin, unpackPath string) (string, error) {
-	data, err := http.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	data, err := httpClient.Get("https://api.github.com/repos/" + repo + "/releases/latest")
 	if err != nil {
 		return "", err
 	}
@@ -326,7 +182,7 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("SHA256SUMS 中未找到 %s 条目", filename)
 	}
-	resp, err := http.Get(downloadUrl)
+	resp, err := httpClient.Get(downloadUrl)
 	if err != nil {
 		return "", err
 	}
@@ -364,7 +220,7 @@ func downloadAndUnpack(bin, unpackPath string) (string, error) {
 // fetchReleaseFile 从指定 release 下载资产并返回内容
 func fetchReleaseFile(ver, asset string) (string, error) {
 	url := fmt.Sprintf("https://github.com/"+repo+"/releases/download/%s/%s", ver, asset)
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -487,36 +343,6 @@ func extractTarGz(r io.Reader, dest string) (string, error) {
 	return dest, nil
 }
 
-func copyStaticFile(srcPath, bin string) (string, error) {
-	// natpunch web UI is embedded in the binary; no web/ files to copy.
-	srcBin := filepath.Join(srcPath, bin)
-	if common.IsWindows() {
-		srcBin += ".exe"
-	}
-	if _, err := os.Stat(srcBin); err != nil {
-		return "", fmt.Errorf("更新包中未找到可执行文件 %s: %w", srcBin, err)
-	}
-	var binPath string
-	if !common.IsWindows() {
-		if _, err := copyFile(srcBin, "/usr/bin/"+bin); err != nil {
-			if _, err := copyFile(srcBin, "/usr/local/bin/"+bin); err != nil {
-				return "", err
-			}
-			binPath = "/usr/local/bin/" + bin
-		} else {
-			binPath = "/usr/bin/" + bin
-		}
-	} else {
-		destBin := filepath.Join(common.GetAppPath(), bin+".exe")
-		if err := replaceExecutable(srcBin, destBin); err != nil {
-			return "", err
-		}
-		binPath = destBin
-	}
-	chMod(binPath, 0755)
-	return binPath, nil
-}
-
 func copyStaticFileReplaceNatpunch(srcPath, descPath string) error {
 	// Web UI is embedded in the binary; only replace the executable.
 	return replaceBinFromPackage(srcPath, descPath, "natpunch")
@@ -529,10 +355,6 @@ func copyStaticFileReplaceClient(srcPath, descPath string) error {
 func replaceBinFromPackage(srcPath, descPath, bin string) error {
 	srcBin := filepath.Join(srcPath, bin)
 	destBin := filepath.Join(descPath, bin)
-	if common.IsWindows() {
-		srcBin += ".exe"
-		destBin += ".exe"
-	}
 	// Prefer replacing the actually running binary when its basename matches.
 	if exe, err := os.Executable(); err == nil {
 		if filepath.Base(exe) == filepath.Base(destBin) {
@@ -550,7 +372,9 @@ func replaceBinFromPackage(srcPath, descPath, bin string) error {
 	if err := replaceExecutable(srcBin, destBin); err != nil {
 		return err
 	}
-	chMod(destBin, 0755)
+	if err := chMod(destBin, 0755); err != nil {
+		return err
+	}
 	// Clean temp package; keep parent temp dir if still in use
 	_ = os.RemoveAll(srcPath)
 	return nil
@@ -619,64 +443,6 @@ func replaceExecutable(srcBin, destBin string) error {
 	return nil
 }
 
-func InstallClient() {
-	path := common.GetInstallPath()
-	if !common.FileExists(path) {
-		err := os.Mkdir(path, 0755)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-	if _, err := copyStaticFile(common.GetAppPath(), "natpunch-client"); err != nil {
-		log.Fatalln(err)
-	}
-}
-
-func InstallNatpunch() string {
-	path := common.GetInstallPath()
-	log.Println("install path:" + path)
-	if !common.FileExists(path) {
-		MkidrDirAll(path, "conf")
-		// not copy config if the config file is exist
-		if err := CopyDir(filepath.Join(common.GetAppPath(), "conf"), filepath.Join(path, "conf")); err != nil {
-			log.Fatalln(err)
-		}
-		chMod(filepath.Join(path, "conf"), 0755)
-	}
-	binPath, err := copyStaticFile(common.GetAppPath(), "natpunch")
-	if err != nil {
-		log.Fatalln(err)
-	}
-	log.Println("install ok!")
-	log.Println("Web UI is embedded in the natpunch binary; no web/ directory is required")
-	log.Println("The new configuration file is located in", path, "you can edit them")
-	if !common.IsWindows() {
-		log.Println(`You can start with:
-natpunch start|stop|restart|uninstall|update
-anywhere!`)
-	} else {
-		log.Println(`You can copy executable files to any directory and start working with:
-natpunch.exe start|stop|restart|uninstall|update
-now!`)
-	}
-	chMod(common.GetLogPath(), 0640)
-	return binPath
-}
-
-func InstallNatpunchToCurrentDir() string {
-	path := common.GetAppPath()
-	log.Println("install path:" + path)
-	log.Println("install ok!")
-	chMod(filepath.Join(path, "natpunch.log"), 0640)
-
-	if !common.IsWindows() {
-		path = filepath.Join(path, "natpunch")
-	} else {
-		path = filepath.Join(path, "natpunch.exe")
-	}
-	return path
-}
-
 func MkidrDirAll(path string, v ...string) {
 	for _, item := range v {
 		if err := os.MkdirAll(filepath.Join(path, item), 0755); err != nil {
@@ -711,10 +477,12 @@ func CopyDir(srcPath string, destPath string) error {
 		if !f.IsDir() {
 			destNewPath := strings.Replace(path, srcPath, destPath, -1)
 			log.Println("copy file ::" + path + " to " + destNewPath)
-			copyFile(path, destNewPath)
-			if !common.IsWindows() {
-				// 拷贝的配置文件含 vkey/web_password 等敏感项：0640（组可读），不再 0766 全局可写（阶段三 #12）
-				chMod(destNewPath, 0640)
+			if _, err := copyFile(path, destNewPath); err != nil {
+				return fmt.Errorf("拷贝 %s 失败: %w", path, err)
+			}
+			// 拷贝的配置文件含 vkey/web_password 等敏感项：0640（组可读），不再 0766 全局可写
+			if err := chMod(destNewPath, 0640); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -741,14 +509,16 @@ func copyFile(src, dest string) (w int64, err error) {
 			if b == false {
 				log.Println("mkdir:" + destSplitPath)
 				//创建目录
-				err := os.Mkdir(destSplitPath, os.ModePerm)
+				err := os.Mkdir(destSplitPath, 0755)
 				if err != nil {
 					log.Fatalln(err)
 				}
 			}
 		}
 	}
-	dstFile, err := os.Create(dest)
+	// 先以 0600 创建，避免拷贝过程中出现“凭据文件短暂全局可读”的窗口；
+	// 调用方（copyStaticFile / CopyDir）随后按用途 chmod 到 0755 / 0640。
+	dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return
 	}
@@ -769,8 +539,8 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
-func chMod(name string, mode os.FileMode) {
-	if !common.IsWindows() {
-		os.Chmod(name, mode)
-	}
+// chMod 收紧文件权限。配置文件里含 vkey / web_password 等凭据，
+// chmod 失败必须作为错误上报，不能静默放过 —— 否则敏感文件可能一直保持宽松权限。
+func chMod(name string, mode os.FileMode) error {
+	return os.Chmod(name, mode)
 }
