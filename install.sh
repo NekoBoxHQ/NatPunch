@@ -333,11 +333,21 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/natpunch.conf
-# 用 sh -c 包裹，避免 systemd 不支持 ${VAR:-} 默认值语法
-ExecStart=/bin/sh -c '/usr/bin/natpunch-client -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG}'
+# 必须直接 exec 客户端本体，**不要**用 /bin/sh -c 包一层。
+# 包一层的话 systemd 眼里的"主进程"是那个 sh 壳，而 KillMode=process（见下）
+# 只杀主进程 —— 于是 systemctl stop / restart 之后真正的 natpunch-client 会活下来、
+# 被 init 收养（PPID=1），下一次启动又多一个。每升一次级就多一个同 vkey 的客户端，
+# 一起连服务端、抢同一条隧道。真机上抓到过：restart 之后一个 29 分钟前的旧进程
+# 和新进程同时连着服务端，systemd 只能记一句
+#   "Unit process <pid> (natpunch-client) remains running after unit stopped."
+# 变量展开交给 systemd 自己做（EnvironmentFile 里的 ${SERVER} 等）；缺值会直接
+# 起不来而不是静默传空 —— 这正是想要的行为。
+ExecStart=/usr/bin/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}
 Restart=always
 RestartSec=3
 # KillMode=process：stop 只杀主进程，不连带杀面板 SSH 场景下的更新子脚本
+# （那个 shell 是客户端进程的子进程，就在本单元 cgroup 里）。
+# 它和上面的 ExecStart 是配套的：主进程必须就是客户端本体，否则客户端会漏杀。
 KillMode=process
 [Install]
 WantedBy=multi-user.target

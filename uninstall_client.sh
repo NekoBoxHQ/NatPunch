@@ -211,6 +211,19 @@ verify_package() {
 ensure_killmode_process() {
     U="$1"
     [ -f "$U" ] || return 0
+    # —— 顺带把 ExecStart 从 /bin/sh -c 包裹改回直接 exec 客户端本体 ——
+    # 两件事必须配套：KillMode=process 只杀"主进程"，而 sh 包裹会让主进程变成那个
+    # shell，真正的 natpunch-client 反而活下来（被 init 收养，PPID=1），下次启动
+    # 就多一个同 vkey 的客户端、一起连服务端抢同一条隧道。真机上抓到过：
+    # restart 之后一个 29 分钟前的旧进程和新进程同时连着。
+    # 整行覆盖成已知的正确形态，不依赖旧行长什么样；失败只告警，不阻断升级。
+    if grep -q '^ExecStart=/bin/sh -c ' "$U" 2>/dev/null; then
+        cp -a "$U" "/tmp/natpunch-unit-$(basename "$U").pre_directexec.bak" 2>/dev/null || true
+        awk '/^ExecStart=\/bin\/sh -c /{print "ExecStart=\/usr\/bin\/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}"; next} {print}' "$U" > "$U.tmp" \
+            && mv "$U.tmp" "$U" || rm -f "$U.tmp"
+        grep -q '^ExecStart=/usr/bin/natpunch-client ' "$U" 2>/dev/null \
+            || echo "==> 警告: 改写 ExecStart 失败，单元仍是 sh -c 包裹（下次 stop 会留下残留客户端）" >&2
+    fi
     if grep -q '^KillMode=' "$U" 2>/dev/null; then
         # 用 awk 原地替换，busybox 兼容
         awk 'BEGIN{FS=OFS="="} /^KillMode=/{print "KillMode","process"; next} {print}' "$U" > "$U.tmp" \
@@ -324,6 +337,19 @@ tcmd() {
 ensure_killmode_process() {
     U="$1"
     [ -f "$U" ] || return 0
+    # —— 顺带把 ExecStart 从 /bin/sh -c 包裹改回直接 exec 客户端本体 ——
+    # 两件事必须配套：KillMode=process 只杀"主进程"，而 sh 包裹会让主进程变成那个
+    # shell，真正的 natpunch-client 反而活下来（被 init 收养，PPID=1），下次启动
+    # 就多一个同 vkey 的客户端、一起连服务端抢同一条隧道。真机上抓到过：
+    # restart 之后一个 29 分钟前的旧进程和新进程同时连着。
+    # 整行覆盖成已知的正确形态，不依赖旧行长什么样；失败只告警，不阻断升级。
+    if grep -q '^ExecStart=/bin/sh -c ' "$U" 2>/dev/null; then
+        cp -a "$U" "/tmp/natpunch-unit-$(basename "$U").pre_directexec.bak" 2>/dev/null || true
+        awk '/^ExecStart=\/bin\/sh -c /{print "ExecStart=\/usr\/bin\/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}"; next} {print}' "$U" > "$U.tmp" \
+            && mv "$U.tmp" "$U" || rm -f "$U.tmp"
+        grep -q '^ExecStart=/usr/bin/natpunch-client ' "$U" 2>/dev/null \
+            || echo "==> 警告: 改写 ExecStart 失败，单元仍是 sh -c 包裹（下次 stop 会留下残留客户端）" >&2
+    fi
     if grep -q '^KillMode=' "$U" 2>/dev/null; then
         awk 'BEGIN{FS=OFS="="} /^KillMode=/{print "KillMode","process"; next} {print}' "$U" > "$U.tmp" \
             && mv "$U.tmp" "$U" || rm -f "$U.tmp"
@@ -397,6 +423,15 @@ if command -v systemctl >/dev/null 2>&1 && command -v systemd-run >/dev/null 2>&
     if systemd-run --unit="natpunch-apply-stop-$$" --collect --wait --quiet \
             /bin/sh -c "systemctl stop natpunch-client" >/dev/null 2>&1; then
         log "已通过独立单元停止客户端"
+        sleep 1
+        # 兜底清扫：stop 时若单元还是旧的 /bin/sh -c 包裹，KillMode=process 只杀那个
+        # shell，真正的客户端活下来（被 init 收养，PPID=1）；start 之后就成了两个同
+        # vkey 的客户端。存量机器第一次走新流程时就会碰到这种残留。
+        # 复用 kill_client_pids —— 它按 /proc/<pid>/exe 匹配，精确到客户端本体，
+        # 碰不到面板 SSH 的 shell，也碰不到 apply 脚本自己。
+        kill_client_pids TERM
+        sleep 1
+        kill_client_pids KILL
         sleep 1
         # stop 后 apply 脚本已脱离客户端 cgroup，可以安全 start
         if tcmd 15 systemctl start natpunch-client >/dev/null 2>&1; then

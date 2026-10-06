@@ -204,6 +204,29 @@ else
     bad "install_server.sh 的 upgrade() 不刷新自启单元 —— unit 里的加固到不了存量机器"
 fi
 
+echo "== 8. systemd 客户端单元不能把 ExecStart 包成 sh -c =="
+# 背景：KillMode=process 只杀"主进程"。ExecStart 若是 /bin/sh -c '...'，systemd 眼里的
+# 主进程就是那个 shell —— systemctl stop / restart 只杀 shell，真正的 natpunch-client
+# 活下来被 init 收养（PPID=1），下次启动再多一个同 vkey 的客户端，一起连服务端抢同一条
+# 隧道。真机上抓到过：restart 之后一个 29 分钟前的旧进程和新进程同时在连。
+# 这两条是配套的，改一条必须看另一条。
+if grep -q '^ExecStart=/usr/bin/natpunch-client ' "$INSTALL"; then
+    ok "install.sh 的 ExecStart 直接 exec 客户端本体"
+else
+    bad "install.sh 的 ExecStart 不是直接 exec 客户端本体 —— 配合 KillMode=process 会漏杀客户端"
+fi
+if grep -q 'ExecStart=/bin/sh -c' "$INSTALL"; then
+    bad "install.sh 里还有 ExecStart=/bin/sh -c 包裹（会漏杀客户端）"
+else
+    ok "install.sh 里没有 sh -c 包裹的 ExecStart"
+fi
+# 存量机器靠更新路径改单元（不是所有人都会重装）
+if grep -q 'pre_directexec' "$SRC" && grep -q 'natpunch-client -server=\${SERVER}' "$SRC"; then
+    ok "uninstall_client.sh 会把存量单元里的 ExecStart 改回直接 exec"
+else
+    bad "uninstall_client.sh 不修存量单元的 ExecStart —— 更新后仍会留下残留客户端"
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"
