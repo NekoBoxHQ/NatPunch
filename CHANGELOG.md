@@ -39,10 +39,16 @@
 - **凭据处理**：`vkey`、SOCKS5 账密、配置模式重连 vkey 的比较改用常量时间（新增 `common.ConstantTimeStrEq`）；`IpWhiteAuth` 日志里的完整 vkey 只保留前 4 位；`GetClient` 对非管理员同时抹掉 `IpWhitePass`（此前只抹了 `VerifyKey`）；客户端 vkey 临时文件改用 `O_NOFOLLOW` 打开（`/tmp` 若可被非特权用户写入，预置同名符号链接即可让 root 客户端覆盖任意文件）。
 - **更新 / 文件路径加固**：更新路径 4 处 `http.Get` 改用带 60s 超时的 client（原来走 `DefaultClient`，卡住的连接会让更新永久挂起）；`chMod` / `CopyDir` 不再吞掉 `os.Chmod` 与拷贝错误；新建文件先以 0600 落地，目录用 0755 而非 0777。
 
+### 签名链与并发收紧（第二轮）
+- **签名校验改为 fail-closed**。原来「拿不到 `SHA256SUMS.minisig` 就告警放行」是整条签名链的降级口子：SHA256 比对的 `SHA256SUMS` 与包来自同一渠道，属于自洽校验 —— 攻击者控制发布渠道时只要不提供签名文件，就能让签名这层形同虚设。现在 `lib/install` 与三个 shell 安装器（`install.sh` / `install_server.sh` / `uninstall_client.sh`）在拿不到可信签名时一律中止。
+- **内置校验器哈希不符也改为中止**（原为警告后放行）。校验器与包同源下载，把请求换成乱码即可逼出「跳过签名校验」的降级路径。
+- **`uninstall_client.sh` 补上内置静态校验器**。此前它只有系统 `minisign` 一条路，而 OpenWrt 上没有 minisign 包 —— 也就是说**客户端更新路径一直只做了 SHA256**，等于把「用网上下载的二进制覆盖本地 root 二进制」完全托付给 HTTPS。现在与 `install.sh` 同级：校验器哈希必须与脚本内嵌信任锚一致才执行。CI 的信任锚比对同步纳入该脚本，避免以后发版时锚点过期反而把升级卡死。
+- **无签名环境留有显式逃生开关** `NATPUNCH_ALLOW_UNSIGNED=1`（默认不启用）。自建发布链等场景可显式放行，日志会明确标注「不防发布渠道被控」。
+- **`server/proxy/http.go` keep-alive 换 host 的跨代复用**：转发 goroutine 原来闭包引用外层的 `connClient` / `host` / `isReset`，而这三者在换 host 时都会被重新赋值 —— 旧 goroutine 退出时的 `defer connClient.Close()` 关掉的其实是**新**连接；共享的 `isReset` 也可能被新一代替成 false，导致旧 goroutine 反过来关掉仍在使用的客户端连接。改为每一代把句柄、host、重置标记显式传进 goroutine，重置标记用独立的 `atomic.Bool`。
+- 新增回归断言：`test/upgrade_logic_test.sh` 现在会检查三个脚本都走统一的签名失败收口、不存在「跳过签名校验」的放行分支、校验器哈希不符是硬失败、以及逃生开关存在。
+
 ### 已知未修（需单独决策）
-- `lib/install` 的 `verifyReleaseSignature` 在 `SHA256SUMS.minisig` 缺失时放行（fail-open），与两个 shell 安装器策略一致。若 CI 已配置 `MINISIGN_SECRET_KEY`，可收紧为 fail-closed。
-- TLS 未配置 `tls_fingerprint` 时仍以 `InsecureSkipVerify` 放行（只防被动窃听），需 `tls_strict=true` 才拒绝启动。
-- `server/proxy/http.go` keep-alive 切换 host 时 `isReset` / `connClient` 跨 goroutine 复用。
+- TLS 未配置 `tls_fingerprint` 时仍以 `InsecureSkipVerify` 放行（只防被动窃听，不防中间人），需 `tls_strict=true` 才拒绝启动。**这次没有改默认值**：现网客户端是以 `-tls_enable=true` 起的，把默认改成 fail-closed 会让它们升级后直接拒绝启动 —— 正是「不可以无缘无故不启动」要避免的那类故障。要收紧请在客户端显式加 `-tls_strict=true -tls_fingerprint=<服务端桥接证书指纹>`。
 
 ## v26.9.111（已发布）
 

@@ -49,6 +49,16 @@ log()  { printf '%b\n' "  ${C_GREEN}[OK]${C_RESET}   $*"; }
 info() { printf '%b\n' "  ${C_CYAN}[INFO]${C_RESET} $*"; }
 warn() { printf '%b\n' "  ${C_YELLOW}[WARN]${C_RESET} $*" >&2; }
 die()  { printf '%b\n' "  ${C_RED}[FAIL]${C_RESET} $*" >&2; exit 1; }
+# 签名校验不可用时的统一收口。
+# 这是往 root 目录装/换二进制：拿不到可信签名，就等于把「装什么」交给发布渠道和中间人。
+# 因此默认中止；确需在无签名环境（自建发布链等）继续，显式设置 NATPUNCH_ALLOW_UNSIGNED=1。
+sig_unavailable() {
+    if [ "${NATPUNCH_ALLOW_UNSIGNED:-}" = "1" ]; then
+        warn "$1 —— 已按 NATPUNCH_ALLOW_UNSIGNED=1 放行（SHA256 已强制校验，但不防发布渠道被控）"
+        return 0
+    fi
+    die "$1。出于防篡改默认中止；确需在无签名环境下继续，请设置 NATPUNCH_ALLOW_UNSIGNED=1 后重试"
+}
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少依赖: $1"; }
 kv() {
     printf "  ${C_DIM}%-10s${C_RESET} %s\n" "$1" "$2"
@@ -356,22 +366,22 @@ verify_package() {
                                     cd /; rm -rf "$TMP"; die "minisign 签名校验失败（内置校验器）"
                                 fi
                             else
-                                warn "内置校验器 $MSC 哈希与内嵌信任锚不符，拒绝执行，跳过签名校验（SHA256 已强制校验）"
+                                die "内置校验器 $MSC 哈希与内嵌信任锚不符（疑似被篡改），已拒绝执行"
                             fi
                         else
-                            warn "内置校验器 $MSC 未配置信任锚（本脚本 MSC_SHA256_* 为空），跳过签名校验（SHA256 已强制校验）"
+                            sig_unavailable "内置校验器 $MSC 未配置信任锚"
                         fi
                     else
-                        warn "无法下载内置校验器 $MSC，跳过签名校验（SHA256 已强制校验）"
+                        sig_unavailable "无法下载内置校验器 $MSC"
                     fi
                 fi
             fi
-            [ "$sig_ok" -eq 1 ] || warn "未找到签名校验工具，跳过签名校验（SHA256 已强制校验）"
+            [ "$sig_ok" -eq 1 ] || sig_unavailable "未能建立包的可信来源（无可用签名校验手段）"
         else
-            warn "发布未提供 SHA256SUMS.minisig，跳过签名校验（SHA256 已强制校验）"
+            sig_unavailable "发布未提供 SHA256SUMS.minisig（无法建立包的可信来源）"
         fi
     else
-        warn "未配置 MINISIGN_PUBKEY，跳过签名校验（SHA256 已强制校验）"
+        sig_unavailable "未配置 MINISIGN_PUBKEY"
     fi
 }
 fetch() {

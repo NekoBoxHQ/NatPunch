@@ -240,12 +240,16 @@ func fetchReleaseFile(ver, asset string) (string, error) {
 // 与 shell 安装器策略保持一致（复评🟡：此前 Go 自更新只比对未签名的 SHA256SUMS，
 // 等价于仅信任 HTTPS 传输，弱于 install.sh / install_server.sh 的 minisign 校验）：
 //   - 发布方提供了 SHA256SUMS.minisig → 强制校验，失败即中止更新；
-//   - 未提供签名文件（CI 未配置 MINISIGN_SECRET_KEY）→ 告警放行，此时仍有 SHA256 强制校验。
+//   - 拿不到签名文件 → 同样中止。
+//
+// 最后一条原来是告警放行，但那是个降级口子：SHA256 是对**同一渠道拿到的**
+// SHA256SUMS 做的自洽比对，攻击者控制发布渠道时只要不上传 .minisig，
+// 就能让整条签名链失效、转而信任自己提供的清单。发布流水线（release.yml）
+// 已强制要求上传 SHA256SUMS.minisig，因此这里改为 fail-closed。
 func verifyReleaseSignature(ver, sumsRaw string) error {
 	sigRaw, err := fetchReleaseFile(ver, "SHA256SUMS.minisig")
 	if err != nil {
-		log.Printf("未获取到 SHA256SUMS.minisig，跳过签名校验（SHA256 已强制校验）: %v", err)
-		return nil
+		return fmt.Errorf("未获取到 SHA256SUMS.minisig，无法确认包的可信来源，已中止更新: %w", err)
 	}
 	pk, err := minisign.NewPublicKey(natpunchMinisignPubKey)
 	if err != nil {

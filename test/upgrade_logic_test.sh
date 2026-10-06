@@ -85,6 +85,38 @@ else
     bad "systemd unit 缺 StartLimitIntervalSec=0 —— 短时间多次重启后会被打成 failed 并停止重启"
 fi
 
+echo "== 5. 签名链不能被改回「拿不到签名就放行」 =="
+# 背景：SHA256 比对的 SHA256SUMS 与包来自同一渠道，属于自洽校验。攻击者控制发布渠道时，
+# 只要不上传 .minisig、或把内置校验器换成乱码，就能把签名这层整个降级掉。
+# 所以「签名不可用」必须是中止，而不是打印一句警告继续装 —— 这是往 root 目录放二进制。
+for f in "$INSTALL" install_server.sh "$SRC"; do
+    if grep -q 'sig_unavailable' "$f"; then
+        ok "$f 走统一收口 sig_unavailable"
+    else
+        bad "$f 缺少 sig_unavailable"
+    fi
+    if grep -q '跳过签名校验' "$f"; then
+        bad "$f 仍有「跳过签名校验」的放行分支"
+    else
+        ok "$f 没有签名放行分支"
+    fi
+done
+if grep -q '哈希与内嵌信任锚不符（疑似被篡改），已拒绝执行' "$INSTALL"; then
+    ok "校验器哈希不符是硬失败（不是警告）"
+else
+    bad "校验器哈希不符必须直接中止，否则换掉校验器就能逼出降级"
+fi
+if grep -q '^MSC_SHA256_amd64=' "$SRC"; then
+    ok "uninstall_client.sh 内嵌了校验器信任锚"
+else
+    bad "uninstall_client.sh 缺 MSC_SHA256_* 信任锚，OpenWrt 上会永远落到「无校验手段」分支"
+fi
+if grep -q 'NATPUNCH_ALLOW_UNSIGNED' "$INSTALL" && grep -q 'NATPUNCH_ALLOW_UNSIGNED' "$SRC"; then
+    ok "无签名环境留有显式逃生开关"
+else
+    bad "缺少 NATPUNCH_ALLOW_UNSIGNED 逃生开关"
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"

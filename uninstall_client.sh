@@ -14,6 +14,15 @@ REPO="NekoBoxHQ/NatPunch"
 # 发布方 minisign 公钥，必须与 install.sh / install_server.sh / lib/install 内嵌值一致。
 # 可用环境变量覆盖（自建发布链场景）。
 NP_MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
+
+# 内置静态校验器（minisign-check）各架构 SHA256 信任锚，由发布方在打 tag 前填入。
+# 必须内嵌于本脚本：若改用「同渠道下载的 SHA256SUMS」去校验校验器，在镜像被控时
+# 攻击者可同时替换 包 / SHA256SUMS / 校验器 三者，构成循环信任，等于没有校验。
+# 与 install.sh / install_server.sh 保持同一组值（release.yml 会逐个脚本比对）。
+MSC_SHA256_amd64="e20c81421e5833c07a6c9c3d077650f7591effc63c1565b7086d9e133ea73576"
+MSC_SHA256_arm64="152434e6f6d5aab0e8cafef602fc1a069b57b6d805d4954c5edb88550c6b9a9c"
+MSC_SHA256_arm="517c7d12adeea6af6682b5957b81bb3f450cfdab1d7b7ade6abe7108e303ace1"
+MSC_SHA256_mipsle="a4c2e73ac3a2810190882ecbf50d0a26accafe42843f48c73cb0709e83558865"
 ACTION="${1:-uninstall}"
 CLIENT_BIN_1="/usr/bin/natpunch-client"
 CLIENT_BIN_2="/usr/local/bin/natpunch-client"
@@ -29,6 +38,16 @@ UNINSTALL_LOG="/tmp/natpunch_uninstall.log"
 log()  { echo "==> $*"; }
 warn() { echo "==> 警告: $*" >&2; }
 die()  { echo "==> 错误: $*" >&2; exit 1; }
+# 签名校验不可用时的统一收口。
+# 这是往 root 目录装/换二进制：拿不到可信签名，就等于把「装什么」交给发布渠道和中间人。
+# 因此默认中止；确需在无签名环境（自建发布链等）继续，显式设置 NATPUNCH_ALLOW_UNSIGNED=1。
+sig_unavailable() {
+    if [ "${NATPUNCH_ALLOW_UNSIGNED:-}" = "1" ]; then
+        warn "$1 —— 已按 NATPUNCH_ALLOW_UNSIGNED=1 放行（SHA256 已强制校验，但不防发布渠道被控）"
+        return 0
+    fi
+    die "$1。出于防篡改默认中止；确需在无签名环境下继续，请设置 NATPUNCH_ALLOW_UNSIGNED=1 后重试"
+}
 # timeout 不存在时（精简 Linux）直接调用，保证 KillMode 生效不被 command not found 打断
 tcmd() {
     if command -v timeout >/dev/null 2>&1; then
@@ -126,19 +145,64 @@ verify_package() {
         return 1
     }
     log "sha256 校验通过"
-    if ! fetch_to "$_base/SHA256SUMS.minisig" "$_dir/SHA256SUMS.minisig"; then
-        warn "发布未提供 SHA256SUMS.minisig，跳过签名校验（SHA256 已强制校验）"
-        return 0
+    _sig_ok=0
+    if fetch_to "$_base/SHA256SUMS.minisig" "$_dir/SHA256SUMS.minisig"; then
+        # 1) 系统 minisign（存在即强制校验，失败即中止）
+        if command -v minisign >/dev/null 2>&1; then
+            if minisign -Vm "$_dir/SHA256SUMS" -P "$NP_MINISIGN_PUBKEY" \
+                -x "$_dir/SHA256SUMS.minisig" >/dev/null 2>&1; then
+                log "minisign 签名校验通过"
+                _sig_ok=1
+            else
+                warn "minisign 签名校验失败"
+                return 1
+            fi
+        fi
+        # 2) 内置静态校验器（OpenWrt 等没有 minisign 包的环境）：与包同源下载，
+        #    但哈希必须与脚本内嵌信任锚一致才执行 —— 避免用同渠道的东西验自己。
+        if [ "$_sig_ok" -eq 0 ]; then
+            _msc_arch=""
+            case "$(uname -m)" in
+                x86_64|amd64) _msc_arch="amd64" ;;
+                aarch64|arm64) _msc_arch="arm64" ;;
+                armv7l|armv6l) _msc_arch="arm" ;;
+                mips|mipsel|mipsle) _msc_arch="mipsle" ;;
+            esac
+            case "$_msc_arch" in
+                amd64)  _msc_expect="$MSC_SHA256_amd64" ;;
+                arm64)  _msc_expect="$MSC_SHA256_arm64" ;;
+                arm)    _msc_expect="$MSC_SHA256_arm" ;;
+                mipsle) _msc_expect="$MSC_SHA256_mipsle" ;;
+                *)      _msc_expect="" ;;
+            esac
+            _msc_actual=""
+            if [ -n "$_msc_arch" ] && [ -n "$_msc_expect" ] \
+                && fetch_to "$_base/minisign-check-linux-$_msc_arch" "$_dir/msc"; then
+                if command -v sha256sum >/dev/null 2>&1; then
+                    _msc_actual="$(sha256sum "$_dir/msc" | awk '{print $1}')"
+                elif command -v shasum >/dev/null 2>&1; then
+                    _msc_actual="$(shasum -a 256 "$_dir/msc" | awk '{print $1}')"
+                fi
+                if [ -n "$_msc_actual" ] && [ "$_msc_expect" = "$_msc_actual" ]; then
+                    chmod +x "$_dir/msc" 2>/dev/null || true
+                    printf 'untrusted comment: minisign public key\n%s\n' "$NP_MINISIGN_PUBKEY" > "$_dir/natpunch.pub"
+                    if "$_dir/msc" "$_dir/natpunch.pub" "$_dir/SHA256SUMS.minisig" "$_dir/SHA256SUMS" >/dev/null 2>&1; then
+                        log "minisign 签名校验通过（内置静态校验器）"
+                        _sig_ok=1
+                    else
+                        warn "minisign 签名校验失败（内置校验器）"
+                        return 1
+                    fi
+                else
+                    warn "内置校验器哈希与内嵌信任锚不符（疑似被篡改），已拒绝执行"
+                    return 1
+                fi
+            fi
+        fi
     fi
-    if command -v minisign >/dev/null 2>&1; then
-        minisign -Vm "$_dir/SHA256SUMS" -P "$NP_MINISIGN_PUBKEY" \
-            -x "$_dir/SHA256SUMS.minisig" >/dev/null 2>&1 || {
-            warn "minisign 签名校验失败"
-            return 1
-        }
-        log "minisign 签名校验通过"
-    else
-        warn "系统没有 minisign，跳过签名校验（SHA256 已强制校验）"
+
+    if [ "$_sig_ok" -ne 1 ]; then
+        sig_unavailable "签名校验不可用（无 minisign 且内置校验器不可得）" || return 1
     fi
     return 0
 }

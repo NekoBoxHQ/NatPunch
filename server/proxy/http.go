@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type httpServer struct {
@@ -149,7 +150,11 @@ func (s *httpServer) handleHttp(c *conn.Conn, r *http.Request, br *bufio.Reader)
 		lk         *conn.Link
 		targetAddr string
 		lenConn    *conn.LenConn
-		isReset    bool
+		// resetFlag 每一代连接一个（keep-alive 换 host 会重开一条）。
+		// 原来是一个跨代共享的 bool：主循环为拆除旧连接置 true，而新连接的
+		// 转发 goroutine 一进来就把它刷成 false —— 旧 goroutine 退出时读到 false，
+		// 就会把还在用的 c 关掉。
+		resetFlag  *atomic.Bool
 		wg         sync.WaitGroup
 		remoteAddr string
 		// countedClient 记录当前已占用连接数的客户端（阶段三 #7）：
@@ -268,24 +273,29 @@ reset:
 		logs.Notice("connect to target %s error %s", lk.Host, err)
 		return
 	}
-	connClient = conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
+	// 本代连接的句柄显式传进 goroutine。原来闭包直接引用外层的 connClient / host，
+	// 而它们在 keep-alive 换 host 时会被重新赋值 —— 旧 goroutine 退出时的
+	// defer connClient.Close() 关掉的其实是**新**连接。
+	cc := conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
+	connClient = cc
+	rf := &atomic.Bool{}
+	resetFlag = rf
 
 	//read from inc-client
 	wg.Add(1)
-	go func() {
-		isReset = false
-		defer connClient.Close()
+	go func(cc io.ReadWriteCloser, h *file.Host, rf *atomic.Bool) {
+		defer cc.Close()
 		defer func() {
 			wg.Done()
-			if !isReset {
+			if !rf.Load() {
 				c.Close()
 			}
 		}()
 
-		if err1 := goroutine.CopyBuffer(c, connClient, host.Client.Flow, nil, host, "", goroutine.DirMuxToOutside); err1 != nil {
+		if err1 := goroutine.CopyBuffer(c, cc, h.Client.Flow, nil, h, "", goroutine.DirMuxToOutside); err1 != nil {
 			return
 		}
-	}()
+	}(cc, host, rf)
 
 	for {
 		//if the cache start and the request is in the cache list, return the cache
@@ -344,7 +354,10 @@ reset:
 			break
 		} else if host != hostTmp {
 			host = hostTmp
-			isReset = true
+			// 先置位本代的"被动拆除"标记（转发 goroutine 据此不再关 c），再关本代的 connClient
+			if resetFlag != nil {
+				resetFlag.Store(true)
+			}
 			connClient.Close()
 			goto reset
 		}

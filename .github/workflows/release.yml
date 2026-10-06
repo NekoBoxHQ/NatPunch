@@ -236,7 +236,7 @@ jobs:
             fi
             actual=$(sha256sum "$f" | awk '{print $1}')
             summary="${summary}MSC_SHA256_${arch}=\"${actual}\"\n"
-            for script in install.sh install_server.sh; do
+            for script in install.sh install_server.sh uninstall_client.sh; do
               pinned=$(grep -E "^MSC_SHA256_${arch}=" "$script" | head -1 | cut -d'"' -f2)
               if [ -z "$pinned" ]; then
                 echo "::warning::$script 的 MSC_SHA256_${arch} 为空（该架构不启用内置校验器）"
