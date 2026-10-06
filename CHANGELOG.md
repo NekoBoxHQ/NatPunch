@@ -2,6 +2,33 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.1（已发布）
+
+### 修复
+- **v26.9.112 里服务端不会启用 TLS 桥接（严重）**。重写 `cmd/natpunch/natpunch.go` 时漏掉了
+  `bridge.ServerTlsEnable = beego.AppConfig.DefaultBool("tls_enable", false)`，
+  于是 `ServerTlsEnable` 恒为 false：
+  - 服务端**不会在 `tls_bridge_port` 上建监听**（`bridge/bridge.go` 的 `if ServerTlsEnable`）；
+  - 面板的「TLS 一键命令」永远不出现、也不下发证书指纹（`web/controllers/base.go` 的 `useTls`）。
+
+  表现：客户端若在 unit 里带着 `-tls_enable=true`（此前通过面板 TLS 一键命令装的），
+  升级服务端后就再也连不上 —— 它一直在敲 8025，而那里没有监听；
+  `uninstall_client.sh update` 会保留原配置，所以**升级客户端也修不好**。
+  重新走一次面板的安装命令（v26.9.112 的面板会给不带 TLS 的命令）可以立刻绕开。
+
+  已补回该行，并新增配置键对账门禁（见下）防止同类漏读再次发生。
+- 清掉 p2p / secret / file 三种已删隧道模式遗留的两处死代码
+  （`bridge.SendLinkInfo` 里的 file 模式特判、`GetTaskStatus` 里的 secret 端口分支）。
+
+### 工程化
+- 新增 `test/config_keys_test.sh` 并接入 CI：`conf/natpunch.conf` 里生效的每个键、
+  以及 `cmd/natpunch/natpunch.go` 里默认配置模板的每个键，代码里都必须真的有人读它；
+  关键键（`tls_enable` / `bridge_*` / `log_*` / `web_*`）单独点名。
+  这类"漏读一行配置"编译得过、单测与 lint 也全绿，只有真去连才会暴露 —— 本版就是踩了这个。
+- `conf/natpunch.conf` 补上 `max_global_conn=0`（默认模板里有、随包配置漏了）。
+- README 更正「安装/更新走 `releases/latest/download`」这个已不准确的说法：实际取的是
+  **版本号最高**的发布，`/latest` 只在接口不可达时兜底。
+
 ## v26.9.112（已发布）
 
 ### 变更
