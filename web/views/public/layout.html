@@ -28,6 +28,11 @@
     <script src="{{.web_base_url}}/static/js/bootstrap.min.js?v={{.version}}"></script>
     <script src="{{.web_base_url}}/static/js/bootstrap-table.min.js?v={{.version}}"></script>
     <script src="{{.web_base_url}}/static/js/bootstrap-table-locale-all.min.js?v={{.version}}"></script>
+    <!-- 仪表盘（views/index/index.html）的 7 张图靠它画：那张模板只往 chartdatas 里塞配置，
+         真正的 echarts.init 在 static/js/language.js 的 setLang 里统一调用。
+         所以「模板里搜不到 echarts 字样」不代表没人用 —— v26.10.x 的某次清理就是这么误删的，
+         结果整个仪表盘的负载/CPU/内存/连接数/带宽/流量统计/连接类型 全成了空白框。 -->
+    <script src="{{.web_base_url}}/static/js/echarts.min.js?v={{.version}}"></script>
     <script src="{{.web_base_url}}/static/js/inspinia.js?v={{.version}}"></script>
     <script src="{{.web_base_url}}/static/js/flatpickr.min.js?v={{.version}}"></script>
     <script src="{{.web_base_url}}/static/js/flatpickr-l10n-zh.js?v={{.version}}"></script>

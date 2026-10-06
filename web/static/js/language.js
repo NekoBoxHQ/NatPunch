@@ -105,13 +105,25 @@
 			}
 		});
 
+		// 这个函数同时负责"翻译整页 langtag"和"画仪表盘图表"，所以画图这步
+		// 必须显式判 echarts 在不在：static/js/echarts.min.js 一旦缺失
+		// （layout.html 少一个 <script>，或打包时被当成"没人用"剔掉 —— v26.10.x
+		// 的某次清理就这么干过），这里会抛 ReferenceError，仪表盘的
+		// 负载/CPU/内存/连接数/带宽/流量统计/连接类型 七张图全变成空白框，
+		// 而除了开发者控制台没有任何提示。缺了就跳过并在控制台点名。
 		if ( !$.isEmptyObject(chartdatas) ) {
 			setchartlang(languages['content']['charts'],chartdatas);
-			for(var key in chartdatas){
-				if ($('#'+key).length == 0) continue;
-				if($.type(chartdatas[key]) == 'object')
-				charts[key] = echarts.init(document.getElementById(key));
-				charts[key].setOption(chartdatas[key], true);
+			if ( typeof echarts === 'undefined' ) {
+				console.error('echarts 未加载：static/js/echarts.min.js 缺失，仪表盘图表无法绘制');
+			} else {
+				for(var key in chartdatas){
+					if ($('#'+key).length == 0) continue;
+					// 非 object 的项：原来缺花括号，会走到 charts[key].setOption
+					// （charts[key] 还是 undefined）上抛 TypeError，一并跳过。
+					if($.type(chartdatas[key]) != 'object') continue;
+					charts[key] = echarts.init(document.getElementById(key));
+					charts[key].setOption(chartdatas[key], true);
+				}
 			}
 		}
 	}

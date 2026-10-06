@@ -67,6 +67,44 @@ done
 [ "$tn" -gt 0 ] || bad "没能从 cmd/natpunch/natpunch.go 里抠出默认模板的键"
 [ "$tn" -gt 0 ] && ok "默认模板 $tn 个键全部有代码读取"
 
+echo "== 4. 面板静态资源对账（模板引用的文件必须真的在） =="
+# 由来：v26.10.x 的一次「按面板实际入口清理不可达的页面与接口」把
+# web/static/js/echarts.min.js 当成"面板里没人用的图表库"删掉了，理由写的是
+# "仪表盘是数字条 + CSS"。但仪表盘（views/index/index.html）只是往 chartdatas
+# 里塞配置，真正的 echarts.init 在 static/js/language.js 的 setLang 里统一调用 ——
+# **模板里搜不到 "echarts" 字样**，于是被误判成无人使用。删掉之后仪表盘的
+# 负载/CPU/内存/连接数/带宽/流量统计/连接类型 七张图全成了空白框，
+# 而编译、CI、面板其它页面一切正常，只有人肉打开面板才看得见。
+# 所以这里改成机器核对，而不是靠"搜关键词猜有没有人用"。
+miss=0
+nref=0
+for r in $(grep -rhoE '/static/[A-Za-z0-9._/-]+' web/views/ 2>/dev/null | sort -u); do
+    nref=$((nref + 1))
+    [ -e "web$r" ] || { bad "模板引用了 $r，但 web$r 不存在（面板对应功能会静默变成空白）"; miss=1; }
+done
+if [ "$nref" -eq 0 ]; then
+    bad "没能从 web/views/ 里抠出任何 /static/ 引用（模板路径变了？）"
+elif [ "$miss" -eq 0 ]; then
+    ok "$nref 个静态资源引用全部存在"
+fi
+# 上面那条只能保证"引用了就存在"。如果连 layout.html 里的加载行也一起删掉，
+# 它就查不出来了 —— 所以再单独钉一条语义断言：有模板填 chartdatas，就得有画的人。
+if git grep -l 'chartdatas\[' -- web/views >/dev/null 2>&1; then
+    if grep -q 'static/js/echarts.min.js' web/views/public/layout.html \
+       && [ -f web/static/js/echarts.min.js ]; then
+        ok "有模板在用 chartdatas，layout.html 也确实加载了 echarts"
+    else
+        bad "有模板在用 chartdatas，但 echarts 没了（layout.html 的 <script> 被删 或 文件缺失）—— 仪表盘图表会全变空白框"
+    fi
+    if grep -q 'echarts\.init' web/static/js/language.js; then
+        ok "language.js 里确实在调 echarts.init（chartdatas 有人消费）"
+    else
+        bad "language.js 里没有 echarts.init —— chartdatas 填了也没人画"
+    fi
+else
+    ok "没有模板使用 chartdatas（这一版不需要 echarts）"
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "配置键对账失败"
