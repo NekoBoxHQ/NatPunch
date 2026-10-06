@@ -13,7 +13,7 @@
 - **面板 SSH 终端**：客户端列表一键进入（仅限本人/授权客户端，操作留审计日志），内置快捷命令
 - **一键部署**：OpenWrt / Linux 一键安装，注册为系统服务运行
 - **一键更新 / 卸载**：`update` 保留配置更新到最新版，卸载彻底清理
-- **自动获取最新版**：安装/更新走 `releases/latest/download`，无需指定版本号
+- **自动获取最新版**：安装/更新取**版本号最高**的发布，无需指定版本号（不用 `/latest` —— 它按发布时间排序，给旧分支补发 patch 后会指向旧版；接口不可达时才回退到 `/latest`）
 - **命名隔离**：客户端 `natpunch-client` 与服务端 `natpunch` 完全隔离，同机部署互不影响
 
 ## 可接受使用政策（AUP）
@@ -50,7 +50,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/i
 
 > 客户端命名为 **`natpunch-client`**（二进制 `/usr/bin/natpunch-client`、自启 `natpunch-client`），与服务端 **`natpunch`** 在进程名、自启名上完全隔离——同机部署服务端时，客户端的安装/卸载/更新均不会影响服务端运行。
 >
-> 安装与更新**自动获取最新发布**（`releases/latest/download`），无需指定版本号。
+> 安装与更新取**版本号最高**的发布（接口不可达时回退到 `releases/latest`），无需指定版本号。
 
 ### 卸载 / 更新客户端
 

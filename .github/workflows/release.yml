@@ -31,12 +31,20 @@ jobs:
           sh -n install.sh
           sh -n install_server.sh
           sh -n uninstall_client.sh
+          sh -n test/config_keys_test.sh
 
       - name: Shell logic self-test
         # uninstall_client.sh 是升级路径（会停掉客户端再拉起来），出错时是
         # "静默选错版本 / 静默放行坏包 / 内嵌脚本语法错走到一半断掉"，
         # 全部不会报错。见 test/upgrade_logic_test.sh 的说明。
         run: sh test/upgrade_logic_test.sh
+
+      - name: Config keys reconciliation
+        # conf/natpunch.conf 里生效的每个键、以及自动生成的默认配置模板里的每个键，
+        # 代码里都必须真的有人读它。由来：重写 cmd/natpunch/natpunch.go 时漏掉一行
+        # AppConfig 读取（tls_enable），导致服务端永远不开 TLS 桥接、面板也不再下发
+        # 证书指纹 —— 编译得过、CI 全绿，功能静默失效。见 test/config_keys_test.sh。
+        run: sh test/config_keys_test.sh
 
       - name: Unit tests (exclude integration)
         run: go test ./...

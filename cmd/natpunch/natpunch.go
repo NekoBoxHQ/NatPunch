@@ -94,6 +94,10 @@ func main() {
 		natpunch_mux.WriteQueueMax = v
 	}
 
+	// 桥接是否启用 TLS。面板的「TLS 一键命令」也用这个值判断要不要下发证书指纹
+	// （web/controllers/base.go 的 useTls），漏掉这行会让 TLS 桥接静默失效。
+	bridge.ServerTlsEnable = beego.AppConfig.DefaultBool("tls_enable", false)
+
 	common.InitPProfFromFile()
 	if level = beego.AppConfig.String("log_level"); level == "" {
 		level = "7"
