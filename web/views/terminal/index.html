@@ -227,17 +227,51 @@
                 try { ws.send(new TextEncoder().encode(data)); } catch (e) {}
             }
         });
-        // 右键粘贴（阻止默认菜单，读剪贴板写入终端）
-        boxEl[0].addEventListener('contextmenu', function (e) {
-            e.preventDefault();
-            if (navigator.clipboard && navigator.clipboard.readText) {
-                navigator.clipboard.readText().then(function (txt) {
-                    if (txt && ws && ws.readyState === 1) {
-                        try { ws.send(new TextEncoder().encode(txt)); } catch (e2) {}
-                    }
-                }).catch(function () {});
+        // 复制：优先剪贴板 API（只有 HTTPS / localhost 有），否则回退 execCommand。
+        // 面板多是 http://ip:8081 —— 非安全上下文下 navigator.clipboard 根本不存在，
+        // 只剩 execCommand('copy') 这一条路可走。
+        function copySelection() {
+            if (!term) { return false; }
+            var sel = term.getSelection();
+            if (!sel) { return false; }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(sel).catch(function () {});
+                return true;
             }
+            var ta = document.createElement('textarea');
+            ta.value = sel;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(ta);
+            return ok;
+        }
+
+        // 右键菜单：**有选中内容就放行浏览器自带菜单**（「复制」可用）；
+        // 只有没选中、且剪贴板 API 存在（HTTPS/localhost）时，才当「右键粘贴」。
+        // 旧实现无条件 preventDefault，把浏览器菜单整个吃掉 —— 而 HTTP 下面板又拿不到
+        // navigator.clipboard（readText 不存在），于是右键既不能复制也不能粘贴，完全失效。
+        boxEl[0].addEventListener('contextmenu', function (e) {
+            if (term && term.getSelection()) { return; }
+            if (!navigator.clipboard || !navigator.clipboard.readText) { return; }
+            e.preventDefault();
+            navigator.clipboard.readText().then(function (txt) {
+                if (txt && ws && ws.readyState === 1) {
+                    try { ws.send(new TextEncoder().encode(txt)); } catch (e2) {}
+                }
+            }).catch(function () {});
         });
+
+        // Ctrl+Shift+C / Ctrl+Insert 复制（Ctrl+C 要留给 SIGINT，不能占用）。
+        // 捕获阶段拦下，避免 xterm 再处理一遍。
+        boxEl[0].addEventListener('keydown', function (e) {
+            var hit = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c');
+            if (!hit && e.ctrlKey && e.key === 'Insert') { hit = true; }
+            if (hit && copySelection()) { e.preventDefault(); e.stopPropagation(); }
+        }, true);
     }
 
     function doConnect(clientId) {

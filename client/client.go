@@ -275,16 +275,12 @@ func (s *TRPClient) handleChan(src net.Conn) {
 			shellPath = "/bin/bash"
 		}
 		cmd := exec.Command(shellPath, "-l")
-		// 起始目录与电脑 SSH 登录一致：家目录（root 的 /root），避免面板终端起始显示 /
-		home := "/root"
-		if h, herr := os.UserHomeDir(); herr == nil && h != "" {
-			home = h
-		}
+		// 家目录与环境变量的构造见 shellenv.go —— 那里解释了为什么要拒绝 HOME="/"、
+		// 为什么 HOME/PS1/TERM/HOSTNAME 必须"先摘后加"。这块逻辑有单测（shellenv_test.go）。
+		home := shellHome()
 		cmd.Dir = home
-		// 注入 PS1 兜底：个别系统 profile/bash.bashrc 未设置 PS1 时，保证仍显示 root@host:~# 完整提示符
-		// 同时注入 HOME：bash 的 \w 需要 $HOME 判断家目录，否则显示 /root 而非 ~
-		// TERM=xterm-256color：与电脑 SSH 一致的标准终端类型，vim/top/htop 颜色与全屏布局正常
-		cmd.Env = append(os.Environ(), "HOME="+home, "PS1=\\u@\\h:\\w\\$ ", "TERM=xterm-256color")
+		hostname, _ := os.Hostname()
+		cmd.Env = buildShellEnv(os.Environ(), home, hostname)
 		f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 		if err != nil {
 			s.logWarn("start shell error %s", err.Error())
