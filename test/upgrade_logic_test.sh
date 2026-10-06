@@ -262,6 +262,28 @@ if grep -q "port + \" '\" + tlsFlag + \"'" web/views/client/list.html 2>/dev/nul
 else
     bad "部署命令里的 tlsFlag 没加引号 —— install.sh 只收得到第一个 flag，证书指纹会被丢掉"
 fi
+
+# 半配置体检：开了 TLS 却没指纹，两条路径都得喊出来。
+# 由来：v26.10.14 修的是「合成部署命令」那段代码，**救不到已经装好的** —— update 保留配置，
+# TLS_FLAG 是安装那一刻写进 /etc/natpunch.conf 的，之后不会被重写。所以两边都要查：
+# 安装时拦住新的，更新时把存量的喊出来。
+if grep -q 'TLS 已开但没给 -tls_fingerprint' install.sh; then
+    ok "install.sh 会喊出「开了 TLS 但没给指纹」"
+else
+    bad "install.sh 不检查半配置 —— 部署命令一旦漏带指纹，装出来的客户端不会有任何提示"
+fi
+if grep -q '当前配置开了 TLS 但没有 tls_fingerprint' uninstall_client.sh; then
+    ok "uninstall_client.sh 会体检存量配置的半配置"
+else
+    bad "uninstall_client.sh 不体检存量 —— 已装的缺指纹客户端永远修不到"
+fi
+# 位置断言：体检必须在**版本比对之前**。受影响的机器多半已经是"最新版"，
+# 会从"已是最新版本，无需更新"那一步直接 return，根本走不到后面的代码。
+if awk '/^do_update\(\) \{/,/pick_highest_version/' uninstall_client.sh | grep -q '当前配置开了 TLS 但没有 tls_fingerprint'; then
+    ok "体检在版本比对之前（否则已是最新的机器看不到提示）"
+else
+    bad "体检放在版本比对之后 —— 已是最新版的机器根本不会看到这个提示"
+fi
 # 存量机器靠更新路径迁移单元（不是所有人都会重装）
 if grep -q 'pre_execform' "$SRC" && grep -q 'exec /usr/bin/natpunch-client' "$SRC"; then
     ok "uninstall_client.sh 会把存量单元迁移到 exec 形态"

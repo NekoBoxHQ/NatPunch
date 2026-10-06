@@ -264,6 +264,21 @@ do_update() {
         warn "未检测到已安装客户端，请使用 install.sh 全新安装"
         exit 1
     fi
+    # 存量配置体检：开了 TLS 却没指纹 = 半配置（只防被动窃听、不防中间人）。
+    # v26.10.14 修的是「合成部署命令」的那段代码 —— **救不到已经装好的**：update 是保留
+    # 配置的，TLS_FLAG 是安装那一刻写进 /etc/natpunch.conf 的，之后不会被重写。
+    # 所以在这里把它喊出来。**必须放在版本比对之前**：受影响的机器多半已经是"最新版"，
+    # 会从那一步直接 return，根本走不到下面。
+    _tl="$(sed -n 's/^TLS_FLAG=//p' /etc/natpunch.conf 2>/dev/null | head -1 | tr -d "'\"")"
+    case "$_tl" in
+        *tls_enable=true*|*tls=true*)
+            case "$_tl" in
+                *tls_fingerprint=*) ;;
+                *) warn "当前配置开了 TLS 但没有 tls_fingerprint（只防被动窃听、不防中间人）。
+    不影响连接，但桥接证书没被固定。用面板对这台重新「部署」一次即可补上。" ;;
+            esac
+            ;;
+    esac
     ARCH="$(uname -m)"
     case "$ARCH" in
         x86_64|amd64)   PKG="linux_amd64_client.tar.gz" ;;

@@ -83,6 +83,21 @@ if [ -n "${TLS_FLAG:-}" ]; then
         esac
     done
 fi
+
+# 开了 TLS 却没带指纹 = 半配置：只防被动窃听、不防中间人。
+# 这不是理论问题：面板那两条部署命令一度没给 tlsFlag 加引号，被 shell 拆掉后指纹落到
+# $5，那段时间装出来的客户端**全部**缺指纹、日志每小时刷警告（真机 24 小时 136 条）。
+# 这里不做"没指纹就拒绝"（有人确实只想加密、不固定），但必须喊一声。
+case "${TLS_FLAG:-}" in
+    *tls_enable=true*|*tls=true*)
+        case "$TLS_FLAG" in
+            *tls_fingerprint=*) ;;
+            *) warn "TLS 已开但没给 -tls_fingerprint=<服务端指纹>：只防被动窃听、不防中间人。
+    面板的「TLS 命令」/「部署」按钮会带上；手工安装可从服务端取：
+      openssl x509 -in /opt/natpunch/conf/bridge.pem -outform DER | sha256sum" ;;
+        esac
+        ;;
+esac
 # ---------- 环境检测 ----------
 IS_OPENWRT=0
 [ -f /etc/openwrt_release ] && IS_OPENWRT=1
