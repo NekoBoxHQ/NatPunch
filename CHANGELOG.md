@@ -2,6 +2,33 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.12（已发布）
+
+### 修复
+- **客户端建连路径上没有超时** —— 链路一丢包就卡住两分多钟，而这正是这个工具要面对的常态。
+
+  客户端连服务端用的是**不带超时**的 `net.Dial` / `tls.Dial`；内核要耗完 SYN 重传才返回，
+  Linux 上能卡 **130 秒以上**。而外层重连是
+
+      for { Start(); sleep 5 }
+
+  结构 —— `Start()` 卡在拨号里，整个重连就停摆：不重试、也不理会 `closeClient`。链路抖动下这等于失联。
+
+  **改动**
+  - 新增 `connectTimeout = 10s` 与 `bridgeDialer`（同时显式设 `KeepAlive 15s`，让**半开**的连接
+    被内核探出来，而不是干等 mux 的 60 秒 `disconnect_timeout`）
+  - **明文 / TLS / SOCKS5 / HTTP 代理**四条拨号路径全部收口到它：`tls.Dial` → `tls.DialWithDialer`、
+    `net.Dial` → `bridgeDialer.Dial`、`proxy.FromURL` 的 forward dialer 也一并换掉
+  - 服务端 bridge 的 **LocalProxy** 分支同样是裸 `net.Dial("tcp", link.Host)`，改用
+    `net.DialTimeout` + `link.Option.Timeout`，与「转发到目标」那条路径保持同一口径
+  - 10 秒的取舍：跨运营商 / 3G 握手上限通常 1~3 秒，10 秒够用；真连不上时又能较快回到重试
+
+### 清理（多余代码）
+- `client/control.go`：删掉 `NewConn` 里 20 行注释掉的 proxyproto 实验代码
+- `server/proxy/https.go`：删掉 `HttpsServer.Start()` 里 **54 行被取代的旧实现**（上游那套
+  `https_just_proxy` / `httpsListenerMap` / 默认证书选择），功能已由上面 40~89 行的
+  SNI → 查 host → 选证书 → `handleHttps2` / `cert` 取代
+
 ## v26.10.11（已发布）
 
 ### 修复
