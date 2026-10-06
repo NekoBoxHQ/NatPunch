@@ -2,6 +2,38 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.9（已发布）
+
+### 修复
+- **升级流程会在 `/tmp` 里攒 `natpunch_apply.<pid>`，只增不减**（真机审计发现：sg 上 4 份，
+  其中 16:31 / 16:39 / 16:44 是三次**成功**升级各留一份；路由器上另有 2 份老版本留下的
+  `natpunch_update.*` 目录 —— 那台 `/tmp` 是 tmpfs，占的是内存）。
+
+  根因：update 的 apply 挂在 `systemd-run --unit=... --collect` 的独立单元里跑，而它的自删
+  写成 `( sleep 1; rm -f "$0" ) &` —— 主进程一退，systemd 立刻按 cgroup 清场，那个还在 sleep
+  的子 shell 被一起 SIGTERM，`rm` 永远执行不到。同机上的看门狗 GUARD 用的是同步 `rm -f "$0"`，
+  一份都没剩，正好是这组对照。已在 sg 上用真实机制做 A/B：同样交给 `systemd-run --collect`，
+  旧写法 4 秒后文件还在，EXIT 陷阱写法当场就没了。
+
+  另外自删原先只写在文件末尾，`BIN_SRC`/`TMP_DIR` 无效、写二进制失败、启动失败这三条
+  **快速退出路径**都是直接 `exit` 走的，一样会留。
+
+  改法：挂到 EXIT 陷阱的 `cleanup()` —— 清 `TMP_DIR` + 只删 `/tmp/natpunch_apply.*` 形态的
+  `$0`（不做无条件 `rm -f "$0"`，免得被别的形态调起来时删错东西）。不挂 `INT/TERM`：
+  那两个信号下陷阱跑完 shell 还会继续往下执行，半路把正在读的脚本删掉更危险。
+
+- `do_update` 里顺带扫掉历史遗留的 apply / guard / update 临时物。判据用**年龄**
+  （`find -mmin +60`），**不是**「那个 PID 还在不在」：文件名里的 PID 是**主脚本**的 `$$`，
+  而 apply / guard 是主脚本 fork 出去、早就换了 PID 的另外两个进程 —— 主脚本一退那个 PID
+  就是死的，按它判断会把**正在跑**的看门狗当遗留物删掉，而 `sh` 是边读边执行脚本文件的，
+  删了后半段就读不到，那条保险丝会在最需要它的那 90 秒里悄没声地失效。后缀另要求纯数字，
+  否则 `natpunch_update.*` 会连本次要写的 `natpunch_update.log` 一起匹配上。
+  已在 busybox（路由器）和 GNU find（sg）上实测：老目录被扫掉，新目录和日志都留着。
+
+### 测试
+- `test/upgrade_logic_test.sh` 新增第 10 节：APPLY 必须有 EXIT 陷阱、`rm -f "$0"` 只能有一处
+  且不带后台子 shell、清扫判据必须是年龄而不是 PID 存活（含反向断言）。
+
 ## v26.10.8（已发布）
 
 ### 修复
