@@ -2,11 +2,11 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/conn"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/NekoBoxHQ/NatPunch/lib/goroutine"
-	"errors"
 	"github.com/astaxie/beego/logs"
 	"io"
 	"net"
@@ -39,9 +39,6 @@ type flowConn struct {
 	io.ReadWriteCloser
 	fakeAddr net.Addr
 	host     *file.Host
-	flowIn   int64
-	flowOut  int64
-	once     sync.Once
 }
 
 func (rp *HttpReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -87,7 +84,6 @@ func (c *flowConn) Write(p []byte) (n int, err error) {
 }
 
 func (c *flowConn) Close() error {
-	//c.once.Do(func() { c.host.Flow.Add(c.flowIn, c.flowOut) })
 	return c.ReadWriteCloser.Close()
 }
 

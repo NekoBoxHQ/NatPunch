@@ -231,35 +231,6 @@ func (https *HttpsServer) NewHttps(l net.Listener, certFile string, keyFile stri
 	}()
 }
 
-// handle the https which is just proxy to other client
-func (https *HttpsServer) handleHttps(c net.Conn) {
-	hostName, rb := GetServerNameFromClientHello(c)
-	var targetAddr string
-	r := buildHttpsRequest(hostName)
-	var host *file.Host
-	var err error
-	if host, err = file.GetDb().GetInfoByHost(hostName, r); err != nil {
-		c.Close()
-		logs.Notice("the url %s can't be parsed!", hostName)
-		return
-	}
-	if err := https.CheckFlowAndConnNum(host.Client); err != nil {
-		logs.Warn("client id %d, host id %d, error %s, when https connection", host.Client.Id, host.Id, err.Error())
-		c.Close()
-		return
-	}
-	defer host.Client.AddConn()
-	if err = https.auth(r, conn.NewConn(c), host.Client.Cnf.U, host.Client.Cnf.P); err != nil {
-		logs.Warn("auth error", err, r.RemoteAddr)
-		return
-	}
-	if targetAddr, err = host.Target.GetRandomTarget(); err != nil {
-		logs.Warn(err.Error())
-	}
-	logs.Trace("new https connection,clientId %d,host %s,remote address %s", host.Client.Id, r.Host, c.RemoteAddr().String())
-	https.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, host.Client.Flow, host.Target.LocalProxy, nil, host)
-}
-
 type HttpsListener struct {
 	acceptConn     chan *conn.Conn
 	parentListener net.Listener

@@ -218,7 +218,12 @@ func (s *Mux) ping() {
 			case data = <-s.pingCh:
 				atomic.StoreUint32(&s.pingCheckTime, 0)
 			case <-s.closeChan:
-				break
+				// 必须 return 而不是 break：break 只跳出 select，循环会继续，
+				// 拿着已经失效的 data 再跑一轮（UnmarshalText 失败 → latency 变成一个
+				// 巨大的垃圾值写进统计）。当前恰好被 Close() 的先后顺序掩盖着
+				// （先 isClose.Store(true) 再往 closeChan 发信号，下一轮开头就 break 了），
+				// 但那是巧合不是约束 —— 顺序一换，select 会因 closeChan 常驻就绪而空转烧 CPU。
+				return
 			}
 			_ = now.UnmarshalText(data)
 			latency := time.Now().UTC().Sub(now).Seconds()

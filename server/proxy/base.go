@@ -25,7 +25,6 @@ type NetBridge interface {
 
 // BaseServer struct
 type BaseServer struct {
-	id           int
 	bridge       NetBridge
 	task         *file.Tunnel
 	errorContent []byte

@@ -29,7 +29,6 @@ var (
 	level           string
 	ver             = flag.Bool("version", false, "show current version")
 	confPath        = flag.String("conf_path", "", "set current confPath")
-	serverCmd       = flag.Bool("server", false, "NatPunch管理脚本")
 	natpunchLogPath = flag.String("log_path", "", "natpunch log path")
 )
 

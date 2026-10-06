@@ -21,11 +21,6 @@ const (
 	connectMethod   = 1
 	bindMethod      = 2
 	associateMethod = 3
-	// The maximum packet size of any udp Associate packet, based on ethernet's max size,
-	// minus the IP and UDP headers. IPv4 has a 20 byte header, UDP adds an
-	// additional 4 bytes.  This is a total overhead of 24 bytes.  Ethernet's
-	// max packet size is 1500 bytes,  1500 - 24 = 1476.
-	maxUDPPacketSize = 1476
 )
 
 const (
