@@ -22,13 +22,13 @@ const (
 	udpBuildTimeout       = 5 * time.Second
 )
 
-// udpSession 代表一个客户端 src addr ↔ npc 之间的 UDP 转发会话。
+// udpSession 代表一个客户端 src addr ↔ natpunch-client 之间的 UDP 转发会话。
 //
 // 同一个 src addr 在并发场景下可能被多个 goroutine 同时尝试建立会话。为避免
 // 重复建立，采用"原子占位"模式：第一个 goroutine 通过 sync.Map.LoadOrStore
 // 占位（此时 ready 通道未关闭），后续 goroutine 检测到占位后阻塞在 ready
 // 通道上等待会话就绪，然后复用同一个 target 转发数据。这样：
-//   - 同一 src addr 始终只有 1 条到 npc 的 mux stream
+//   - 同一 src addr 始终只有 1 条到 natpunch-client 的 mux stream
 //   - 只有"赢家"消耗一个 NowConn 配额，输家不再重复占用
 //   - 避免了 race window 期间的 NowConn 配额泄漏
 type udpSession struct {
@@ -182,7 +182,7 @@ func (s *UdpModeServer) dispatch(key string, sess *udpSession, data []byte, n in
 	}
 }
 
-// runSession 由占位赢家执行：建立到 npc 的 stream、发送首包、运行下行读循环。
+// runSession 由占位赢家执行：建立到 natpunch-client 的 stream、发送首包、运行下行读循环。
 // buf 由本函数负责归还。
 func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSession, buf []byte, n int) {
 	data := buf[:n]

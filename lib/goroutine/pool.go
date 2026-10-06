@@ -196,7 +196,7 @@ func copyConnGroup(group interface{}) {
 	if err != nil {
 		cg.src.Close()
 		cg.dst.Close()
-		//logs.Warn("close npc by copy from natpunch", err, c.connId)
+		//logs.Warn("close natpunch-client by copy from natpunch", err, c.connId)
 	}
 
 	//if conns.flow != nil {

@@ -41,7 +41,7 @@ func ViewsHTTPFS() http.FileSystem {
 	return slashFileSystem{fs: http.FS(ViewsFS)}
 }
 
-// diskFirstFS prefers a file on disk (for hot-added files such as npc
+// diskFirstFS prefers a file on disk (for hot-added files such as natpunch-client
 // binaries and install scripts) and falls back to the embedded FS.
 type diskFirstFS struct {
 	embedded http.FileSystem
@@ -63,7 +63,7 @@ func (d diskFirstFS) Open(name string) (http.File, error) {
 
 // StaticHTTPFS returns an http.FileSystem rooted at the embedded static/ directory
 // (so Open("css/style.css") maps to static/css/style.css), with on-disk
-// web/static/ taking priority so admins can drop extra files (e.g. npc
+// web/static/ taking priority so admins can drop extra files (e.g. natpunch-client
 // binaries) into web/static/ and serve them over /static/ without a rebuild.
 func StaticHTTPFS() http.FileSystem {
 	sub, err := fs.Sub(StaticFS, "static")

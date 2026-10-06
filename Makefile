@@ -13,7 +13,7 @@ build-server:
 	$(GO) build -ldflags "$(LDFLAGS)" -o natpunch ./cmd/natpunch/natpunch.go
 
 build-client:
-	$(GO) build -ldflags "$(LDFLAGS)" -o natpunch-client ./cmd/npc/npc.go
+	$(GO) build -ldflags "$(LDFLAGS)" -o natpunch-client ./cmd/natpunch-client/main.go
 
 vet:
 	$(GO) vet ./...
@@ -48,7 +48,7 @@ cross-server:
 cross-client:
 	@for a in $(CROSS_ARCHS); do \
 		echo "==> client linux/$$a"; \
-		GOOS=linux GOARCH=$$a CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o /tmp/natpunch-client-$$a ./cmd/npc/npc.go || exit 1; \
+		GOOS=linux GOARCH=$$a CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o /tmp/natpunch-client-$$a ./cmd/natpunch-client/main.go || exit 1; \
 	done
 
 # 冒烟：独立临时目录启动服务端，验证端口监听与仓库 conf 零污染

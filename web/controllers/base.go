@@ -99,9 +99,9 @@ func (s *BaseController) display(tpl ...string) {
 
 	s.Data["bridgeType"] = beego.AppConfig.String("bridge_type")
 	if common.IsWindows() {
-		s.Data["win"] = "npc.exe"
+		s.Data["win"] = "natpunch-client.exe"
 	} else {
-		s.Data["win"] = "./npc"
+		s.Data["win"] = "./natpunch-client"
 	}
 
 	s.Data["p"] = strconv.Itoa(server.Bridge.TunnelPort)

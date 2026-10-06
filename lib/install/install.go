@@ -232,21 +232,21 @@ func compareVersion(a, b string) int {
 	return 0
 }
 
-func UpdateNpc() {
+func UpdateClient() {
 	destPath, err := downloadLatest("client")
 	if err != nil {
 		log.Println("下载更新失败：", err)
 		return
 	}
 	//复制文件到对应目录
-	if _, err := copyStaticFile(destPath, "npc"); err != nil {
+	if _, err := copyStaticFile(destPath, "natpunch-client"); err != nil {
 		log.Println("替换客户端文件失败：", err)
 		return
 	}
 	fmt.Println("Update completed, please restart")
 }
 
-func UpdateNpcNew() {
+func UpdateClientNew() {
 	latest, err := fetchLatestVersion()
 	if err != nil {
 		log.Println("获取最新版本失败：", err)
@@ -263,7 +263,7 @@ func UpdateNpcNew() {
 		log.Println("下载更新失败：", err)
 		return
 	}
-	if err := copyStaticFileReplaceNpc(destPath, common.GetAppPath()); err != nil {
+	if err := copyStaticFileReplaceClient(destPath, common.GetAppPath()); err != nil {
 		log.Println("替换客户端文件失败：", err)
 		return
 	}
@@ -522,8 +522,8 @@ func copyStaticFileReplaceNatpunch(srcPath, descPath string) error {
 	return replaceBinFromPackage(srcPath, descPath, "natpunch")
 }
 
-func copyStaticFileReplaceNpc(srcPath, descPath string) error {
-	return replaceBinFromPackage(srcPath, descPath, "npc")
+func copyStaticFileReplaceClient(srcPath, descPath string) error {
+	return replaceBinFromPackage(srcPath, descPath, "natpunch-client")
 }
 
 func replaceBinFromPackage(srcPath, descPath, bin string) error {
@@ -619,7 +619,7 @@ func replaceExecutable(srcBin, destBin string) error {
 	return nil
 }
 
-func InstallNpc() {
+func InstallClient() {
 	path := common.GetInstallPath()
 	if !common.FileExists(path) {
 		err := os.Mkdir(path, 0755)
@@ -627,7 +627,7 @@ func InstallNpc() {
 			log.Fatal(err)
 		}
 	}
-	if _, err := copyStaticFile(common.GetAppPath(), "npc"); err != nil {
+	if _, err := copyStaticFile(common.GetAppPath(), "natpunch-client"); err != nil {
 		log.Fatalln(err)
 	}
 }

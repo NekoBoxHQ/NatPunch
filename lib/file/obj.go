@@ -36,7 +36,7 @@ type Client struct {
 	Id              int        //id
 	VerifyKey       string     //verify key
 	Addr            string     // client egress address as seen by server (RemoteAddr)
-	LocalAddr       string     // client private/LAN addresses reported by npc
+	LocalAddr       string     // client private/LAN addresses reported by natpunch-client
 	Remark          string     //remark
 	Status          bool       //is allow connect
 	IsConnect       bool       //is the client connect

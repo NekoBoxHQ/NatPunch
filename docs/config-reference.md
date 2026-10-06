@@ -111,7 +111,7 @@
 
 ## 客户端配置
 
-客户端通过 `-conf_path` 指定配置目录（如 `/etc/natpunch-client/conf/npc.conf`），常用项：
+客户端通过 `-conf_path` 指定配置目录（如 `/etc/natpunch-client/conf/natpunch.conf`），常用项：
 
 | 配置项 | 说明 |
 |---|---|

@@ -37,8 +37,8 @@ var (
 	password       = flag.String("password", "", "p2p password flag")
 	target         = flag.String("target", "", "p2p target")
 	localType      = flag.String("local_type", "p2p", "p2p target")
-	logPath        = flag.String("log_path", "", "npc log path")
-	debug          = flag.Bool("debug", true, "npc debug")
+	logPath        = flag.String("log_path", "", "natpunch-client log path")
+	debug          = flag.Bool("debug", true, "natpunch-client debug")
 	pprofAddr      = flag.String("pprof", "", "PProf debug addr (ip:port)")
 	stunAddr       = flag.String("stun_addr", "stun.stunprotocol.org:3478", "stun server address (eg:stun.stunprotocol.org:3478)")
 	ver            = flag.Bool("version", false, "show current version")
@@ -58,7 +58,7 @@ func main() {
 		return
 	}
 	if *logPath == "" {
-		*logPath = common.GetNpcLogPath()
+		*logPath = common.GetClientLogPath()
 	}
 	if common.IsWindows() {
 		*logPath = strings.Replace(*logPath, "\\", "\\\\", -1)
@@ -72,7 +72,7 @@ func main() {
 	// init service
 	options := make(service.KeyValue)
 	svcConfig := &service.Config{
-		Name:        "Npc",
+		Name:        "natpunch-client",
 		DisplayName: "NatPunch 内网穿透客户端",
 		Description: "一款轻量级、功能强大的内网穿透代理服务器。支持tcp、udp流量转发，支持内网http代理、内网socks5代理，同时支持snappy压缩、站点保护、加密传输、多路复用、header修改等。支持web图形化管理，集成多用户模式。",
 		Option:      options,
@@ -94,7 +94,7 @@ func main() {
 		}
 	}
 	svcConfig.Arguments = append(svcConfig.Arguments, "-debug=false")
-	prg := &npc{
+	prg := &clientApp{
 		exit: make(chan struct{}),
 	}
 	s, err := service.New(prg, svcConfig)
@@ -118,7 +118,7 @@ func main() {
 			flag.CommandLine.Parse(os.Args[2:])
 			client.RegisterLocalIp(*serverAddr, *verifyKey, *connType, *proxyUrl, *registerTime)
 		case "update":
-			install.UpdateNpc()
+			install.UpdateClient()
 			return
 		case "nat":
 			c := stun.NewClient()
@@ -150,7 +150,7 @@ func main() {
 		case "install":
 			service.Control(s, "stop")
 			service.Control(s, "uninstall")
-			install.InstallNpc()
+			install.InstallClient()
 			err := service.Control(s, os.Args[1])
 			if err != nil {
 				logs.Error("Valid actions: %q\n%s", service.ControlAction, err.Error())
@@ -178,15 +178,28 @@ func main() {
 	s.Run()
 }
 
-type npc struct {
+type clientApp struct {
 	exit chan struct{}
 }
 
-func (p *npc) Start(s service.Service) error {
+// firstEnv 按顺序返回第一个非空环境变量值。
+// 新名优先，旧名（npc 时期）继续识别 —— 容器 / 编排里既有
+// NPC_SERVER_ADDR / NPC_SERVER_VKEY 若被静默丢弃，表现是「服务起来了但连不上」，
+// 属于最不该靠人肉排查的一类故障。
+func firstEnv(env map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := env[k]; v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func (p *clientApp) Start(s service.Service) error {
 	go p.run()
 	return nil
 }
-func (p *npc) Stop(s service.Service) error {
+func (p *clientApp) Stop(s service.Service) error {
 	close(p.exit)
 	if service.Interactive() {
 		os.Exit(0)
@@ -194,13 +207,13 @@ func (p *npc) Stop(s service.Service) error {
 	return nil
 }
 
-func (p *npc) run() error {
+func (p *clientApp) run() error {
 	defer func() {
 		if err := recover(); err != nil {
 			const size = 64 << 10
 			buf := make([]byte, size)
 			buf = buf[:runtime.Stack(buf, false)]
-			logs.Warning("npc: panic serving %v: %v\n%s", err, string(buf))
+			logs.Warning("natpunch-client: panic serving %v: %v\n%s", err, string(buf))
 		}
 	}()
 	run()
@@ -238,10 +251,10 @@ func run() {
 	}
 	env := common.GetEnvMap()
 	if *serverAddr == "" {
-		*serverAddr, _ = env["NPC_SERVER_ADDR"]
+		*serverAddr = firstEnv(env, "NATPUNCH_SERVER_ADDR", "NPC_SERVER_ADDR")
 	}
 	if *verifyKey == "" {
-		*verifyKey, _ = env["NPC_SERVER_VKEY"]
+		*verifyKey = firstEnv(env, "NATPUNCH_SERVER_VKEY", "NPC_SERVER_VKEY")
 	}
 	if *verifyKey != "" && *serverAddr != "" && *configPath == "" {
 		client.SetTlsEnable(*tlsEnable)
@@ -348,12 +361,12 @@ func inputCmd() {
 			}
 
 			for _, item := range cmdArray {
-				startNpcServer(item)
+				startClientServer(item)
 			}
 
 		} else {
 			if flag == "5" {
-				install.UpdateNpcNew()
+				install.UpdateClientNew()
 				inputCmd()
 			} else {
 				systemService(flag)
@@ -362,7 +375,7 @@ func inputCmd() {
 	}
 }
 
-func startNpcServer(startCmd string) {
+func startClientServer(startCmd string) {
 	var serAddr string
 	var vkey string
 	var tls string
@@ -461,7 +474,7 @@ func systemService(flag string) {
 
 func systemPro(flag string, serAddr string, vkey string, tls bool) {
 	// init service
-	prg := &npc{
+	prg := &clientApp{
 		exit: make(chan struct{}),
 	}
 	options := make(service.KeyValue)
@@ -482,12 +495,12 @@ func systemPro(flag string, serAddr string, vkey string, tls bool) {
 		}
 		svcConfig.Arguments = append(svcConfig.Arguments, "-debug=false")
 
-		*logPath = common.GetNpcLogPath()
+		*logPath = common.GetClientLogPath()
 		if common.IsWindows() {
 			*logPath = strings.Replace(*logPath, "\\", "\\\\", -1)
 		}
 
-		*logPath = strings.Replace(*logPath, "npc.log", "npc-"+vkey+".log", -1)
+		*logPath = strings.Replace(*logPath, "natpunch-client.log", "natpunch-client-"+vkey+".log", -1)
 		svcConfig.Arguments = append(svcConfig.Arguments, "-log_path="+*logPath)
 
 		logs.NewLogger()
@@ -496,7 +509,7 @@ func systemPro(flag string, serAddr string, vkey string, tls bool) {
 		logs.SetLogFuncCallDepth(3)
 		logs.SetLogger(logs.AdapterFile, `{"level":`+*logLevel+`,"filename":"`+*logPath+`","daily":false,"maxlines":100000,"color":true}`)
 
-		install.InstallNpc()
+		install.InstallClient()
 		err := service.Control(s, "install")
 		if err != nil {
 			fmt.Println("隧道["+vkey+"]安装到系统服务失败", err)

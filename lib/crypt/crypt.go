@@ -53,7 +53,7 @@ func Base64Decoding(encodedString string) (string, error) {
 	return "", errors.New("快捷启动命令错误，请检查")
 }
 
-// joinQuickCmd 把 "name|addr|vkey|tls[|fp]" 拼成 "addr vkey tls[ fp]"（startNpcServer 用 Fields 解析）
+// joinQuickCmd 把 "name|addr|vkey|tls[|fp]" 拼成 "addr vkey tls[ fp]"（startClientServer 用 Fields 解析）
 func joinQuickCmd(s string) (string, error) {
 	parts := strings.Split(s, "|")
 	if len(parts) < 4 {

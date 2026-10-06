@@ -358,7 +358,7 @@ func GetLocalUdpAddr() (net.Conn, error) {
 
 // parse template
 func ParseStr(str string) (string, error) {
-	tmp := template.New("npc")
+	tmp := template.New("natpunch-client")
 	var err error
 	w := new(bytes.Buffer)
 	if tmp, err = tmp.Parse(str); err != nil {
@@ -516,7 +516,7 @@ func ipFromAddr(addr net.Addr) net.IP {
 	}
 }
 
-// GetLocalIPs returns IPv4 addresses useful for identifying the npc host.
+// GetLocalIPs returns IPv4 addresses useful for identifying the natpunch-client host.
 // Prefers the local IP of conn (path toward natpunch). Falls back to the outbound
 // interface and finally an interface scan.
 // The connection path and outbound interface IPs are trusted as-is (only

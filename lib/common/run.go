@@ -82,13 +82,13 @@ func GetLogPathCurrentPath() string {
 	return path
 }
 
-// interface npc log file path
-func GetNpcLogPath() string {
+// interface natpunch-client log file path
+func GetClientLogPath() string {
 	var path string
 	if IsWindows() {
-		path = filepath.Join(GetAppPath(), "npc.log")
+		path = filepath.Join(GetAppPath(), "natpunch-client.log")
 	} else {
-		path = "/var/log/npc.log"
+		path = "/var/log/natpunch-client.log"
 	}
 	return path
 }

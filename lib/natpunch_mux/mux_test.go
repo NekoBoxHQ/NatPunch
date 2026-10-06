@@ -413,13 +413,13 @@ func TestNewMux(t *testing.T) {
 	go func() {
 		m2 := NewMux(conn2, "tcp", 60)
 		for {
-			//log.Println("npc starting accept")
+			//log.Println("natpunch-client starting accept")
 			c, err := m2.Accept()
 			if err != nil {
 				log.Println(err)
 				continue
 			}
-			//log.Println("npc accept success ")
+			//log.Println("natpunch-client accept success ")
 			c2, err := net.Dial("tcp", "127.0.0.1:80")
 			if err != nil {
 				log.Println(err)
@@ -433,7 +433,7 @@ func TestNewMux(t *testing.T) {
 					buf := make([]byte, 32<<10)
 					_, err = io.CopyBuffer(c2, c, buf)
 					//if err != nil {
-					//	log.Println("close npc by copy from natpunch", err, c.connId)
+					//	log.Println("close natpunch-client by copy from natpunch", err, c.connId)
 					//}
 					_ = c2.Close()
 					_ = c.Close()
@@ -441,7 +441,7 @@ func TestNewMux(t *testing.T) {
 				buf := make([]byte, 32<<10)
 				_, err = io.CopyBuffer(c, c2, buf)
 				//if err != nil {
-				//	log.Println("close npc by copy from server", err, c.connId)
+				//	log.Println("close natpunch-client by copy from server", err, c.connId)
 				//}
 				_ = c2.Close()
 				_ = c.Close()
@@ -485,7 +485,7 @@ func TestNewMux(t *testing.T) {
 				buf := make([]byte, 32<<10)
 				_, err = io.CopyBuffer(conns, tmpCpnn, buf)
 				//if err != nil {
-				//	log.Println("close natpunch by copy from npc ", tmpCpnn.connId, err)
+				//	log.Println("close natpunch by copy from natpunch-client ", tmpCpnn.connId, err)
 				//}
 				_ = conns.Close()
 				_ = tmpCpnn.Close()

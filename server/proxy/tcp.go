@@ -1,5 +1,5 @@
-//go:build !npcgui
-// +build !npcgui
+//go:build !natpunchgui
+// +build !natpunchgui
 
 package proxy
 

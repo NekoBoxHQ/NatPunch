@@ -124,7 +124,7 @@ jobs:
             tar -czf ../linux_${{ matrix.goarch }}_server.tar.gz .
           else
             go build -ldflags "-s -w -extldflags -static -X github.com/NekoBoxHQ/NatPunch/lib/version.VERSION=$TAG" \
-              -o out/natpunch-client ./cmd/npc/npc.go
+              -o out/natpunch-client ./cmd/natpunch-client/main.go
             BIN="$(pwd)/out/natpunch-client"
             tar -czf linux_${{ matrix.goarch }}_client.tar.gz -C out natpunch-client
           fi

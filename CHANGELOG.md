@@ -2,6 +2,21 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## 未发布
+
+### 变更
+- **客户端标识全面统一为 `natpunch-client`**：源码标识、构建目录、服务单元名、面板提示、日志与临时文件名里残留的旧客户端标识全部改名，与服务端 `natpunch` 对称。README / LICENSE / NOTICE 的上游归属声明按要求保持不变。
+- **修复：面板给出的客户端启动命令与实际二进制名不符**。面板此前显示 `npc.exe` / `./npc`，而发布包里的可执行文件叫 `natpunch-client`，照抄命令必然「找不到文件」；现改为 `natpunch-client.exe` / `./natpunch-client`。
+- **修复：菜单里的「更新客户端」必然失败**。`lib/install` 在更新包中查找的是名为 `npc` 的文件，而发布包内是 `natpunch-client`，因此 100% 报「更新包中未找到可执行文件」。改名后与 `os.Executable()` 自替换、SHA256 校验链路一致。
+- **修复文档**：`docs/config-reference.md` 里客户端配置路径写成 `conf/npc.conf`，实际是 `conf/natpunch.conf`。
+- 构建标签 `npcgui` / `npcsdk` 改名为 `natpunchgui` / `natpunchsdk`，构建目录 `cmd/npc/` 改为 `cmd/natpunch-client/`（入口文件 `main.go`）。
+
+### 兼容
+- 环境变量新增 `NATPUNCH_SERVER_ADDR` / `NATPUNCH_SERVER_VKEY`，同时继续识别旧的 `NPC_SERVER_ADDR` / `NPC_SERVER_VKEY` —— 容器 / 编排里既有变量若被静默丢弃，表现是「服务起来了但连不上」，属于最难排查的一类故障。
+- vkey 临时文件改名为 `natpunch-client-vkey.txt`，读取时回退旧名 `npc_vkey.txt`，升级后首次启动不会因读不到而直接退出。
+- **自行构建 GUI / SDK 的命令需同步改**：`go build -tags natpunchgui ...`、`go build -tags natpunchsdk ...`（CI 与 Makefile 已更新）。
+- 安装脚本里对 OpenWrt `firewall.allow-npc-download` / `/opt/npc_download` 的清理**保持不变**：那是上游安装器留下的历史残留，改名会让清理失效。
+
 ## v26.9.111（已发布）
 
 ### 变更

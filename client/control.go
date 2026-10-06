@@ -62,7 +62,13 @@ func GetTaskStatus(path string) {
 		log.Fatalln(err)
 	}
 	//read now vKey and write to server
-	if f, err := common.ReadAllFromFile(filepath.Join(common.GetTmpPath(), "npc_vkey.txt")); err != nil {
+	vkeyPath := filepath.Join(common.GetTmpPath(), "natpunch-client-vkey.txt")
+	f, err := common.ReadAllFromFile(vkeyPath)
+	if err != nil {
+		// 兼容旧命名：早期版本存在 npc_vkey.txt，直接改名会让升级后首次启动在这里 Fatalln
+		f, err = common.ReadAllFromFile(filepath.Join(common.GetTmpPath(), "npc_vkey.txt"))
+	}
+	if err != nil {
 		log.Fatalln(err)
 	} else if _, err := c.Write([]byte(crypt.Md5(string(f)))); err != nil {
 		log.Fatalln(err)
@@ -180,7 +186,7 @@ re:
 		}
 		vkey = string(b)
 	}
-	os.WriteFile(filepath.Join(common.GetTmpPath(), "npc_vkey.txt"), []byte(vkey), 0600)
+	os.WriteFile(filepath.Join(common.GetTmpPath(), "natpunch-client-vkey.txt"), []byte(vkey), 0600)
 
 	//send hosts to server
 	for _, v := range cnf.Hosts {
