@@ -349,6 +349,113 @@ else
     fi
 fi
 
+echo "== 11. install.sh 覆盖安装不能切断自己的来路 =="
+# 维护者的 SSH 常常是「服务端 → 客户端隧道 → 目标机」进来的。原来的顺序是
+#   停止客户端 → 换二进制 → 写配置 → 注册自启 → 启动
+# 从隧道进来跑时，第一步 killall 一执行会话就断，脚本被 SIGHUP 带走 —— 后面全部做不到，
+# 重连回去还是旧配置旧版本（真机实测确认：守护会把客户端拉回来，但那次安装是白做的）。
+# 所以现在必须满足两条：
+#   1) 不碰运行进程的动作（换二进制 / 写配置 / 写单元 / enable）全部排在 stop 之前；
+#   2) stop + start 交给一个脱离会话的进程。
+extract_heredoc_from() {   # <结束标记> <文件>
+    awk -v tag="$1" '
+        !grab && $0 ~ ("<<." tag ".") { grab = 1; next }
+        grab && $0 == tag { exit }
+        grab { print }
+    ' "$2"
+}
+if grep -q '^needs_detach()' "$INSTALL"; then
+    ok "install.sh 有 needs_detach 判定"
+else
+    bad "install.sh 没有 needs_detach —— 从隧道进来跑会把自己切断"
+fi
+n_bin="$(grep -n 'mv -f "\$BIN_TMP" "\$BIN"' "$INSTALL" | head -n1 | cut -d: -f1)"
+n_cfg="$(grep -n '^cat > "\$CONF" <<EOF' "$INSTALL" | head -n1 | cut -d: -f1)"
+n_rst="$(grep -n '^# ---------- 重启' "$INSTALL" | head -n1 | cut -d: -f1)"
+if [ -n "$n_bin" ] && [ -n "$n_rst" ] && [ "$n_bin" -lt "$n_rst" ]; then
+    ok "换二进制排在停止服务之前（被打断时新版也已落盘）"
+else
+    bad "换二进制的顺序不对（$n_bin vs 重启段 $n_rst）"
+fi
+if [ -n "$n_cfg" ] && [ -n "$n_rst" ] && [ "$n_cfg" -lt "$n_rst" ]; then
+    ok "写配置排在停止服务之前"
+else
+    bad "写配置的顺序不对（$n_cfg vs 重启段 $n_rst）"
+fi
+# 反向：直接覆盖正在运行的二进制会 ETXTBSY，必须走「临时名 + rename」
+if grep -q 'cp -f "\$BIN_SRC" "\$BIN"' "$INSTALL"; then
+    bad "install.sh 直接 cp 覆盖运行中的二进制 —— ETXTBSY，且此时客户端还活着"
+else
+    ok "二进制走临时名 + rename（不碰运行中进程的 inode）"
+fi
+# 注册段里不能出现启动动作，否则又跑到 stop 前面去了
+reg="$(awk '/^# ---------- 注册自启/{f=1} /^# ---------- 重启/{f=0} f' "$INSTALL")"
+if printf '%s\n' "$reg" | grep -qE '"\$INIT" start|systemctl (restart|start)'; then
+    bad "注册自启段里夹着启动动作 —— 顺序又被打回去了"
+else
+    ok "注册自启段只写文件 + enable，不启动"
+fi
+ih="$(extract_heredoc_from APPLYEOF "$INSTALL")"
+if [ -z "$ih" ]; then
+    bad "没能从 $INSTALL 抠出脱离会话的重启脚本"
+else
+    ok "install.sh 内嵌了脱离会话的重启脚本"
+    if printf '%s\n' "$ih" | sh -n 2>/dev/null; then
+        ok "内嵌重启脚本 sh -n 通过"
+    else
+        bad "内嵌重启脚本有语法错 —— 覆盖安装走到一半会断在那儿"
+    fi
+    # 变量必须靠位置参数传进去：外层用的是 <<'APPLYEOF'（要挡住 $ 展开），
+    # 靠名字直接引用会全部是空的。
+    if printf '%s\n' "$ih" | grep -q 'INIT="\$1"'; then
+        ok "内嵌脚本用位置参数取配置（heredoc 是引号形式，挡了展开）"
+    else
+        bad "内嵌脚本没有从位置参数取变量 —— 引号 heredoc 下那些值会是空的"
+    fi
+    if printf '%s\n' "$ih" | grep -v '^[[:space:]]*#' | grep -A1 'rm -f "\$0"' | grep -q '^) &$'; then
+        bad "内嵌脚本把自删丢回后台子 shell —— --collect 会连坐掉它"
+    else
+        ok "内嵌脚本的自删是同步的"
+    fi
+    # 健康判据不能用 systemctl is-active：Restart=always 的崩溃循环里进程每隔几秒活一下，
+    # 采样恰好落在那一下就会返回 active。真机验过：sg 上一个"拒绝启动"的坏配置
+    # （tls_strict=true 无指纹）NRestarts 已经到 10，脚本却报 "restarted with the new build"。
+    # NAT 机上这个假 OK 等于把黑盒子说成好的。
+    if printf '%s\n' "$ih" | grep -v '^[[:space:]]*#' | grep -q 'systemctl is-active'; then
+        bad "内嵌脚本用 is-active 判活着 —— 崩溃循环里会误报成功"
+    else
+        ok "内嵌脚本没用 is-active 判活着（它是崩溃循环的假阳性源）"
+    fi
+    if printf '%s\n' "$ih" | grep -q '\[ "\$s1" = "\$s2" \]'; then
+        ok "内嵌脚本连采两次 PID 比对（崩溃循环里每次采样都是新 PID）"
+    else
+        bad "内嵌脚本没有「两次采样 PID 相同」的稳定性判据"
+    fi
+    if printf '%s\n' "$ih" | grep -q 'BIN_BAK' && printf '%s\n' "$ih" | grep -q 'rolled back'; then
+        ok "起不来会回滚到旧二进制 / 旧配置"
+    else
+        bad "失败后没有回滚 —— NAT 机上会静默变成黑盒子"
+    fi
+fi
+if grep -q 'BIN_BAK="/tmp/natpunch-bin.old' "$INSTALL" \
+   && grep -q 'CONF_BAK="/tmp/natpunch-conf.old' "$INSTALL"; then
+    ok "install.sh 会留一份旧二进制 / 旧配置给回滚脚本"
+else
+    bad "install.sh 没留回滚备份 —— 内嵌脚本拿到的是空路径，回滚无从下手"
+fi
+# 每份二进制备份 15MB。真机上跑两趟就攒了四份 —— 必须有人负责收掉：
+# 前台路径归 install.sh 的 EXIT 陷阱，脱离路径归内嵌脚本（成功时删，回滚也失败才留）。
+if grep -q 'KEEP_BAK' "$INSTALL" && grep -q -- '-mmin +60' "$INSTALL"; then
+    ok "回滚备份有主：前台由陷阱收、遗留物按年龄清"
+else
+    bad "回滚备份没人清 —— 每覆盖装一次就往 /tmp 里留 15MB"
+fi
+if [ -n "$ih" ] && printf '%s\n' "$ih" | grep -A3 'rolled back' | grep -q 'rm -f "\$BIN_BAK"'; then
+    ok "回滚成功后内嵌脚本会收掉备份"
+else
+    bad "回滚成功后备份还留着 —— /tmp 会被一份 15MB 撑爆"
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"

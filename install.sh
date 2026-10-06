@@ -34,8 +34,47 @@ sig_unavailable() {
 }
 cleanup() {
     [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ] && rm -rf "$TMP_DIR" 2>/dev/null || true
+    # 二进制是「先写临时名再 rename」，中途被打断会留下半个 .new
+    [ -n "${BIN_TMP:-}" ] && [ -f "${BIN_TMP:-}" ] && rm -f "$BIN_TMP" 2>/dev/null || true
+    # 回滚备份只在「交给脱离会话的收尾脚本」时才留 —— 那之后归它管，
+    # 由它成功时删、回滚也失败时才留。前台路径没人接手，这里必须收掉：
+    # 每份二进制 15MB，真机上跑两趟就攒了四份。
+    if [ "${KEEP_BAK:-0}" != "1" ]; then
+        [ -n "${BIN_BAK:-}" ] && rm -f "$BIN_BAK" 2>/dev/null || true
+        [ -n "${CONF_BAK:-}" ] && rm -f "$CONF_BAK" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT INT TERM
+
+# ---------- 这次安装会不会切断我们自己？ ----------
+# 维护者的 SSH 常常是「服务端 → 客户端隧道 → 目标机」进来的：客户端一停，承载这次
+# 会话的隧道就断，前台脚本被 SIGHUP 带走 —— 后面的「写配置 / 起服务」一步都执行不到。
+# 所以凡是会碰运行中客户端的动作，要么挪到非破坏性的位置，要么交给脱离会话的进程。
+client_running() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "$BIN" >/dev/null 2>&1
+    elif command -v pidof >/dev/null 2>&1; then
+        pidof natpunch-client >/dev/null 2>&1
+    else
+        ps w 2>/dev/null | grep -v grep | grep -q "$BIN"
+    fi
+}
+needs_detach() {
+    client_running || return 1
+    # 没有 SSH_CONNECTION = 不是 SSH 会话。面板的网页终端就是客户端自己 fork 出来的
+    # PTY（conn type=shell），杀掉客户端一样会断，按「会断」处理。
+    [ -z "${SSH_CONNECTION:-}" ] && return 0
+    _peer="${SSH_CONNECTION%% *}"
+    # 隧道拨到 127.0.0.1:22 时，sshd 看到的对端就是本机回环
+    case "$_peer" in
+        127.*|::1|0.0.0.0) return 0 ;;
+    esac
+    # 隧道转发到某个本机地址（LAN IP）时，对端会是本机自己的地址
+    for _ip in $(hostname -I 2>/dev/null) $(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1); do
+        [ -n "$_ip" ] && [ "$_peer" = "$_ip" ] && return 0
+    done
+    return 1
+}
 # ---------- 参数解析 ----------
 # 兼容三种写法：带 -- 分隔、带 --openwrt 前缀、或都不带（推荐）
 # --openwrt 仅为历史兼容标记，安装时自动检测 /etc/openwrt_release，带不带行为完全一致
@@ -288,24 +327,40 @@ tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"
 tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || die "解压失败"
 BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client | head -n1)"
 [ -n "$BIN_SRC" ] || die "未找到 natpunch-client 二进制"
-# ---------- 安装前清理既有客户端进程/服务 ----------
-log "停止既有 natpunch-client（如有）..."
-if command -v killall >/dev/null 2>&1; then
-    killall natpunch-client 2>/dev/null || true
-elif command -v pkill >/dev/null 2>&1; then
-    pkill -x natpunch-client 2>/dev/null || true
-fi
-[ -f "$INIT" ] && "$INIT" stop 2>/dev/null || true
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl stop natpunch-client 2>/dev/null || true
-fi
-sleep 1
+# 清掉历史遗留的回滚备份（安装被打断、或回滚本身也失败时才会留下）。
+# **按年龄判据，不看 PID**：文件名里的 PID 是当时那个脚本的 $$，它早没了；
+# 按 PID 判断会把正在被收尾脚本使用的备份删掉（同款教训见 uninstall_client.sh）。
+find /tmp -maxdepth 1 -name 'natpunch-bin.old.*' -mmin +60 -exec rm -f {} \; 2>/dev/null
+find /tmp -maxdepth 1 -name 'natpunch-conf.old.*' -mmin +60 -exec rm -f {} \; 2>/dev/null
 # ---------- 安装二进制 ----------
-install -m 0755 "$BIN_SRC" "$BIN" 2>/dev/null || {
-    cp -f "$BIN_SRC" "$BIN" || die "安装到 $BIN 失败"
-    chmod 755 "$BIN"
-}
+# 原子替换：先写到同目录的临时名，再 rename 覆盖过去。
+# 直接 `cp -f` 到正在运行的二进制上会 ETXTBSY（文本忙）；rename 换的是目录项，
+# 跑着的进程依旧握着旧 inode —— 所以这一步**可以放在停服务之前**，
+# 让最容易失败的那段（下载之后的写盘）发生在隧道还活着的时候。
+log "安装二进制..."
+BIN_TMP="$BIN.new.$$"
+# 留一份旧的：脱离会话的收尾脚本起不来时要拿它回滚。没有旧的就留空 = 首次安装。
+BIN_BAK=""
+if [ -f "$BIN" ]; then
+    BIN_BAK="/tmp/natpunch-bin.old.$$"
+    cp -f "$BIN" "$BIN_BAK" 2>/dev/null || BIN_BAK=""
+fi
+if command -v install >/dev/null 2>&1; then
+    install -m 0755 "$BIN_SRC" "$BIN_TMP" 2>/dev/null \
+        || cp -f "$BIN_SRC" "$BIN_TMP" || die "写入 $BIN_TMP 失败"
+else
+    cp -f "$BIN_SRC" "$BIN_TMP" || die "写入 $BIN_TMP 失败"
+fi
+chmod 755 "$BIN_TMP" 2>/dev/null || true
+mv -f "$BIN_TMP" "$BIN" || die "替换 $BIN 失败"
+BIN_TMP=""
 # ---------- 写配置 ----------
+# 同样留一份旧的给回滚用
+CONF_BAK=""
+if [ -f "$CONF" ]; then
+    CONF_BAK="/tmp/natpunch-conf.old.$$"
+    cp -f "$CONF" "$CONF_BAK" 2>/dev/null || CONF_BAK=""
+fi
 log "写入配置 $CONF"
 umask 077
 # TLS_FLAG 必须整体加单引号：init.d 用 `. /etc/natpunch.conf` source 本文件，
@@ -386,8 +441,8 @@ stop() {
 INIT
     fi
     chmod +x "$INIT"
+    # 只注册，不启动：启动统一放到下面「重启」那一步（可能要脱离会话做）
     "$INIT" enable 2>/dev/null || true
-    "$INIT" start
 else
     if ! command -v systemctl >/dev/null 2>&1; then
         die "非 OpenWrt 环境且未找到 systemctl"
@@ -439,6 +494,157 @@ SVC
     if ! systemctl enable natpunch-client >/dev/null 2>&1; then
         warn "systemctl enable 失败，客户端不会开机自启"
     fi
+fi
+# ---------- 重启（从这里开始可能切断本会话） ----------
+# 上面几步都**不碰运行中的进程**，这是有意排的顺序：
+#   · 二进制是先写临时名再 rename，跑着的进程仍然握着旧 inode；
+#   · 配置只在客户端启动时读一次，覆盖写不影响正在跑的那个；
+#   · 写 unit / init.d / enable / daemon-reload 都不重启服务。
+# 所以先做完这些、再动 stop —— 就算脚本在这里被 SIGHUP 带走，**新版本也已经躺在磁盘上了**：
+# systemd 用 EnvironmentFile，任何一次重启都会读到新配置；procd/systemd 本来就会把进程拉回来
+# （真机实测：killall 之后 systemd 6 秒、procd 8 秒把它拉回来）。
+if needs_detach; then
+    APPLY="/tmp/natpunch_install_run.$$"
+    DETACH_LOG="/tmp/natpunch-install.log"
+    cat > "$APPLY" <<'APPLYEOF'
+#!/bin/sh
+# install.sh 的收尾：停旧 → 起新 → 自检（起不来就回滚）。**必须脱离会话执行** ——
+# 如果这次 SSH 正是从这台客户端的隧道里进来的，第一句 killall 会把承载会话的隧道
+# 一起切断，前台脚本随即被 SIGHUP 带走，「起新」永远执行不到。
+INIT="$1"; IS_OPENWRT="$2"; BIN="$3"; LOG="$4"; BIN_BAK="$5"; CONF_BAK="$6"
+CONF=/etc/natpunch.conf
+exec >>"$LOG" 2>&1
+set -x
+
+# 取当前客户端进程号。
+# **不能用 `systemctl is-active` 判断活着**：Restart=always 的崩溃循环里进程每隔几秒
+# 活一下，采样恰好落在那一下就会返回 active —— 真机上验过，一个"拒绝启动"的坏配置
+# 被报成了 "restarted with the new build"（假 OK，NAT 机上等于把黑盒子说成好的）。
+svc_pid() {
+    if command -v pidof >/dev/null 2>&1; then
+        pidof natpunch-client 2>/dev/null
+    else
+        pgrep -f "$BIN" 2>/dev/null
+    fi
+}
+svc_stop() {
+    killall natpunch-client 2>/dev/null || true
+    if [ -f "$INIT" ]; then "$INIT" stop 2>/dev/null || true; fi
+    if command -v systemctl >/dev/null 2>&1; then systemctl stop natpunch-client 2>/dev/null; fi
+    sleep 1
+}
+svc_start() {
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        "$INIT" start
+    else
+        systemctl restart natpunch-client
+    fi
+}
+# 连采两次，PID 一样才算真稳住了；崩溃循环里每次采样都是新的 PID。
+svc_steady() {
+    s1=$(svc_pid)
+    sleep 4
+    s2=$(svc_pid)
+    [ -n "$s2" ] && [ "$s1" = "$s2" ]
+}
+
+sleep 1
+svc_stop
+svc_start
+
+ok=0
+i=0
+while [ "$i" -lt 4 ]; do
+    if svc_steady; then ok=1; break; fi
+    i=$((i + 1))
+done
+
+if [ "$ok" -eq 1 ]; then
+    echo "==> install: client restarted with the new build"
+    [ -n "$BIN_BAK" ] && rm -f "$BIN_BAK" 2>/dev/null
+    [ -n "$CONF_BAK" ] && rm -f "$CONF_BAK" 2>/dev/null
+else
+    echo "!! install: client did NOT stay up (crash loop?)"
+    if [ -n "$BIN_BAK" ] || [ -n "$CONF_BAK" ]; then
+        echo "!! install: rolling back to the previous binary / config"
+        if [ -n "$BIN_BAK" ] && [ -f "$BIN_BAK" ]; then
+            # 同样走 rename：直接 cp 覆盖运行中的二进制会 ETXTBSY
+            cp -f "$BIN_BAK" "$BIN.rb" 2>/dev/null \
+                && chmod 755 "$BIN.rb" 2>/dev/null \
+                && mv -f "$BIN.rb" "$BIN" 2>/dev/null
+        fi
+        if [ -n "$CONF_BAK" ] && [ -f "$CONF_BAK" ]; then
+            cp -f "$CONF_BAK" "$CONF" 2>/dev/null
+        fi
+        svc_stop
+        svc_start
+        sleep 6
+        if svc_steady; then
+            echo "==> install: rolled back, the previous build is running again"
+            # 回滚成功 = 备份没用了。不清就会一份 15MB 地堆在 /tmp 里（真机上跑两趟攒了四份）
+            [ -n "$BIN_BAK" ] && rm -f "$BIN_BAK" 2>/dev/null
+            [ -n "$CONF_BAK" ] && rm -f "$CONF_BAK" 2>/dev/null
+        else
+            echo "!! install: rollback ALSO failed - backups kept for manual recovery:"
+            echo "    $BIN_BAK  $CONF_BAK"
+        fi
+    else
+        echo "!! install: nothing to roll back to (first install) - check the logs below"
+    fi
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        logread 2>/dev/null | grep natpunch-client | tail -n 20
+    else
+        journalctl -u natpunch-client -n 20 --no-pager 2>/dev/null
+    fi
+fi
+# 同步自删，且只删自己那个名字。
+# **不能写成 `( sleep 1; rm -f "$0" ) &`**：在 systemd-run --collect 之下，主进程一退
+# cgroup 立刻清场，还在 sleep 的子 shell 会被一起 SIGTERM，rm 永远执行不到
+# （同一个坑 2026-10-06 已在 uninstall_client.sh 里踩过，v26.10.9 修）。
+case "$0" in
+    /tmp/natpunch_install_run.*) rm -f "$0" 2>/dev/null || true ;;
+esac
+APPLYEOF
+    chmod +x "$APPLY"
+    : > "$DETACH_LOG"
+    _started=0
+    if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        if systemd-run --unit="natpunch-install-$$" --collect \
+                /bin/sh "$APPLY" "$INIT" "$IS_OPENWRT" "$BIN" "$DETACH_LOG" "$BIN_BAK" "$CONF_BAK" >/dev/null 2>&1; then
+            _started=1
+        fi
+    fi
+    if [ "$_started" -eq 0 ]; then
+        if command -v setsid >/dev/null 2>&1; then
+            setsid /bin/sh "$APPLY" "$INIT" "$IS_OPENWRT" "$BIN" "$DETACH_LOG" "$BIN_BAK" "$CONF_BAK" >/dev/null 2>&1 &
+        else
+            nohup /bin/sh "$APPLY" "$INIT" "$IS_OPENWRT" "$BIN" "$DETACH_LOG" "$BIN_BAK" "$CONF_BAK" >/dev/null 2>&1 &
+        fi
+    fi
+    # 备份移交给脱离会话的收尾脚本：本脚本退出时别再删（它可能还没跑完）
+    KEEP_BAK=1
+    echo "==> 二进制 / 配置 / 自启都已就位"
+    echo "==> 「停旧 + 起新」已交给一个脱离会话的进程执行"
+    echo "==> 本会话若正走这台客户端的隧道，约 1 秒后断开；重连后执行："
+    echo "      cat $DETACH_LOG"
+    exit 0
+fi
+# 本会话不经过这条隧道（SSH 对端不是本机地址）—— 前台直接做，结果打给你看
+log "停止既有 natpunch-client（如有）..."
+if command -v killall >/dev/null 2>&1; then
+    killall natpunch-client 2>/dev/null || true
+elif command -v pkill >/dev/null 2>&1; then
+    pkill -x natpunch-client 2>/dev/null || true
+fi
+[ -f "$INIT" ] && "$INIT" stop 2>/dev/null || true
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop natpunch-client 2>/dev/null || true
+fi
+sleep 1
+log "启动..."
+if [ "$IS_OPENWRT" -eq 1 ]; then
+    "$INIT" start
+else
     systemctl restart natpunch-client
 fi
 # ---------- 验证 ----------
