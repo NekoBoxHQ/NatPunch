@@ -188,6 +188,22 @@ case "$co" in
         bad "cleanup_old_backups 没清 \$CONF_DIR 的备份 —— /opt/natpunch/conf.bak.* 会无限累积" ;;
 esac
 
+echo "== 7. 升级流程必须刷新自启单元 =="
+# 背景：unit 文件里的加固（procd 的 respawn retry、systemd 的 StartLimitIntervalSec）
+# 只有在「写单元」那一步才生效。upgrade 原先只换二进制、完全不碰 unit —— 于是这些加固
+# 永远到不了已安装的机器。真机上就是这么积的：服务端的 unit 从装完那天起就没刷新过，
+# procd 的 retry 一直停在 5、systemd 一直缺 StartLimitIntervalSec=0，
+# 而客户端那边更麻烦 —— 单元是 install.sh 写的，升级用的却是 uninstall_client.sh，
+# 两个脚本互不知道对方写不写单元，那条链路没法在这里一并保住（本次只修服务端）。
+upg="$(extract_fn upgrade "$SERVER_SRC")"
+if [ -z "$upg" ]; then
+    bad "没能从 $SERVER_SRC 抠出 upgrade()"
+elif printf '%s\n' "$upg" | grep -q 'register_autostart'; then
+    ok "install_server.sh 的 upgrade() 会刷新自启单元"
+else
+    bad "install_server.sh 的 upgrade() 不刷新自启单元 —— unit 里的加固到不了存量机器"
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"

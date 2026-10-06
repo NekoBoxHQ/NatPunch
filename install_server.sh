@@ -540,6 +540,11 @@ upgrade() {
     set_kv http_proxy_port  0
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
+    # 重新注册自启单元。原先 upgrade 完全不碰 unit（只有 install 才写），于是
+    # **单元文件里的加固改动永远到不了已安装的机器** —— 真机上就是这么积下来的：
+    # 装完那天写的 unit 一直没刷新，procd 的 retry 停在 5、systemd 缺 StartLimitIntervalSec=0。
+    # 必须在 start 之前调：register_autostart 里带 daemon-reload，写晚了 systemd 仍按旧单元起进程。
+    register_autostart
     start
     # 升级成功后才清理旧备份（失败/回滚路径不清理，保证可回滚）
     cleanup_old_backups
