@@ -68,6 +68,26 @@ else
         "v26.10.0" "次版本优先于补丁号"
 fi
 
+# 三份实现必须一致。三个脚本各自独立下发（raw 一行 wget|sh），没法共享文件，
+# 这份函数是靠复制维持的 —— 最典型的失手就是只改了一处（比如只把 install.sh 的
+# sort -V 换掉），另外两个继续按字典序挑版本，静默降级。
+ph_body() {
+    awk '/^pick_highest_version\(\)/{g=1} g&&/awk .$/{a=1} a{print} a&&/^    .$/{exit}' "$1"
+}
+pb1="$(ph_body install.sh | md5sum | cut -d' ' -f1)"
+pb2="$(ph_body install_server.sh | md5sum | cut -d' ' -f1)"
+pb3="$(ph_body "$SRC" | md5sum | cut -d' ' -f1)"
+if [ -n "$pb1" ] && [ "$pb1" = "$pb2" ] && [ "$pb2" = "$pb3" ]; then
+    ok "三个脚本里的 pick_highest_version 代码体一致"
+else
+    bad "三个脚本里的 pick_highest_version 代码体不一致（install=${pb1:0:8} server=${pb2:0:8} client=${pb3:0:8}）—— 只改了一处？"
+fi
+if grep -q 'sort -V' install.sh install_server.sh "$SRC" 2>/dev/null | grep -v '^[^:]*:[0-9]*: *#' | grep -q .; then
+    bad "还有脚本在用 sort -V 挑版本 —— busybox < 1.32 上会退化成字典序"
+else
+    ok "没有脚本再用 sort -V 挑版本（只剩注释里提到它）"
+fi
+
 echo "== 3. 两个脚本的基础语法 =="
 for f in "$INSTALL" "$SRC"; do
     if sh -n "$f" 2>/tmp/_selfcheck_err; then ok "$f"; else bad "$f: $(cat /tmp/_selfcheck_err)"; fi
@@ -225,6 +245,24 @@ if grep -q 'pre_directexec' "$SRC" && grep -q 'natpunch-client -server=\${SERVER
     ok "uninstall_client.sh 会把存量单元里的 ExecStart 改回直接 exec"
 else
     bad "uninstall_client.sh 不修存量单元的 ExecStart —— 更新后仍会留下残留客户端"
+fi
+
+echo "== 9. 面板终端 WS 必须关掉 beego 的模板渲染 =="
+# 背景：beego 在 action 返回后判断 `!ResponseWriter.Started && Output.Status == 0` 才渲染
+# 模板；WebSocket 的 hijack 不经过 beego 的 Write/WriteHeader，两个条件恒成立 →
+# 它去渲染不存在的 views/terminalcontroller/ws.tpl → template.go:75 panic → 被 recover
+# 抓住打一串 [C] 堆栈。成功的终端会话结束时同样走这个判断，于是"每开一次终端 panic 一次"。
+# 真机实测：升级前当天 24 条 [C] 全来自 /terminal/ws，而当天真实 [E] 是 0 条 ——
+# 这些堆栈一直在掩盖真错误。
+# ws_controllers 那条 Go 测试（web/controllers/terminal_test.go）钉的是"闸门本身"，
+# 这里钉的是"Ws() 有没有用这个闸门"——两者缺一不可。
+WS_SRC="web/controllers/terminal.go"
+if [ ! -f "$WS_SRC" ]; then
+    bad "找不到 $WS_SRC"
+elif awk '/func \(s \*TerminalController\) Ws\(\) \{/{g=1} g&&/^}/{exit} g' "$WS_SRC" | grep -q 's.EnableRender = false'; then
+    ok "TerminalController.Ws() 里关了模板渲染"
+else
+    bad "Ws() 里没有 s.EnableRender = false —— 面板终端会重新变成每开一次 panic 一次"
 fi
 
 echo

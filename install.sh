@@ -96,6 +96,49 @@ fetch() {
         curl -fsSL --max-time 60 --retry 2 -o "$2" "$1"
     fi
 }
+# pick_highest_version：从 GitHub releases 的 JSON 里挑版本号最高的 tag。
+#
+# 两个坑都绕开了：
+#   1) /releases/latest 是"按发布时间最新"，不是"版本号最高"。给旧分支补发一个 patch
+#      之后 latest 会指向旧版 —— 升级反而降级。
+#   2) 不用 `sort -V`：busybox 的 sort 直到 1.32 才支持 -V，更老的 OpenWrt 上会静默
+#      退化成字典序，于是 v26.9.9 排在 v26.9.111 后面。
+# 三个脚本各自独立下发（raw 一行 wget|sh），没法共享文件，这份实现与
+# uninstall_client.sh / install_server.sh 里的逐字一致，改一处要改三处。
+pick_highest_version() {
+    # 逐段做数值比较，不拼成一个大数字串去比 —— awk 的双精度只有 15~17 位有效数字，
+    # 40 位的补零串一比就退化成"只看前几位"。
+    # 按 "{" 切块再逐个找 tag_name，而不是按行取字段：那样只对"每个 tag 独占一行"
+    # 的响应成立，碰上一行里塞多个对象的（压缩过的 JSON）就会只看见第一个、静默选错。
+    awk '
+        function setbest(v, a, n,   j) {
+            bestv = v; bn = n
+            for (j = 1; j <= n; j++) b[j] = a[j]
+        }
+        function consider(v,   s, n, i, a, m, x, y) {
+            s = v; sub(/^v/, "", s)
+            n = split(s, a, ".")
+            for (i = 1; i <= n; i++) if (a[i] !~ /^[0-9]+$/) return
+            if (bestv == "") { setbest(v, a, n); return }
+            m = (n > bn) ? n : bn
+            for (i = 1; i <= m; i++) {
+                x = (i <= n)  ? a[i] + 0 : 0
+                y = (i <= bn) ? b[i] + 0 : 0
+                if (x > y) { setbest(v, a, n); return }
+                if (x < y) return
+            }
+        }
+        {
+            c = split($0, chunk, "{")
+            for (k = 1; k <= c; k++) {
+                if (chunk[k] !~ /"tag_name"[[:space:]]*:/) continue
+                split(chunk[k], q, "\"")
+                if (q[4] != "") consider(q[4])
+            }
+        }
+        END { if (bestv != "") print bestv }
+    '
+}
 # ---------- 获取版本（按版本号取最高，latest 按发布时间排序会指向旧版） ----------
 log "获取最新版本..."
 VER=""
@@ -105,7 +148,8 @@ if [ "$HAS_WGET" -eq 1 ]; then
 else
     VER_LIST="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
 fi
-VER="$(echo "$VER_LIST" | grep '"tag_name"' | sed 's/.*: *"\([^"]*\)".*/\1/' | grep -E '^v[0-9]' | sort -V | tail -n1)"
+VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
+echo "    版本选取：${VER:-回退 latest}"
 echo "    ${VER:-最新发布}"
 # ---------- 下载 ----------
 if [ -n "$VER" ]; then

@@ -391,6 +391,41 @@ fetch() {
         curl) curl -fsSL --max-time 10 "$1" 2>/dev/null ;;
     esac
 }
+# pick_highest_version：从 GitHub releases 的 JSON 里挑版本号最高的 tag。
+# 不用 `sort -V`：busybox 的 sort 直到 1.32 才支持 -V，更老的 OpenWrt 上会静默退化成
+# 字典序，v26.9.9 排到 v26.9.111 后面 → 升级反而降级。
+# 三个脚本各自独立下发（raw 一行 wget|sh），没法共享文件，这份实现与
+# install.sh / uninstall_client.sh 里的逐字一致，改一处要改三处。
+pick_highest_version() {
+    awk '
+        function setbest(v, a, n,   j) {
+            bestv = v; bn = n
+            for (j = 1; j <= n; j++) b[j] = a[j]
+        }
+        function consider(v,   s, n, i, a, m, x, y) {
+            s = v; sub(/^v/, "", s)
+            n = split(s, a, ".")
+            for (i = 1; i <= n; i++) if (a[i] !~ /^[0-9]+$/) return
+            if (bestv == "") { setbest(v, a, n); return }
+            m = (n > bn) ? n : bn
+            for (i = 1; i <= m; i++) {
+                x = (i <= n)  ? a[i] + 0 : 0
+                y = (i <= bn) ? b[i] + 0 : 0
+                if (x > y) { setbest(v, a, n); return }
+                if (x < y) return
+            }
+        }
+        {
+            c = split($0, chunk, "{")
+            for (k = 1; k <= c; k++) {
+                if (chunk[k] !~ /"tag_name"[[:space:]]*:/) continue
+                split(chunk[k], q, "\"")
+                if (q[4] != "") consider(q[4])
+            }
+        }
+        END { if (bestv != "") print bestv }
+    '
+}
 get_latest_ver() {
     # 按版本号取最高：GitHub releases/latest 按【发布时间】排序，并行/连续发版时
     # 会指向后发布但版本号更低的 tag（如 98 晚于 99 发布 → latest=98）。
@@ -398,7 +433,7 @@ get_latest_ver() {
     V=""
     RESP=$(fetch "https://api.github.com/repos/$REPO/releases?per_page=20") || RESP=""
     if [ -n "${RESP:-}" ]; then
-        V=$(echo "$RESP" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | grep -E '^v[0-9]' | sort -V | tail -n1)
+        V=$(printf '%s\n' "$RESP" | pick_highest_version)
     fi
     if [ -z "${V:-}" ]; then
         RESP=$(fetch "https://api.github.com/repos/$REPO/tags?per_page=10") || RESP=""
