@@ -551,6 +551,43 @@ svc_steady() {
     s2=$(svc_pid)
     [ -n "$s2" ] && [ "$s1" = "$s2" ]
 }
+# 有没有真的连上服务端？
+# **这一层才是「指纹对不对」的证据。** 指纹不匹配根本握不上手（服务端日志里是
+# `remote error: tls: bad certificate`），而客户端进程会**稳稳地活着**（连不上就每 5 秒重试）
+# —— 只看"活着"会把它报成成功，那又是把黑盒子说成好的。
+#
+# **判据看 socket，不看日志。** 两个坑先后踩过：
+#   1) 只翻日志尾部：上一轮的成功记录还在里面 → 这一轮没连上也被判成功；
+#   2) 拿 `start vkey:` 当分隔：OpenWrt 上 logread 的缓冲区真机出现过整个停在几十分钟前，
+#      照它判等于一直读旧记录。
+# 客户端连上就有一条指向服务端桥端口的 ESTABLISHED；握手失败的会被它自己关掉。
+# 这个判据不看日志、不受缓冲区影响，也立刻可用（不用等日志刷出来）。
+svc_connected() {
+    _p=$(sed -n 's/^PORT=//p' /etc/natpunch.conf 2>/dev/null | head -1 | tr -dc '0-9')
+    [ -n "$_p" ] || return 1
+    # **要连着看几眼，不能只采一次。** 指纹不匹配时 TCP 连接是能建立起来的
+    # （pin 是在握手过程中才失败），那一刻 socket 就是 ESTABLISHED —— 单次采样可能正好
+    # 撞上这个窗口，把"握手失败"读成"连上了"。真机上就这么骗过去一次。
+    # 客户端 5 秒才重试一次，所以取 6 次跨 9 秒：真连上的次次都在（列序见下），
+    # 握手失败的一整个周期里只有几十毫秒是 ESTAB，基本采不到。
+    #
+    # 列序记录：ss 的状态在最前（`ESTAB 0 0 1.2.3.4:5 5.6.7.8:8025`），
+    # netstat 的在最后（`tcp 0 0 1.2.3.4:5 5.6.7.8:8025 ESTABLISHED`）——
+    # 别写成 "ESTAB.*:端口"，那在 netstat 上永远匹配不到（真机上就漏判过）。
+    _hits=0
+    _k=0
+    while [ "$_k" -lt 6 ]; do
+        if command -v ss >/dev/null 2>&1; then
+            _t=$(ss -tn 2>/dev/null)
+        else
+            _t=$(netstat -tn 2>/dev/null)
+        fi
+        printf '%s\n' "$_t" | grep 'ESTAB' | grep -qE ":$_p([^0-9]|$)" && _hits=$((_hits + 1))
+        _k=$((_k + 1))
+        [ "$_k" -lt 6 ] && sleep 1
+    done
+    [ "$_hits" -ge 4 ]
+}
 
 sleep 1
 svc_stop
@@ -563,10 +600,32 @@ while [ "$i" -lt 4 ]; do
     i=$((i + 1))
 done
 
+# 连上了才算数。svc_connected 自己要看 9 秒，所以最多重试 3 轮（约 27 秒）。
+conn=0
 if [ "$ok" -eq 1 ]; then
-    echo "==> install: client restarted with the new build"
+    j=0
+    while [ "$j" -lt 3 ]; do
+        if svc_connected; then conn=1; break; fi
+        j=$((j + 1))
+    done
+fi
+
+if [ "$ok" -eq 1 ] && [ "$conn" -eq 1 ]; then
+    echo "==> install: client is up AND connected to the server"
     [ -n "$BIN_BAK" ] && rm -f "$BIN_BAK" 2>/dev/null
     [ -n "$CONF_BAK" ] && rm -f "$CONF_BAK" 2>/dev/null
+elif [ "$ok" -eq 1 ]; then
+    # 进程活着但没连上。**不自动回滚**：这可能只是这台此刻网络不通，
+    # 回滚会把"新版本已经装好"这个好消息一起撤掉。喊出来，让人看一眼再定。
+    echo "!! install: client is RUNNING but never reached the server"
+    echo "!!   check -tls_fingerprint / -vkey, or whether the box has network at all"
+    [ -n "$BIN_BAK" ] && rm -f "$BIN_BAK" 2>/dev/null
+    [ -n "$CONF_BAK" ] && rm -f "$CONF_BAK" 2>/dev/null
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        logread 2>/dev/null | grep -i natpunch-client | tail -n 20
+    else
+        journalctl -u natpunch-client -n 20 --no-pager 2>/dev/null
+    fi
 else
     echo "!! install: client did NOT stay up (crash loop?)"
     if [ -n "$BIN_BAK" ] || [ -n "$CONF_BAK" ]; then
@@ -643,8 +702,9 @@ APPLYEOF
     if grep -q '__NATPUNCH_INSTALL_DONE__' "$DETACH_LOG" 2>/dev/null; then
         grep 'install: ' "$DETACH_LOG" | grep -v '^+' | tail -n 3
         echo "      （完整日志：$DETACH_LOG）"
-        if grep -q 'install: client restarted with the new build' "$DETACH_LOG" \
-                || grep -q 'install: rolled back' "$DETACH_LOG"; then
+        # 只有「起来了、而且连上了服务端」才算安装成功 —— 连上本身就证明指纹是对的。
+        # 回滚成功也只是"没装成，但机器还是好的"，退出码给 1，别让调用方以为升级生效了。
+        if grep -q 'install: client is up AND connected to the server' "$DETACH_LOG"; then
             exit 0
         fi
         exit 1

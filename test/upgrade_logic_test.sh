@@ -450,11 +450,28 @@ else
     # 真机上踩过：收尾脚本 echo 的是 "install: client restarted with the new build"，
     # 父进程 grep 的是 "install: restarted with the new build" —— 少了 "client"，
     # 结果安装明明成功却 exit 1。两行静态看都很正常，只有跑起来才露。
-    if printf '%s\n' "$ih" | grep -q 'install: client restarted with the new build' \
-       && grep -q "grep -q 'install: client restarted with the new build'" "$INSTALL"; then
+    if printf '%s\n' "$ih" | grep -q 'install: client is up AND connected to the server' \
+       && grep -q "grep -q 'install: client is up AND connected to the server'" "$INSTALL"; then
         ok "父进程判成功的字符串与收尾脚本打印的完全一致"
     else
         bad "父进程判成功的字符串对不上收尾脚本打印的 —— 成功了也会 exit 1"
+    fi
+    # 自检必须验到「连上服务端」这一层。
+    # 指纹不匹配是握不上手的，而客户端进程会**稳稳活着**（每 5 秒重试一次）——
+    # 只看"活着"就会把指纹填错的机器报成安装成功，NAT 机上等于把黑盒子说成好的。
+    if printf '%s\n' "$ih" | grep -q 'ESTAB'; then
+        ok "自检验到「真的连上服务端」—— 这一层才证明指纹生效"
+    else
+        bad "自检只验进程活着 —— 指纹填错也会被报成成功"
+    fi
+    # 而且这条判据**不能看日志**。两个坑先后踩过：
+    #   1) 只翻日志尾部：上一轮的成功记录还在里面 → 这一轮没连上也被判成功；
+    #   2) 拿 `start vkey:` 当分隔：OpenWrt 上 logread 的缓冲区真机出现过整个停在几十分钟前。
+    # 现在看 socket（连上就有一条指向桥端口的 ESTABLISHED），不吃日志、不受缓冲区影响。
+    if printf '%s\n' "$ih" | grep -q 'Successful connection with server'; then
+        bad "连接判据还在翻日志 —— 上一轮连上了，这一轮没连上也会被判成功"
+    else
+        ok "连接判据看 socket，不翻日志（不受缓冲区和上一轮记录影响）"
     fi
     # 健康判据不能用 systemctl is-active：Restart=always 的崩溃循环里进程每隔几秒活一下，
     # 采样恰好落在那一下就会返回 active。真机验过：sg 上一个"拒绝启动"的坏配置
