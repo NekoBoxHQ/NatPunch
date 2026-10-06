@@ -2,6 +2,49 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.10（已发布）
+
+### 修复
+- **面板首页（仪表盘）的七张图全成了空白框** —— 负载 / 核心(CPU) / 内存 / 连接数 / 带宽 /
+  流量统计 / 连接类型，标题在、图没了（"图形界面没有了"）。真机实测
+  `https://<面板>/static/js/echarts.min.js` → **HTTP 404**，而 `style.css` 是 200（203920 字节），
+  其它静态资源也都正常，只有这一个 404。
+
+  根因是 `76fe94e`「按面板实际入口清理不可达的页面与接口」里的一条判断写错了：
+
+  > `static/js/echarts.min.js`：面板没有任何图表用它（仪表盘是数字条 + CSS），
+  > 却每个页面都在加载，从内嵌资源里去掉。
+
+  `views/index/index.html` 里确实搜不到 "echarts" 字样 —— 但那只说明**关键词搜索判断不出
+  这个库有没有被用**：那张模板只负责往
+  `chartdatas['load'|'cpu'|'memory'|'connections'|'bandwidth'|'flow'|'counts']` 里塞配置，
+  真正的 `echarts.init` 在 `static/js/language.js` 的 `setLang` 里用**一个通用循环**统一调用：
+
+  ```js
+  charts[key] = echarts.init(document.getElementById(key));
+  charts[key].setOption(chartdatas[key], true);
+  ```
+
+  仪表盘上那 7 个 `style="height:300px"` 的 div 就是给它们准备的。
+  「搜不到关键词」只是因为这个库被一个通用循环用掉了，不等于没人用。
+  而且 `setLang` 是「翻译整页 `langtag`」和「画图表」**共用的同一个函数**，
+  异常抛在它中间，页面上其它依赖它的处理会一起断掉 —— 影响面比"少几张图"更大。
+
+  **改动**
+  - 恢复 `web/static/js/echarts.min.js`（383139 字节，取自 `76fe94e^`）
+  - `layout.html` 加回 `<script src=".../static/js/echarts.min.js?v=...">`，
+    并在旁边注明"模板里搜不到 echarts 不等于没人用"，防止再被误删
+  - `language.js`：画图前显式判 `typeof echarts`，缺失时跳过并在控制台点名，
+    不再让一个缺失的静态资源把整段翻译流程一起带崩；顺带把 `chartdatas[key]` 非 object 时
+    会撞上的 `charts[key].setOption`（原文缺花括号，`charts[key]` 还是 undefined）改成跳过
+
+### 测试
+- `test/config_keys_test.sh` 新增第 4 节「面板静态资源对账」——**机器核对，不靠关键词猜**：
+  - 模板里引用的每个 `/static/...` 路径，文件必须存在（这一条能直接抓住本例）
+  - 有模板填 `chartdatas` 时，`layout.html` 必须加载 echarts、文件必须存在、
+    `language.js` 必须真的调 `echarts.init`
+  - 两种失败形态都实测会红：删掉文件 / 只删 `layout.html` 里那行 `<script>`
+
 ## v26.10.9（已发布）
 
 ### 修复
