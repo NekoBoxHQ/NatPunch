@@ -2,6 +2,45 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.11（已发布）
+
+### 修复
+- **Go 那条 `update` 路径换完二进制后不重启**（`natpunch update` / `natpunch-client update`）。
+  这两个子命令是一次性进程：只把磁盘上的二进制换掉就退出，**正在跑的服务内存里还是旧代码**，
+  结尾只打印一句「更新成功，请重启服务」。在典型场景下这是致命的 —— 这两个命令经常是从
+  「服务端 → 客户端隧道 → 目标机」的 SSH 上敲的，照它说的去重启，客户端一停、承载这次 SSH
+  的隧道就断了，等于让你把自己踢下线，服务停在「已停止」再没人拉起来。
+  shell 那条路（`uninstall_client.sh update`）早就有「脱离会话 + 看门狗」，Go 这条一直缺。
+
+  现在：替换成功后生成 `/tmp/natpunch_restart.<pid>`，交给一个**脱离当前会话与 cgroup** 的
+  进程执行 —— 有 systemd 就用 `systemd-run --unit=... --collect` 起独立单元（本次 SSH 会话随
+  隧道断开被清场也带不走它），否则用 setsid。两个设计点：
+  - **只在服务本来就是运行中时才重启** —— 有人可能是故意停掉的，换个二进制顺手把它拉起来
+    属于改变别人机器的运行状态，不是升级该干的事
+  - **拿不到脱离手段时不硬来** —— 原地重启比不重启更糟（会切断调用方会话、服务停在半路）
+
+- **客户端 `udp5` 分支漏了 `return`**，每小时刷 20 多条误导性告警：
+  `[W] connect to 127.0.0.1 error dial udp5: unknown network udp5`。
+  `handleChan` 是个 if 链（http / udp5 / shellresize / shell → 最后落到 `net.DialTimeout`），
+  **只有 udp5 那条没有 return**；`udp5` 是项目自己的哨兵值（UDP over SOCKS5），不是合法的 Go
+  网络类型，那一跳必然失败，还会对已经关闭的连接再 Close 一次。真机上 6 小时 21 条，
+  且长得极像「连接失败」，排查时会被它带偏。补上 return，与三个兄弟分支对齐。
+
+### 文档
+- `server/proxy/transport.go`：给 `tcpTrans` 补上「为什么保留」的说明 —— 面板上建不出这种隧道，
+  但客户端 `-local_type=tcpTrans` / 配置文件 `mode=tcpTrans` 依然能建出来，属于「配置 / CLI 可达」，
+  与 file / secret / p2p 同一标准。写明这一点，免得下次按「界面里没入口」当死代码删掉。
+
+### 测试
+- 新增 `lib/install/restart_test.go`：重启脚本必须 `sh -n` 干净、自删必须**同步**且限定
+  `/tmp/natpunch_restart.*` 形态、必须只在服务运行时才重启（含反向断言：不许再出现「请重启服务」老文案）。
+
+### 真机验证
+- 重启脚本在 sg 上用 `systemd-run --collect`（与真实路径同机制）跑过两个分支：
+  服务没在跑 → 日志「未在运行，不自动重启」+ 同步自删 + 无残留单元；
+  服务在跑（拿 cron 当靶子）→ 真重启成功，前后都是 `active`。
+- 服务端升级到 v26.10.10 后 6 小时内 **0 条崩溃日志、0 条 `/terminal/ws`**（终端 panic 的闸门守住了）。
+
 ## v26.10.10（已发布）
 
 ### 修复
