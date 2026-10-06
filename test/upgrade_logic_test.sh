@@ -279,6 +279,46 @@ else
     bad "Ws() 里没有 s.EnableRender = false —— 面板终端会重新变成每开一次 panic 一次"
 fi
 
+echo "== 10. 升级 apply 的自删必须同步（后台 sleep 会被 cgroup 清场连坐） =="
+# 背景：update 的 apply 挂在 `systemd-run --unit=... --collect` 的独立单元里跑。
+# 原先的自删写成 `( sleep 1; rm -f "$0" ) &` —— 主进程一退，systemd 立刻按 cgroup
+# 清场，那个还在 sleep 的子 shell 被一起 SIGTERM，rm 永远执行不到，于是在 /tmp
+# 里只增不减。真机实测：sg 上攒了 4 份 natpunch_apply.<pid>（**成功**升级也留），
+# 而同机的看门狗 GUARD 用的是同步 rm -f "$0"，一份都没剩 —— 正好是这组对照。
+# 另外自删原先只写在文件末尾，BIN_SRC/TMP_DIR 无效、写二进制失败、启动失败
+# 这三条快速退出路径都是直接 exit 走的，一样会留，必须挂到 EXIT 上。
+ab="$(extract_heredoc APPLY)"
+if [ -z "$ab" ]; then
+    bad "没能从 $SRC 抠出 update 用的 APPLY"
+else
+    if printf '%s\n' "$ab" | grep -qF "trap 'cleanup' EXIT"; then
+        ok "APPLY 把清理挂到了 EXIT 陷阱（覆盖全部退出路径）"
+    else
+        bad "APPLY 没有 EXIT 陷阱 —— 快速失败路径会留下 /tmp/natpunch_apply.<pid>"
+    fi
+    n_rm="$(printf '%s\n' "$ab" | grep -v '^[[:space:]]*#' | grep -c 'rm -f "\$0"')"
+    chk "$n_rm" "1" "APPLY 里 rm -f \"\$0\" 只有一处（cleanup 的 case 分支，同步执行）"
+    if printf '%s\n' "$ab" | grep -v '^[[:space:]]*#' | grep -A1 'rm -f "\$0"' | grep -q '^) &$'; then
+        bad "APPLY 又把自删丢回后台子 shell —— --collect 会在主进程退出时连坐掉它"
+    else
+        ok "APPLY 没有后台自删子 shell"
+    fi
+    du="$(extract_fn do_update)"
+    if [ -n "$du" ] && printf '%s\n' "$du" | grep -q -- '-mmin +60'; then
+        ok "do_update 会扫掉历史遗留的 apply/guard/update 临时物（按年龄判断）"
+    else
+        bad "do_update 没有历史遗留临时物清扫 —— sg 上已攒 4 份 apply、路由器有 2 份 update 目录"
+    fi
+    # 反向断言：判据不能是"PID 还在不在"。文件名里的 PID 是主脚本的 $$，
+    # 而 apply / guard 是换了 PID 的另外两个进程 —— 主脚本一退那个 PID 就是死的，
+    # 按它判断会把**正在跑**的看门狗当遗留物删掉（sh 边读边执行，删了后半段读不到）。
+    if [ -n "$du" ] && printf '%s\n' "$du" | grep -q 'kill -0 "\$_p"'; then
+        bad "do_update 按 PID 存活判断遗留物 —— 会把正在跑的 apply/guard 删掉，看门狗失效"
+    else
+        ok "遗留物判据没走 PID 存活那条错路"
+    fi
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"

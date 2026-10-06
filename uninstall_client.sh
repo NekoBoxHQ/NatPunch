@@ -303,6 +303,27 @@ do_update() {
         [ -n "$CUR" ] && log "当前版本 $CUR → $VER"
     fi
     URL="$BASE_URL/$PKG"
+    # 顺手扫掉历史遗留：apply / guard / update 的临时物都带 PID 后缀，
+    # 哪次没删干净（见 APPLY 里那段自删的注释），就在 /tmp 里只增不减 ——
+    # sg 上已经攒了 4 份 natpunch_apply.*，路由器（/tmp 是 tmpfs，吃内存）上
+    # 有两份老版本留下的 natpunch_update.* 目录。
+    #
+    # 判据必须是「够老」，**不能**是「那个 PID 还在不在」：文件名里的 PID 是
+    # 主脚本的 $$，而 apply / guard 是主脚本 fork 出去、早就换了 PID 的另外两个
+    # 进程；主脚本一退出，那个 PID 就是死的，按 PID 判断会把**正在跑**的
+    # apply / guard 判成遗留物删掉 —— 而 sh 是边读边执行脚本文件的，把正在读的
+    # 文件删了，它后半段就读不到，于是"看门狗"这条保险丝在最需要它的那 90 秒里
+    # 悄没声地失效。年龄判据跟 PID 无关：guard 活 90 秒、apply 活几分钟，
+    # 60 分钟以上的必然是死的。
+    # 后缀必须要求纯数字，否则 natpunch_update.* 会连 natpunch_update.log 一起
+    # 匹配上 —— 那是本次升级要写的日志，删了就没法排查了。
+    for _d in /tmp/natpunch_update.* /tmp/natpunch_apply.* /tmp/natpunch_guard.*; do
+        [ -e "$_d" ] || continue
+        _p="${_d##*.}"
+        case "$_p" in ''|*[!0-9]*) continue ;; esac
+        [ -n "$(find "$_d" -maxdepth 0 -mmin +60 2>/dev/null)" ] || continue
+        rm -rf "$_d" 2>/dev/null || true
+    done
     TMP_DIR="/tmp/natpunch_update.$$"
     rm -rf "$TMP_DIR"
     mkdir -p "$TMP_DIR" || die "无法创建临时目录"
@@ -338,8 +359,29 @@ CLIENT_BIN_2="${NP_CLIENT_BIN_2:-/usr/local/bin/natpunch-client}"
 CLIENT_INIT="${NP_CLIENT_INIT:-/etc/init.d/natpunch-client}"
 CLIENT_SYSTEMD_1="${NP_CLIENT_SYSTEMD_1:-/etc/systemd/system/natpunch-client.service}"
 CLIENT_SYSTEMD_2="${NP_CLIENT_SYSTEMD_2:-/lib/systemd/system/natpunch-client.service}"
-# 任何退出路径都清理临时目录（正常路径已显式清理，此处兜底异常路径）
-trap 'rm -rf "$TMP_DIR" 2>/dev/null || true' EXIT INT TERM
+# 退出路径统一收口：清临时目录 + 自删脚本。
+#
+# 自删必须**同步**做，不能像原先那样 `( sleep 1; rm -f "$0" ) &` 丢给后台：
+# update 的 apply 是挂在 `systemd-run --unit=... --collect` 的独立单元里跑的，
+# 主进程一退，systemd 立刻按 cgroup 清场，那个还在 sleep 的子 shell 会被一起
+# SIGTERM 掉，rm 永远轮不到执行。真机证据：sg 上攒了 4 份 natpunch_apply.<pid>
+# （16:31 / 16:39 / 16:44 三次**成功**升级各留一份）；而同机上的看门狗 GUARD
+# 用的是同步 rm -f "$0"，一份都没剩 —— 正好是这组对照。
+# 另外原先只把自删写在文件末尾，BIN_SRC/TMP_DIR 无效、写二进制失败、启动失败
+# 这几条快速退出路径全是直接 exit 走的，一样会留；挂到 EXIT 才能覆盖所有出口。
+#
+# 只删 /tmp/natpunch_apply.* 形态的 $0（这就是本脚本唯一副本的绝对路径），
+# 不做无条件 rm -f "$0" —— 万一被别的形态调起来，别删了不该删的东西。
+# 不挂 INT/TERM：那两个信号下陷阱跑完 shell 还会继续往下执行，半路把正在读的
+# 脚本删掉更危险；被硬杀就让它留在 /tmp（下次升级是另一个 PID，不冲突）。
+cleanup() {
+    rm -rf "$TMP_DIR" 2>/dev/null || true
+    case "$0" in
+        /tmp/natpunch_apply.*) rm -f "$0" 2>/dev/null || true ;;
+    esac
+}
+trap 'cleanup' EXIT
+trap 'rm -rf "$TMP_DIR" 2>/dev/null || true' INT TERM
 [ -n "$BIN_SRC" ] && [ -f "$BIN_SRC" ] || { warn "NP_BIN_SRC 无效: $BIN_SRC"; exit 1; }
 [ -n "$TMP_DIR" ] || { warn "NP_TMP_DIR 为空"; exit 1; }
 log "开始应用更新"
@@ -595,11 +637,8 @@ if [ "$UPDATE_OK" -eq 0 ]; then
     warn "日志见 ${NP_UPDATE_LOG:-/tmp/natpunch_update.log}"
     exit 4
 fi
-# 自删唯一副本
-(
-    sleep 1
-    rm -f "$0"
-) &
+# 自删交给文件开头的 EXIT 陷阱（必须同步，见那里的长注释：丢到后台会被
+# systemd-run 的 cgroup 清场连坐掉，rm 根本执行不到）
 exit 0
 APPLY
     chmod 755 "$APPLY"
