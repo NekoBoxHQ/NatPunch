@@ -57,7 +57,9 @@ func UpdateNatpunch() {
 		log.Println("替换服务端文件失败：", err)
 		return
 	}
-	fmt.Println("更新成功，请重启服务")
+	// 换完只是磁盘上的文件变了，跑着的服务内存里还是旧代码 —— 必须重启才生效。
+	// 这一步交给脱离会话的独立进程做，原因见 restart.go。
+	restartServiceDetached("natpunch", "natpunch")
 }
 
 func fetchLatestVersion() (string, error) {
@@ -127,7 +129,8 @@ func UpdateClient() {
 		log.Println("替换客户端文件失败：", err)
 		return
 	}
-	fmt.Println("更新成功，请重启客户端")
+	// 同 UpdateNatpunch：换完必须重启才生效，交给脱离会话的独立进程做。
+	restartServiceDetached("natpunch-client", "natpunch-client")
 }
 
 type release struct {
