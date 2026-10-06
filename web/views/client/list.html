@@ -258,12 +258,16 @@
                 formatter: function (value, row, index) {
                     var dom = location.hostname;
                     var port = "{{if .tls_enable}}{{.tls_p}}{{else}}{{.p}}{{end}}";
+                    // ⚠️ tlsFlag **必须加单引号**：install.sh 取的是 TLS_FLAG="$4"，带空格的值
+                    // 不加引号会被 shell 拆成两个参数，只有第一个 flag 落进 $4、指纹成了 $5 被丢掉。
+                    // v26.10.8 只把指纹写进了字符串、没加引号，等于没修（真机上 TLS_FLAG 只剩
+                    // -tls_enable=true，tls_fingerprint 警告照刷）。
                     // 带上桥接证书指纹（F2-2）。上面的「TLS 命令」早就带了，这两个部署按钮一直漏着 ——
                     // 拿它们装的客户端只会警告"TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，
                     // 不防中间人"，实测 24 小时能刷 136 条。两个 flag 用空格分隔，install.sh 逐段校验。
                     var tlsFlag = "{{if .tls_enable}}-tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}{{end}}";
-                    var ow = "uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
-                    var lx = "wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
+                    var ow = "uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
+                    var lx = "wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
                         + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
                         + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'

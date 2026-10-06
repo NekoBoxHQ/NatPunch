@@ -254,6 +254,14 @@ if grep -q 'bridge_fingerprint}} -tls_fingerprint=' web/views/client/list.html 2
 else
     bad "面板部署按钮没带 -tls_fingerprint —— 装出来的客户端只防被动窃听，日志会刷警告"
 fi
+# 光"带了"不够：还要**用单引号括起来**。install.sh 取的是 TLS_FLAG="$4"，带空格的值不加引号
+# 会被 shell 拆成两个参数，只有第一个 flag 落进 $4、指纹成了 $5 被丢掉。v26.10.8 就是只加了
+# 内容没加引号 —— 看着修了、实际没传到（真机上 TLS_FLAG 只剩 -tls_enable=true，警告照刷）。
+if grep -q "port + \" '\" + tlsFlag + \"'" web/views/client/list.html 2>/dev/null; then
+    ok "部署命令里的 tlsFlag 用单引号括起来了（多 flag 不会被拆）"
+else
+    bad "部署命令里的 tlsFlag 没加引号 —— install.sh 只收得到第一个 flag，证书指纹会被丢掉"
+fi
 # 存量机器靠更新路径迁移单元（不是所有人都会重装）
 if grep -q 'pre_execform' "$SRC" && grep -q 'exec /usr/bin/natpunch-client' "$SRC"; then
     ok "uninstall_client.sh 会把存量单元迁移到 exec 形态"
