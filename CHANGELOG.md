@@ -2,6 +2,39 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.5（已发布）
+
+### 修复
+- **systemd 客户端 stop / restart 之后会漏杀客户端本体**（真机上抓到，systemd 独有）。
+  单元里 `ExecStart=/bin/sh -c '...'` 包了一层，systemd 眼里的「主进程」是那个 shell；
+  而同一份单元里为了「stop 时别连带杀掉面板 SSH 场景下的更新子脚本」写了 `KillMode=process`
+  —— 它只杀主进程，于是真正的 `natpunch-client` 活下来、被 init 收养（PPID=1），
+  下一次启动就多一个**同 vkey 的客户端**，一起连服务端、抢同一条隧道。
+
+  实测现场（sg.s-ui.com，一次 `update` 之后）：
+
+  ```
+  2467131  PPID=1        29:18  /usr/bin/natpunch-client ...          ← 上上个，还在连服务端
+  2481249  PPID=1        01:15  /bin/sh -c /usr/bin/natpunch-client … ← 单元的 MainPID（只是壳）
+  2481251  PPID=2481249         /usr/bin/natpunch-client ...          ← 当前这个
+  ```
+
+  systemd 只能记一句 `Unit process <pid> (natpunch-client) remains running after unit stopped.`
+  日志里两个 PID 同时打 `Successful connection with server`。
+
+  两处一起改：
+  - `install.sh`：`ExecStart` 改为**直接 exec 客户端本体**（不再包 `sh -c`），变量展开交给
+    systemd 自己做。这样 `KillMode=process` 杀的就是客户端本身，同时仍然不碰面板 shell。
+  - `uninstall_client.sh`：`ensure_killmode_process` 顺带把存量单元里的 `sh -c` 包裹改回直接
+    exec（它本来就在改单元，只是以前只补 `KillMode`）；并在 stop 之后补一次
+    `kill_client_pids` 清扫 —— 存量机器第一次走新流程时正在跑的还是旧单元，那一次仍会漏杀，
+    靠这一句兜住。
+
+  **procd（OpenWrt）没有这个问题**：procd 按进程组清场，实机上路由器始终只有一个客户端。
+
+- `test/upgrade_logic_test.sh` 加第 8 节守住这三条（单元里不能出现 `sh -c` 包裹的 ExecStart、
+  必须是直接 exec、更新路径必须能改存量单元）。已验证对修复前的文件全部失败。
+
 ## v26.10.4（已发布）
 
 ### 修复
