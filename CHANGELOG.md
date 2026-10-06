@@ -2,6 +2,47 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.13（已发布）
+
+### 修复
+- **`lib/natpunch_mux/mux.go` 的无效 `break`（SA4011，隧道核心的 ping goroutine）**
+
+      case <-s.closeChan:
+          break          // 只跳出 select，循环会继续
+
+  `break` 只跳出 `select`，循环会继续，拿着已经失效的 `data` 再跑一轮（`UnmarshalText` 失败、
+  `latency` 变成一个巨大的垃圾值写进统计）。当前恰好被 `Close()` 的先后顺序掩盖着
+  （先 `isClose.Store(true)` 再往 `closeChan` 发信号，下一轮开头就 `break` 了），但那是巧合不是
+  约束 —— 顺序一换，`select` 会因 `closeChan` 常驻就绪而**空转烧 CPU**。改成 `return`。
+
+### 清理（多余代码）
+删掉一批确认无用的声明（删除前逐个读过上下文）：
+- `server/proxy/websocket.go`：`flowIn` / `flowOut` / `once` 三个字段从没被写过，唯一的回写还被
+  注释掉了（`//c.once.Do(func(){ c.host.Flow.Add(...) })`）—— websocket 隧道的流量统计**从来没接上**
+- `server/proxy/https.go`：`handleHttps`（旧实现，唯一「引用」在被注释掉的旧代码里，现役走
+  `handleHttps2` / `cert`）
+- `server/proxy/socks5.go`：`maxUDPPacketSize` 常量
+- `server/proxy/base.go`：`BaseServer.id` 字段
+- `cmd/natpunch-client/main.go`：`-log` flag（help 写着 `stdout|file`，实际从没被读过；文件模式由
+  `-log_path` 控制）—— 一个说了不做的 flag 比没有更坏
+- `cmd/natpunch/natpunch.go`：`-server` flag（从没被读，安装脚本也不传）
+
+### 明确保留（linter 说 unused，但删了才是 bug）
+- `lib/common/pidfile.go` 的 `heldPidFile`：只赋值不读**正是它的作用** —— 让 `*os.File` 保持可达、
+  不被 GC 回收（回收会 finalize 掉 fd，`flock` 随之释放，**单实例保护静默失效**）
+- `cmd/natpunch/natpunch.go` 的 `confPath`：flag 包需要它注册，否则 `-conf_path=` 会让 `Parse` 报错；
+  值由后面的 argv 手工扫描取
+- `lib/natpunch_mux` 的 6 条（`TrafficControl` / `createNetwork` / `runDocker` / …）：被
+  `mux_test.go`（`//go:build integration`）使用，而那个文件默认不编译，所以分析器看不见
+
+这三类说明：**「unused」清单里有一半是假阳性，而且假阳性都出现在代码故意做某件不显眼的事的地方** ——
+和当初按「搜不到关键词」删掉 echarts 是同一个坑。
+
+### 说明
+`:golangci.yml` 主动关掉了 `unused` / `gosimple` / `errcheck`（理由写的是「上游存量风格债（百级噪音）」），
+所以这些检查从没跑过。本次用 staticcheck 过了一遍：**110 条 → 96 条**，`U1000` 16 → 8、`SA4011` 1 → 0，
+剩下 8 条即上面「明确保留」的三类；其余 ~70 条是风格（`S1023` 多余 return、`ST1005` 错误串大小写等）。
+
 ## v26.10.12（已发布）
 
 ### 修复
