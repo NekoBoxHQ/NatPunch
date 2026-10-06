@@ -242,7 +242,23 @@ if grep -qE "^ExecStart=/usr/bin/natpunch-client |^ExecStart=/bin/sh -c '/usr/bi
 else
     ok "install.sh 里没有旧的 ExecStart 形态"
 fi
-# TLS_FLAG 必须允许多个 flag：面板的部署命令要带证书指纹
+# OpenWrt / procd 同理包一层 sh -c，但图的是另一件事：**procd 存的是展开后的 argv，
+# respawn 直接 exec 它、不会重跑 start_service**。所以 instance 也得是 sh -c，
+# 让每次 respawn 重新 source 配置 —— 否则改了 /etc/natpunch.conf 再让守护把进程拉回来，
+# 跑的还是旧 flag。这条不是洁癖：`needs_detach` 一旦漏判（SSH 从隧道进来但没认出来），
+# 前台路径会在 killall 那里被会话带走，procd 却拿旧 argv 拉回来 —— **永远不收敛**。
+# 真机核过：`ubus call service list` 里 command 是展开好的字面量；改完之后 respawn
+# 出来的 argv 跟着 /etc/natpunch.conf 走。
+if grep -q "procd_set_param command /bin/sh -c '. /etc/natpunch.conf; exec /usr/bin/natpunch-client " "$INSTALL"; then
+    ok "install.sh 的 procd instance 是 sh -c 'exec 客户端' 形态（respawn 会重读配置）"
+else
+    bad "procd 的 command 还是写死的 argv —— respawn 用旧 flag，改配置不收敛"
+fi
+if grep -q '^        -server="\${SERVER}:\${PORT}" -vkey=' "$INSTALL"; then
+    bad "install.sh 里还有旧的 procd command 形态（argv 展开后被 procd 存死）"
+else
+    ok "install.sh 里没有旧的 procd command 形态"
+fi
 if grep -q 'TLS_FLAG 的每一段都必须是' "$INSTALL"; then
     ok "install.sh 逐段校验 TLS_FLAG（允许多 flag）"
 else

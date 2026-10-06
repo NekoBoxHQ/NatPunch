@@ -386,8 +386,15 @@ start_service() {
     [ -f /etc/natpunch.conf ] || return 1
     . /etc/natpunch.conf
     procd_open_instance
-    procd_set_param command /usr/bin/natpunch-client \
-        -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG}
+    # 包一层 sh -c，和 systemd 那条 ExecStart=/bin/sh -c 'exec ...' 是同一个道理，
+    # 但这里图的是另一件事：**procd 存的是展开后的 argv，respawn 直接 exec 它，不会重跑
+    # start_service**。所以原来那句 `-server=... ${TLS_FLAG}` 只在实例第一次启动时读到过配置 ——
+    # 之后改了 /etc/natpunch.conf 再让守护把进程拉回来，跑的还是旧 flag。
+    # 真机上核过：`ubus call service list` 里 command 是展开好的字面量。
+    # 单引号是必须的：让 $SERVER/$VKEY/$TLS_FLAG 保持字面量存进去，由每次 respawn 时
+    # 那个 sh 现读现展开。exec 也是必须的 —— 否则 procd 眼里的主进程是 sh，
+    # stop/killall 只杀壳，真正的客户端活下来被 init 收养，下次启动就多一个同 vkey 的客户端。
+    procd_set_param command /bin/sh -c '. /etc/natpunch.conf; exec /usr/bin/natpunch-client -server="$SERVER:$PORT" -vkey="$VKEY" -type=tcp $TLS_FLAG'
     # respawn <threshold> <timeout> <retry>
     # retry 必须是 0。procd 源码 service/instance.c 的判定是：
     #     if (respawn_count > respawn_retry && respawn_retry > 0) {

@@ -30,6 +30,23 @@
 - **起不来自动回滚**。换二进制前留一份旧的、写配置前留一份旧的，自检不过就把两份换回去
   再起一次。NAT 机上「装坏了」等于盒子变黑、只能跑现场，这一步是必须的。
 
+- **procd 的 respawn 不会重读配置** —— OpenWrt 的 instance 也包了一层 `sh -c`。
+  原先 `procd_set_param command` 写的是**展开好的 flag**（真机 `ubus call service list`
+  里能看到 `-server=... -vkey=... -tls_enable=true -tls_fingerprint=...` 这种字面量），
+  而 **procd 的 respawn 是直接 exec 存下来的那份 argv、不会重跑 `start_service`** ——
+  改了 `/etc/natpunch.conf` 之后，光让守护把进程拉回来，跑的还是旧 flag。
+  这和 `needs_detach` 漏判叠在一起就是个**不收敛**的坑：前台路径在 `killall` 那里被会话
+  带走，procd 却拿旧 argv 把进程拉回来 —— 再跑多少次都换不掉 flag。
+
+  改成 `procd_set_param command /bin/sh -c '. /etc/natpunch.conf; exec /usr/bin/natpunch-client ...'`
+  —— 单引号让 `$SERVER` / `$VKEY` / `$TLS_FLAG` 保持字面量存进去、由**每次 respawn 现读现展开**；
+  `exec` 让 procd 眼里的主进程就是客户端本体（否则 stop / killall 只杀壳，真正的客户端
+  活下来被 init 收养，下次启动就多一个同 vkey 的客户端）。和 systemd 那条
+  `ExecStart=/bin/sh -c 'exec ...'` 是同一个形态，理由不同。
+
+  真机验证：把配置里的指纹去掉 → `killall natpunch-client` → 让 procd 自己拉起 →
+  `/proc/<pid>/cmdline` 里**确实没有指纹了**；加回去再 respawn，指纹也回来了。
+
 - **自检不能用 `systemctl is-active` 判活着。** `Restart=always` 的崩溃循环里进程每隔
   `RestartSec` 秒活一下，采样恰好落在那一下就会返回 `active`。真机上验过：一个
   `tls_strict=true` 却没有指纹的坏配置，`NRestarts` 已经涨到 10，自检却报
@@ -43,6 +60,8 @@
   文件名里的 PID 是当时那个脚本的 `$$`，按它判断会删掉正在被收尾脚本使用的备份）。
 
 ### 测试
+- `test/upgrade_logic_test.sh` 第 8 节新增两条：install.sh 的 procd `command` 必须是
+  `sh -c '. /etc/natpunch.conf; exec ...'` 形态，且不许再出现写死 argv 的旧形态。
 - `test/upgrade_logic_test.sh` 第 11 节新增 15 条断言：顺序（换二进制 / 写配置的行号必须早于
   重启段）、二进制走临时名 + rename（不许裸 `cp` 覆盖运行中的）、注册段不许夹启动动作、
   内嵌脚本 `sh -n` 干净、用位置参数取值（引号 heredoc 会挡展开）、自删同步、
