@@ -353,11 +353,11 @@ reset:
 			logs.Notice("the url %s %s %s can't be parsed!", r.URL.Scheme, r.Host, r.RequestURI)
 			break
 		} else if host != hostTmp {
-			host = hostTmp
-			// 先置位本代的"被动拆除"标记（转发 goroutine 据此不再关 c），再关本代的 connClient
-			if resetFlag != nil {
-				resetFlag.Store(true)
-			}
+			// 不在这里同步 host：下一轮的 reset 标签处会用同一个 r.Host 重新查一次
+			// （原来必须写，是因为转发 goroutine 闭包直接引用 host；现在按代传参了，
+			//  这个赋值就成了走到 reset 前的死赋值，staticcheck SA4006）。
+			// 先置位本代的"被动拆除"标记（转发 goroutine 据此不再关 c），再关本代的 connClient。
+			resetFlag.Store(true)
 			connClient.Close()
 			goto reset
 		}

@@ -1,0 +1,17 @@
+fix(http): 去掉上一提交引入的两处死代码（staticcheck SA4006 / SA4031）
+
+master 上的 CI 报红，三条 golangci-lint 全在同一处：
+
+- server/proxy/http.go:356 SA4006：`host = hostTmp` 是死赋值。
+  它原本是活的 —— 转发 goroutine 的闭包直接引用 host；改成按代显式传参之后，
+  走到 reset 标签会用同一个 r.Host 重新查一次，这个赋值再也没人读。
+- server/proxy/http.go:358 SA4031：`if resetFlag != nil` 恒为真。
+  能到达这里必然经过 281 行的 `resetFlag = rf`（reset 标签在它之前，且只能顺流下来）。
+
+两处都是把闭包改为显式传参时留下的，行为不变，纯删除。
+
+验证：GOOS=linux 四架构（amd64/arm64/arm/mipsle）交叉编译 + go vet 通过；
+本地按 CI 同款工具链（GOTOOLCHAIN=go1.26.0，对齐 workflow 的 go-version: '1.26'）
+跑 `golangci-lint run --timeout=10m` 干净 —— 上一轮正是缺了这一步就推了。
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
