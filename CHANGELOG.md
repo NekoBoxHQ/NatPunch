@@ -18,7 +18,13 @@
 ### 清理（多余代码）
 删掉一批确认无用的声明（删除前逐个读过上下文）：
 - `server/proxy/websocket.go`：`flowIn` / `flowOut` / `once` 三个字段从没被写过，唯一的回写还被
-  注释掉了（`//c.once.Do(func(){ c.host.Flow.Add(...) })`）—— websocket 隧道的流量统计**从来没接上**
+  注释掉了（`//c.once.Do(func(){ c.host.Flow.Add(...) })`）。**注意：websocket 的流量统计本身是正常的**
+  —— 它走的是 `goroutine.CopyBuffer(to, from, host.Client.Flow, ...)`，记账在 `lib/goroutine/pool.go`
+  的 144~173 行。这三个字段只是早期那套设计的废弃残留，删掉不改变任何行为。
+
+  > 更正：本条最初的说明写成「websocket 隧道的流量统计从来没接上」，**那是错的**。当时只查了这三个
+  > 字段有没有被写，没去查这个功能有没有别的实现路径 —— 又是「用局部证据代替全链路」，
+  > 和按关键词删 echarts 是同一个毛病。
 - `server/proxy/https.go`：`handleHttps`（旧实现，唯一「引用」在被注释掉的旧代码里，现役走
   `handleHttps2` / `cert`）
 - `server/proxy/socks5.go`：`maxUDPPacketSize` 常量
