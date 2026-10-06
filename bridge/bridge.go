@@ -365,7 +365,9 @@ func (s *Bridge) register(c *conn.Conn) {
 func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (target net.Conn, err error) {
 	//if the proxy type is local
 	if link.LocalProxy {
-		target, err = net.Dial("tcp", link.Host)
+		// 目标可能位于死链路上：不能无超时地等内核把 SYN 重传耗完（Linux 上 130 秒以上），
+		// 那会把这个请求连同客户端连接一起挂着。用与转发目标一致的 link.Option.Timeout。
+		target, err = net.DialTimeout("tcp", link.Host, link.Option.Timeout)
 		return
 	}
 	if v, ok := s.Client.Load(clientId); ok {

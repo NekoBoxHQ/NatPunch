@@ -232,6 +232,23 @@ re:
 }
 
 // Create a new connection with the server and verify it
+// connectTimeout 是「连到服务端」这一步的上限，覆盖 TCP 连接与 TLS 握手。
+//
+// 原来这条路径上用的是**不带超时**的 net.Dial / tls.Dial：链路一丢包，内核要耗完
+// SYN 重传才返回，Linux 上能卡 130 秒以上。而客户端的外层重连是
+//
+//	for { Start(); sleep 5 }
+//
+// 结构 —— Start() 卡在拨号里，整个重连就停摆两分多钟：既不会重试，也不会理会
+// closeClient。对「链路抖动」这种最常见的故障来说，这等于失联。
+//
+// 10 秒的取舍：跨运营商 / 3G 这类高 RTT 链路上握手通常 1~3 秒，10 秒够用；真连不上
+// 时又能较快回到重试。KeepAlive 显式写出来（Go 默认也是 15s）是为了让**半开**的连接
+// 能被内核探测出来 —— 否则要等 mux 的 60 秒 disconnect_timeout 才判定断路。
+const connectTimeout = 10 * time.Second
+
+var bridgeDialer = &net.Dialer{Timeout: connectTimeout, KeepAlive: 15 * time.Second}
+
 func NewConn(tp string, vkey string, server string, connType string, proxyUrl string) (*conn.Conn, error) {
 	var err error
 	var connection net.Conn
@@ -244,7 +261,9 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 			}
 			switch u.Scheme {
 			case "socks5":
-				n, er := proxy.FromURL(u, nil)
+				// 把带超时的 dialer 交给代理层，至少让「连到代理服务器」这一步受超时约束
+				// （SOCKS5 握手在 x/net/proxy 内部完成，外面设不了 deadline）。
+				n, er := proxy.FromURL(u, bridgeDialer)
 				if er != nil {
 					return nil, er
 				}
@@ -258,27 +277,11 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 				if crypt.GetTlsFingerprint() == "" {
 					logs.Warn("TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，不防中间人；建议配置服务端指纹（F2-2）")
 				}
-				connection, err = tls.Dial("tcp", server, crypt.TlsDialConfig())
+				// DialWithDialer：TCP 连接与 TLS 握手都受 connectTimeout 约束
+				connection, err = tls.DialWithDialer(bridgeDialer, "tcp", server, crypt.TlsDialConfig())
 			} else {
-				connection, err = net.Dial("tcp", server)
+				connection, err = bridgeDialer.Dial("tcp", server)
 			}
-
-			//header := &proxyproto.Header{
-			//	Version:           1,
-			//	Command:           proxyproto.PROXY,
-			//	TransportProtocol: proxyproto.TCPv4,
-			//	SourceAddr: &net.TCPAddr{
-			//		IP:   net.ParseIP("10.1.1.1"),
-			//		Port: 1000,
-			//	},
-			//	DestinationAddr: &net.TCPAddr{
-			//		IP:   net.ParseIP("20.2.2.2"),
-			//		Port: 2000,
-			//	},
-			//}
-			//
-			//_, err = header.WriteTo(connection)
-			//_, err = io.WriteString(connection, "HELO")
 		}
 	} else {
 		sess, err = kcp.DialWithOptions(server, nil, 10, 3)
@@ -336,7 +339,8 @@ func NewHttpProxyConn(url *url.URL, remoteAddr string) (net.Conn, error) {
 	password, _ := url.User.Password()
 	req.Header.Set("Authorization", "Basic "+basicAuth(strings.Trim(url.User.Username(), " "), password))
 	// we make a http proxy request
-	proxyConn, err := net.Dial("tcp", url.Host)
+	// 同 NewConn：这一跳也要受超时约束，否则代理不可达时整个重连循环一起卡住
+	proxyConn, err := bridgeDialer.Dial("tcp", url.Host)
 	if err != nil {
 		return nil, err
 	}
