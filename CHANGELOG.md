@@ -2,6 +2,28 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.14（已发布）
+
+### 修复
+- **面板「OpenWrt 部署 / Linux 部署」给出的命令仍然不带证书指纹** —— v26.10.8 只修了一半。
+
+  v26.10.8 把指纹写进了命令字符串，但**没有加引号**：
+
+      ... | sh -s -- '<vkey>' <host> <port> -tls_enable=true -tls_fingerprint=<fp>
+
+  而 `install.sh` 取的是 `TLS_FLAG="${4:-}"` —— 带空格的值会被 shell **拆成两个参数**，
+  只有 `-tls_enable=true` 落进 `$4`，指纹成了 `$5` 被丢掉。**所以拿这两个按钮装的客户端，
+  桥接证书从来没有被固定过**，日志一直照刷 `TLS 已启用但未配置 tls_fingerprint`。
+
+  真机复现（sg.s-ui.com，照面板那条命令原样安装）：`/etc/natpunch.conf` 里
+  `TLS_FLAG='-tls_enable=true'`，客户端日志 4 条指纹警告。
+
+  修法：两条部署命令都给 `tlsFlag` 加单引号。
+
+### 测试
+- `test/upgrade_logic_test.sh` 第 8 节新增一条断言：**光「命令里带了 `-tls_fingerprint`」不够，
+  还必须用单引号括起来**。只查"带没带"会漏掉这个 bug —— v26.10.8 就是这么漏过去的。
+
 ## v26.10.13（已发布）
 
 ### 修复
