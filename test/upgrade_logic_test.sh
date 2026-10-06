@@ -4,7 +4,9 @@
 # 为什么需要它：这几段代码出错时**不会报错**，只会静默做错事 ——
 #   · 版本挑错 → "更新"完反而降级，之后可能连不上服务端；
 #   · 包校验被绕过 → 拿一个被替换过的 root 二进制去执行；
-#   · 内嵌的 apply / guard 脚本有语法错 → 升级走到一半断在那儿，客户端停着。
+#   · 内嵌的 apply / guard 脚本有语法错 → 升级走到一半断在那儿，客户端停着；
+#   · 备份清理漏一类 / 写错 rm 参数 → 备份无限堆在 /opt/natpunch 下，
+#     或者反过来删掉升级唯一的 vkey 回滚点。
 # 这些都必须在下发之前被机器挡住，不能靠人肉 review。
 #
 # 用法：sh test/upgrade_logic_test.sh
@@ -18,13 +20,13 @@ ok()  { echo "  ✓ $1"; }
 bad() { echo "  ✗ $1"; FAIL=1; }
 chk() { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3（得到 '$1'，期望 '$2'）"; fi; }
 
-# 从脚本里原样抠出一个函数
+# 从脚本里原样抠出一个函数（第二个参数是文件名，默认 $SRC）
 extract_fn() {
     awk -v fn="$1()" '
         index($0, fn " {") == 1 { grab = 1 }
         grab { print }
         grab && $0 == "}" { exit }
-    ' "$SRC"
+    ' "${2:-$SRC}"
 }
 # 从脚本里抠出一段 heredoc 正文（按结束标记）
 extract_heredoc() {
@@ -116,6 +118,62 @@ if grep -q 'NATPUNCH_ALLOW_UNSIGNED' "$INSTALL" && grep -q 'NATPUNCH_ALLOW_UNSIG
 else
     bad "缺少 NATPUNCH_ALLOW_UNSIGNED 逃生开关"
 fi
+
+echo "== 6. 备份清理（漏一类就无限累积；清错则毁掉可回滚的那份） =="
+# 背景：升级会在 /opt/natpunch 下留三类备份 ——
+#   natpunch.bak.<时间戳>            旧二进制
+#   conf.bak.<时间戳>/               整个配置目录（clients.json 里是全部客户端 vkey）
+#   conf/natpunch.conf.bak.<时间戳>  改密时写的面板配置
+# 清理函数漏掉哪一类，哪一类就永远堆着（conf.bak.* 目录就是这么堆起来的）；
+# 而清错东西的后果更重 —— conf.bak.* 是升级唯一的 vkey 回滚点。
+SERVER_SRC="install_server.sh"
+cb="$(extract_fn clean_backups "$SERVER_SRC")"
+co="$(extract_fn cleanup_old_backups "$SERVER_SRC")"
+if [ -z "$cb" ]; then
+    bad "没能从 $SERVER_SRC 抠出 clean_backups"
+else
+    info() { :; }   # clean_backups 会 info 一句，测试里不需要输出
+    eval "$cb"
+    T="$(mktemp -d)"
+    mkdir -p "$T/conf"
+    for ts in 20260101010101 20260202020202 20260303030303; do
+        touch "$T/natpunch.bak.$ts" "$T/conf/natpunch.conf.bak.$ts"
+        mkdir -p "$T/conf.bak.$ts" && touch "$T/conf.bak.$ts/clients.json"
+    done
+    touch "$T/natpunch" "$T/conf/natpunch.conf"      # 本体绝不能被当成备份删掉
+
+    clean_backups "$T/natpunch" "二进制" >/dev/null 2>&1
+    chk "$(ls -d "$T"/natpunch.bak.* 2>/dev/null)" "$T/natpunch.bak.20260303030303" \
+        "二进制备份只留最新"
+
+    clean_backups "$T/conf/natpunch.conf" "配置" >/dev/null 2>&1
+    chk "$(ls -d "$T"/conf/natpunch.conf.bak.* 2>/dev/null)" "$T/conf/natpunch.conf.bak.20260303030303" \
+        "面板配置备份只留最新"
+
+    clean_backups "$T/conf" "配置目录" >/dev/null 2>&1
+    chk "$(ls -d "$T"/conf.bak.* 2>/dev/null)" "$T/conf.bak.20260303030303" \
+        "配置目录备份只留最新（rm -f 删不掉目录，且 2>/dev/null 会把失败藏起来）"
+
+    chk "$([ -f "$T/natpunch" ] && echo alive)" "alive" "本体二进制没被误删"
+    chk "$([ -f "$T/conf/natpunch.conf" ] && echo alive)" "alive" "本体配置没被误删"
+
+    # PRE 为空时 "$PRE".bak.* 会退化成 .bak.*，那是在当前目录里删东西。
+    # 必须放**两份**：只留最新的逻辑对单份本来就是「一个都不删」，
+    # 只放一份的话这条断言是空的，测不出退化。
+    mkdir -p "$T/cwd"
+    touch "$T/cwd/.bak.20260101010101" "$T/cwd/.bak.20260202020202"
+    ( cd "$T/cwd" && clean_backups "" "空" >/dev/null 2>&1 )
+    chk "$(ls -A "$T/cwd" | sort | tr '\n' ' ')" ".bak.20260101010101 .bak.20260202020202 " \
+        "PRE 为空时不误删当前目录"
+
+    rm -rf "$T"
+fi
+case "$co" in
+    *'clean_backups "$CONF_DIR"'*)
+        ok "cleanup_old_backups 覆盖了 \$CONF_DIR（即 /opt/natpunch/conf.bak.*）" ;;
+    *)
+        bad "cleanup_old_backups 没清 \$CONF_DIR 的备份 —— /opt/natpunch/conf.bak.* 会无限累积" ;;
+esac
 
 echo
 if [ "$FAIL" -eq 1 ]; then

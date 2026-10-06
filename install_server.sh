@@ -546,10 +546,16 @@ upgrade() {
     log "升级完成，当前版本: ${TARGET_VER:-最新版}"
 }
 # ================= 备份清理 =================
-# 升级/改密会累积 natpunch.bak.* 与 natpunch.conf.bak.* 备份，
-# 每次升级后只保留最新一份，避免历史备份无限累积。
+# 升级/改密会累积三类备份，每次升级成功、改密成功后只保留最新一份：
+#   natpunch.bak.<时间戳>            旧二进制
+#   conf.bak.<时间戳>/               整个配置目录（含 clients.json 里全部客户端 vkey）
+#   conf/natpunch.conf.bak.<时间戳>  改密时写的面板配置
+# 三类的前缀互不为前缀，所以各自单独清，不会互相误伤。
 clean_backups() {
     PRE="$1"; DESC="$2"
+    # PRE 为空时 "$PRE".bak.* 会退化成 .bak.* —— 那是在**当前目录**里找、然后删。
+    # 调用方传的都是绝对路径，这里只是把这种退化输入挡掉。
+    [ -n "$PRE" ] || return 0
     LIST=""
     for f in "$PRE".bak.*; do
         [ -e "$f" ] || continue
@@ -564,15 +570,18 @@ clean_backups() {
     i=1
     for f in "$@"; do
         if [ "$i" -lt "$N" ]; then
-            rm -f "$f" 2>/dev/null && DEL=$((DEL+1))
+            # 必须是 -rf：conf.bak.<时间戳> 是**目录**，rm -f 对目录会失败并且
+            # 因为 2>/dev/null 连报错都看不到 —— 备份照样一份份堆下去。
+            rm -rf "$f" 2>/dev/null && DEL=$((DEL+1))
         fi
         i=$((i+1))
     done
     [ "$DEL" -gt 0 ] && info "$DESC：已清理 $DEL 份旧备份，仅保留最新"
 }
 cleanup_old_backups() {
-    clean_backups "$BIN"  "二进制备份"
-    clean_backups "$CONF" "面板配置备份"
+    clean_backups "$BIN"      "二进制备份"
+    clean_backups "$CONF"     "面板配置备份"
+    clean_backups "$CONF_DIR" "配置目录备份"
 }
 # ================= 启停 =================
 start() {
@@ -860,6 +869,9 @@ do_passwd() {
         echo ""
         kv "端口" "$IN_PORT"; kv "用户名" "$IN_USER"; kv "密码" "$IN_PASS"; kv "面板" "$SCHEME://$HOST:$IN_PORT"
         echo ""
+        # 改密同样会写一份 $CONF.bak.*（见上面那行 cp）。原先只在升级成功时清理，
+        # 于是反复改密码会一直堆，得等到下次升级才被顺带带走。
+        cleanup_old_backups
     fi
 }
 do_upgrade() {
