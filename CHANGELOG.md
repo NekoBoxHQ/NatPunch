@@ -2,6 +2,23 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.4（已发布）
+
+### 修复
+- **升级流程从不刷新自启单元**（`install_server.sh`）。`register_autostart` 只在 `install` 分支里被调用，
+  `upgrade()` 完全不碰 unit —— 于是**单元文件里的加固改动永远到不了已安装的机器**。
+  真机上就是这么积下来的：服务端的 unit 从装完那天（10-01）起就没刷新过，procd 的 `retry` 一直停在
+  5、systemd 一直缺 `StartLimitIntervalSec=0` —— 而这两个值正是 v26.10.3 刚改对的。
+  现在 `upgrade()` 在 `start` 之前调一次 `register_autostart`
+  （必须在 start 之前：它带 `daemon-reload`，写晚了 systemd 还是按旧单元起进程）。
+- `test/upgrade_logic_test.sh` 加第 7 节守住这条：`upgrade()` 里必须出现 `register_autostart`。
+
+### 已知未修（留待单独设计）
+- **客户端那条链路有同样的问题**：unit 是 `install.sh` 写的，而升级走的是 `uninstall_client.sh`，
+  两者互不知道对方写不写单元（后者只引用单元路径做 start/stop）。没在本版一并改，是因为那段代码
+  跑在"停掉客户端再拉起来"的分离进程里 —— **单元写坏 = 客户端起不来 = 失联**，
+  风险等级和服务端这一行不一样，得单独设计（先备份旧单元 + 起不来就回滚）。
+
 ## v26.10.3（已发布）
 
 > 本版是拿两台真机（Debian 12 + systemd 的服务端、iStoreOS + procd 的客户端）逐项比对之后改的。
