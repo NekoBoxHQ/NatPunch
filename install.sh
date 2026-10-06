@@ -112,7 +112,8 @@ fetch "$URL" "$TMP_DIR/pkg.tar.gz" || die "下载失败: $URL"
 log "校验 sha256..."
 fetch "$BASE_URL/SHA256SUMS" "$TMP_DIR/SHA256SUMS" || die "获取 SHA256SUMS 失败"
 [ -s "$TMP_DIR/SHA256SUMS" ] || die "SHA256SUMS 为空"
-EXPECT="$(awk -v f="$PKG" '$2==f {print $1; exit}' "$TMP_DIR/SHA256SUMS")"
+# 第二列可能带一个前导 '*'（coreutils 的二进制模式标记），去掉再比
+EXPECT="$(awk -v f="$PKG" '{ gsub(/^\*/, "", $2) } $2==f {print $1; exit}' "$TMP_DIR/SHA256SUMS")"
 [ -n "$EXPECT" ] || die "SHA256SUMS 中无 $PKG 条目"
 if command -v sha256sum >/dev/null 2>&1; then
     ACTUAL="$(sha256sum "$TMP_DIR/pkg.tar.gz" | awk '{print $1}')"
@@ -249,7 +250,15 @@ start_service() {
     procd_open_instance
     procd_set_param command /usr/bin/natpunch-client \
         -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG}
-    procd_set_param respawn 3600 5 5
+    # respawn <threshold> <timeout> <retry>
+    # retry 必须是 0。procd 源码 service/instance.c 的判定是：
+    #     if (respawn_count > respawn_retry && respawn_retry > 0) {
+    #         respawn = 0; halt = 1;      // 彻底放手，不再拉起
+    #     }
+    # 写成 5 就是"一小时内崩 6 次就永久停止守护"。客户端明明会自己重连，
+    # 却可能因为路由器 OOM 之类的连踹几次被守护放弃，只能重启设备才能恢复 ——
+    # 这正是"无缘无故不启动"。retry=0 走的是 else 分支，永不放弃。
+    procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_close_instance
@@ -263,19 +272,38 @@ INIT
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
+WATCHDOG_PID="/var/run/natpunch-client-watchdog.pid"
 start() {
     [ -f /etc/natpunch.conf ] || exit 1
-    . /etc/natpunch.conf
-    /usr/bin/natpunch-client -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG:-} \
-        >>/tmp/natpunch-client.log 2>&1 &
+    # 这条分支只给"有 /etc/rc.common 但没有 procd"的极少数环境兜底。
+    # 原来这里只写了一句 `cmd &` —— 进程一死就没人再管它，与 procd 分支
+    # 的 respawn 行为完全不对等，正是"无缘无故不启动"。
+    # 外面套一层循环看住：客户端退出就等 5 秒重来。
+    # stop 必须按 pid 文件把循环本体也收掉，否则 killall 杀掉客户端之后
+    # 循环会立刻把它再拉起来，stop 形同虚设。
+    (
+        while :; do
+            . /etc/natpunch.conf
+            /usr/bin/natpunch-client -server="${SERVER}:${PORT}" -vkey="${VKEY}" \
+                -type=tcp ${TLS_FLAG:-} >>/tmp/natpunch-client.log 2>&1 &
+            _np_pid=$!
+            wait "$_np_pid"
+            sleep 5
+        done
+    ) &
+    echo $! > "$WATCHDOG_PID"
 }
 stop() {
+    if [ -f "$WATCHDOG_PID" ]; then
+        kill "$(cat "$WATCHDOG_PID" 2>/dev/null)" 2>/dev/null
+        rm -f "$WATCHDOG_PID"
+    fi
     killall natpunch-client 2>/dev/null
 }
 INIT
     fi
     chmod +x "$INIT"
-    "$INIT" enable 2>/dev/null || warn "init.d enable 失败（不影响本次启动）"
+    "$INIT" enable 2>/dev/null || true
     "$INIT" start
 else
     if ! command -v systemctl >/dev/null 2>&1; then
@@ -287,6 +315,11 @@ else
 Description=NatPunch Client
 After=network-online.target
 Wants=network-online.target
+# StartLimitIntervalSec=0：关掉启动频率限制，语义就是"永远重启"。
+# 默认值（10s / burst 5）+ RestartSec=3 目前恰好不会触发（10 秒窗口内最多 4 次），
+# 但那是靠 3 > 10/5 这个巧合撑着的：谁把 RestartSec 调到 2 秒以内，systemd 就会把
+# 服务打成 failed 并永久停止重启。别赌默认值。
+StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/natpunch.conf
@@ -301,7 +334,11 @@ WantedBy=multi-user.target
 SVC
     chmod 644 "$UNIT"
     systemctl daemon-reload
-    systemctl enable natpunch-client >/dev/null 2>&1
+    # enable 的结果不能吞：这一次能起来（下面还会 restart），但下次重启设备
+    # 就不会自启了，而用户看到的是"安装成功"。失败要在下面明确报出来。
+    if ! systemctl enable natpunch-client >/dev/null 2>&1; then
+        warn "systemctl enable 失败，客户端不会开机自启"
+    fi
     systemctl restart natpunch-client
 fi
 # ---------- 验证 ----------
@@ -328,7 +365,28 @@ if [ "$OK" -eq 1 ]; then
     else
         VER_OUT="$("$BIN" -version 2>/dev/null | head -n1)"
     fi
-    echo "==> 安装成功 ✓ ${VER_OUT:-${VER:-最新版}}"
+    # 自启到底注册上没有 —— 上面只验证了"进程此刻活着"，
+    # 那次能起来不代表下次开机还能起来，两件事必须分开确认。
+    AUTOSTART=0
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        for _f in /etc/rc.d/S*natpunch-client; do
+            if [ -x "$_f" ]; then AUTOSTART=1; break; fi
+        done
+    elif command -v systemctl >/dev/null 2>&1; then
+        systemctl is-enabled --quiet natpunch-client 2>/dev/null && AUTOSTART=1
+    fi
+    if [ "$AUTOSTART" -eq 1 ]; then
+        echo "==> 安装成功 ✓ ${VER_OUT:-${VER:-最新版}}（已注册开机自启）"
+        exit 0
+    fi
+    echo "==> 客户端已启动，但【开机自启未注册】✗" >&2
+    echo "==> 现在能正常用，重启设备后不会自动拉起。请手动补上：" >&2
+    if [ "$IS_OPENWRT" -eq 1 ]; then
+        echo "      $INIT enable" >&2
+    else
+        echo "      systemctl enable natpunch-client" >&2
+    fi
+    exit 3
 else
     echo "==> 启动失败，日志如下："
     if [ "$IS_OPENWRT" -eq 1 ]; then

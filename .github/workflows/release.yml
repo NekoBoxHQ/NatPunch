@@ -30,6 +30,13 @@ jobs:
         run: |
           sh -n install.sh
           sh -n install_server.sh
+          sh -n uninstall_client.sh
+
+      - name: Shell logic self-test
+        # uninstall_client.sh 是升级路径（会停掉客户端再拉起来），出错时是
+        # "静默选错版本 / 静默放行坏包 / 内嵌脚本语法错走到一半断掉"，
+        # 全部不会报错。见 test/upgrade_logic_test.sh 的说明。
+        run: sh test/upgrade_logic_test.sh
 
       - name: Unit tests (exclude integration)
         run: go test ./...

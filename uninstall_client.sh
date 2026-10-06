@@ -11,6 +11,9 @@
 # "新版主脚本 + 旧版 apply" 混搭（曾导致 done 判定失效、卸载提示失真）。
 set -u
 REPO="NekoBoxHQ/NatPunch"
+# 发布方 minisign 公钥，必须与 install.sh / install_server.sh / lib/install 内嵌值一致。
+# 可用环境变量覆盖（自建发布链场景）。
+NP_MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660}"
 ACTION="${1:-uninstall}"
 CLIENT_BIN_1="/usr/bin/natpunch-client"
 CLIENT_BIN_2="/usr/local/bin/natpunch-client"
@@ -49,6 +52,96 @@ fetch_to() {
     [ -s "$2" ] || return 1
     return 0
 }
+# pick_highest_version：从 GitHub releases JSON 里挑版本号最高的 tag。
+#
+# 两个坑都绕开了：
+#   1) /releases/latest 是"按发布时间最新"，不是"版本号最高"。给旧分支补发一个
+#      patch 之后，latest 会指向旧版 —— 升级反而降级。install.sh 早就为此改成
+#      取最高版本了，这里必须对齐。
+#   2) 不用 `sort -V`：busybox 的 sort 直到 1.32 才支持 -V，更老的 OpenWrt 上
+#      会静默退化成字典序，于是 v26.9.9 排在 v26.9.111 后面。这里自己按点分段
+#      做数值比较，任何 awk 都能跑。
+pick_highest_version() {
+    # 逐段做数值比较，不拼成一个大数字串去比 —— awk 的双精度只有 15~17 位
+    # 有效数字，40 位的补零串一比就退化成"只看前几位"，v26.9.111 与 v26.9.120
+    # 会被判相等、v26.9.9 反而排到 v26.9.111 前面（实测踩过）。
+    #
+    # 按 "{" 切块再逐个找 tag_name，而不是按行取第 4 个字段：
+    # 那样只对"每个 tag 独占一行"的响应成立，碰上一行里塞多个对象的
+    # （压缩过的 JSON、镜像改写过的响应）就会只看见第一个，静默选错版本。
+    awk '
+        function setbest(v, a, n,   j) {
+            bestv = v; bn = n
+            for (j = 1; j <= n; j++) b[j] = a[j]
+        }
+        function consider(v,   s, n, i, a, m, x, y) {
+            s = v; sub(/^v/, "", s)
+            n = split(s, a, ".")
+            for (i = 1; i <= n; i++) if (a[i] !~ /^[0-9]+$/) return
+            if (bestv == "") { setbest(v, a, n); return }
+            m = (n > bn) ? n : bn
+            for (i = 1; i <= m; i++) {
+                x = (i <= n)  ? a[i] + 0 : 0
+                y = (i <= bn) ? b[i] + 0 : 0
+                if (x > y) { setbest(v, a, n); return }
+                if (x < y) return
+            }
+        }
+        {
+            c = split($0, chunk, "{")
+            for (k = 1; k <= c; k++) {
+                if (chunk[k] !~ /"tag_name"[[:space:]]*:/) continue
+                split(chunk[k], q, "\"")
+                if (q[4] != "") consider(q[4])
+            }
+        }
+        END { if (bestv != "") print bestv }
+    '
+}
+# verify_package：下载后的完整性校验。install.sh 早就有这套（SHA256 强制 +
+# minisign 分级），更新路径一直是裸的 —— 只做了个 tar 结构检查，等于把
+# "从网上拿一个 root 二进制并立刻执行"这件事完全托付给 HTTPS。
+# 这里补齐到与 install.sh 同级：SHA256 强制；有 minisign 就强制验签，
+# 没有就告警放行（与 install.sh 的降级策略一致）。
+verify_package() {
+    _pkg="$1"; _dir="$2"; _base="$3"
+    if ! fetch_to "$_base/SHA256SUMS" "$_dir/SHA256SUMS"; then
+        warn "获取 SHA256SUMS 失败"
+        return 1
+    fi
+    # SHA256SUMS 的第二列可能带一个前导 '*'（coreutils 的二进制模式标记，
+    # Windows 上的 sha256sum 默认就带）。去掉再比，免得整份校验静默失效。
+    _expect="$(awk -v f="$_pkg" '{ gsub(/^\*/, "", $2) } $2==f {print $1; exit}' "$_dir/SHA256SUMS")"
+    [ -n "$_expect" ] || { warn "SHA256SUMS 中没有 $_pkg 条目"; return 1; }
+    if command -v sha256sum >/dev/null 2>&1; then
+        _actual="$(sha256sum "$_dir/pkg.tar.gz" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        _actual="$(shasum -a 256 "$_dir/pkg.tar.gz" | awk '{print $1}')"
+    else
+        warn "未找到 sha256sum/shasum，无法校验"
+        return 1
+    fi
+    [ "$_expect" = "$_actual" ] || {
+        warn "sha256 校验失败（期望 $_expect，实际 $_actual）"
+        return 1
+    }
+    log "sha256 校验通过"
+    if ! fetch_to "$_base/SHA256SUMS.minisig" "$_dir/SHA256SUMS.minisig"; then
+        warn "发布未提供 SHA256SUMS.minisig，跳过签名校验（SHA256 已强制校验）"
+        return 0
+    fi
+    if command -v minisign >/dev/null 2>&1; then
+        minisign -Vm "$_dir/SHA256SUMS" -P "$NP_MINISIGN_PUBKEY" \
+            -x "$_dir/SHA256SUMS.minisig" >/dev/null 2>&1 || {
+            warn "minisign 签名校验失败"
+            return 1
+        }
+        log "minisign 签名校验通过"
+    else
+        warn "系统没有 minisign，跳过签名校验（SHA256 已强制校验）"
+    fi
+    return 0
+}
 # ---------- 修改 systemd unit 的 KillMode ----------
 # 使用 grep + echo 追加，避免 busybox sed 不支持 a 命令
 ensure_killmode_process() {
@@ -81,23 +174,51 @@ do_update() {
         aarch64|arm64)  PKG="linux_arm64_client.tar.gz" ;;
         *) die "不支持架构: $ARCH（当前仅支持 x86_64 / arm64）" ;;
     esac
-    VER=""
+    # 取版本号最高的 tag（不是 /releases/latest），拿不到就退回 latest 并告警
+    VER_LIST=""
     if [ "$HAS_WGET" -eq 1 ]; then
-        VER="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-            | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+        VER_LIST="$(wget -qO- --timeout=10 \
+            "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
     else
-        VER="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-            | grep '"tag_name"' | head -n1 | sed 's/.*: *"\([^"]*\)".*/\1/')"
+        VER_LIST="$(curl -fsSL --max-time 10 \
+            "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
     fi
-    log "最新版本: ${VER:-最新发布}"
-    URL="https://github.com/$REPO/releases/latest/download/$PKG"
+    VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
+    if [ -n "$VER" ]; then
+        BASE_URL="https://github.com/$REPO/releases/download/$VER"
+        log "目标版本: $VER"
+    else
+        BASE_URL="https://github.com/$REPO/releases/latest/download"
+        warn "无法确定最高版本号，回退到 releases/latest（可能不是最新版）"
+    fi
+    # 已经是最新版本就别动。升级 = 停客户端 → 断隧道 → 再拉起来，
+    # 版本没变还走一遍，等于白给自己制造一次失联窗口。
+    if [ -n "$VER" ]; then
+        CUR="$(tcmd 5 "$CLIENT_BIN_1" -version 2>/dev/null \
+            | sed -n 's/^Version: *//p' | head -n1)"
+        if [ -z "$CUR" ] && [ -f "$CLIENT_BIN_2" ]; then
+            CUR="$(tcmd 5 "$CLIENT_BIN_2" -version 2>/dev/null \
+                | sed -n 's/^Version: *//p' | head -n1)"
+        fi
+        if [ -n "$CUR" ] && [ "$CUR" = "$VER" ]; then
+            log "当前已是最新版本 $VER，无需更新"
+            exit 0
+        fi
+        [ -n "$CUR" ] && log "当前版本 $CUR → $VER"
+    fi
+    URL="$BASE_URL/$PKG"
     TMP_DIR="/tmp/natpunch_update.$$"
     rm -rf "$TMP_DIR"
     mkdir -p "$TMP_DIR" || die "无法创建临时目录"
     # 下载/解压阶段失败时自动清理临时目录；
-    # 后台 apply 脚本就绪并 setsid 启动后，由 apply 脚本负责清理，这里再解除 trap
+    # 后台 apply 脚本就绪并脱离会话启动后，由 apply 脚本负责清理，这里再解除 trap
     trap 'rm -rf "$TMP_DIR" 2>/dev/null || true' EXIT INT TERM
     fetch_to "$URL" "$TMP_DIR/pkg.tar.gz" || die "下载失败: $URL"
+    # 完整性校验：与 install.sh 同级（SHA256 强制 + minisign 分级）。
+    # 放在这里（前台、可见）而不是后台 apply 里 —— 校验失败要当场报出来，
+    # 不能让升级在后台悄悄中止。
+    verify_package "$PKG" "$TMP_DIR" "$BASE_URL" \
+        || die "包完整性校验失败，已中止升级（当前客户端未被动过）"
     tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"
     tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || die "解压失败"
     BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client 2>/dev/null | head -n1)"
@@ -277,11 +398,23 @@ start_client() {
         TLS="$(get_conf TLS_FLAG)"
         [ -z "$PRT" ] && PRT=8024
         [ -z "$SRV" ] || [ -z "$VKY" ] && { warn "配置缺少 SERVER 或 VKEY"; return 1; }
+        # install.sh 写配置时是 TLS_FLAG='...'，get_conf 取回来仍带着那对单引号。
+        # 不剥掉的话下面按空格切词时，最后一个参数的尾巴上会挂一个引号
+        # （实测：-tls_fingerprint=AB:CD 变成 -tls_fingerprint=AB:CD'），
+        # 而且裸写成 TLS_FLAG='true' 时 case 的 true 分支根本匹配不上。
+        TLS="$(printf '%s' "$TLS" | tr -d "'\"")"
         # 参数化启动，不用 eval：SERVER/VKEY 仅作为参数传给二进制，
         # 不会被 shell 解释，杜绝配置文件内容注入命令
+        # 重建启动参数。原来只还原了 -tls_enable=true，把 -tls_fingerprint 丢了：
+        # 配了指纹固定（F2-2）的场景走兜底路径时指纹不生效，开了 tls_strict
+        # 还会直接拒绝启动。这里从 TLS_FLAG 里把两个都抠出来。
         TLS_ARG=""
         case "$TLS" in
-            *tls_enable=true*|*tls=true*|true|1) TLS_ARG="-tls_enable=true" ;;
+            *tls_enable=true*|*tls=true*|true|1)
+                TLS_ARG="-tls_enable=true"
+                FP="$(printf '%s\n' "$TLS" | awk '{for(i=1;i<=NF;i++) if ($i ~ /^-tls_fingerprint=/) {sub(/^-tls_fingerprint=/,"",$i); print $i; exit}}')"
+                [ -n "$FP" ] && TLS_ARG="$TLS_ARG -tls_fingerprint=$FP"
+                ;;
         esac
         # shellcheck disable=SC2086（TLS_ARG 为空或固定白名单值）
         nohup "$CLIENT_BIN_1" -server="$SRV:$PRT" -vkey="$VKY" -type=tcp $TLS_ARG >> /tmp/natpunch-client.log 2>&1 &
@@ -291,6 +424,7 @@ start_client() {
     return 1
 }
 log "替换完成，启动客户端..."
+UPDATE_OK=0
 if ! start_client; then
     if [ -f "${CLIENT_BIN_1}.update_bak" ]; then
         warn "新版本启动失败，自动回滚旧版本"
@@ -299,6 +433,7 @@ if ! start_client; then
         [ -f "$CLIENT_BIN_2" ] && { cp -f "${CLIENT_BIN_1}.update_bak" "$CLIENT_BIN_2"; chmod 755 "$CLIENT_BIN_2"; }
         if start_client; then
             log "更新完成（回滚后启动）"
+            UPDATE_OK=1
             rm -f "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
         else
             warn "回滚后仍无法启动，请检查 $CLIENT_BIN_1 与 /etc/natpunch.conf"
@@ -308,9 +443,21 @@ if ! start_client; then
     fi
 else
     log "更新完成"
+    UPDATE_OK=1
     rm -f "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
 fi
 rm -rf "$TMP_DIR"
+if [ "$UPDATE_OK" -eq 0 ]; then
+    # 升级失败了就明说。原来无论成败一律 exit 0，外面（面板 / 脚本调用方）
+    # 看不出区别。另外提醒一句：服务是 enabled 状态没被碰过，
+    # 重启设备仍然能恢复，不必现场处理。
+    warn "升级失败：客户端当前处于停止状态。服务仍是 enabled，重启设备即可恢复。"
+    if [ -f "${CLIENT_BIN_1}.update_bak" ]; then
+        warn "旧版本已保留在 ${CLIENT_BIN_1}.update_bak，可手动拷回。"
+    fi
+    warn "日志见 ${NP_UPDATE_LOG:-/tmp/natpunch_update.log}"
+    exit 4
+fi
 # 自删唯一副本
 (
     sleep 1
@@ -325,22 +472,112 @@ APPLY
         ensure_killmode_process "$CLIENT_SYSTEMD_2"
         tcmd 10 systemctl daemon-reload >/dev/null 2>&1 || true
     fi
+    # —— 脱离手段探测 ——
+    # 升级要在"自己的 SSH 通道被切断"的前提下跑完，所以 apply 脚本必须活过
+    # 客户端被 stop 的那一刻。setsid 只换 session / 进程组，**不换 cgroup**：
+    # 在 systemd 上真正保险的是把 apply 放进独立单元（独立 cgroup），
+    # 这样 systemctl stop natpunch-client 怎么都杀不到它，不再只依赖 KillMode
+    # 有没有写成功。两者都没有时宁可拒绝，也不要赌。
+    HAS_SETSID=0
+    command -v setsid >/dev/null 2>&1 && HAS_SETSID=1
+    HAS_SYSTEMD_RUN=0
+    # 判据用 /run/systemd/system 是否存在（systemd 真的是 1 号进程），
+    # 不要用 `systemctl is-system-running` —— 它在 degraded 状态下返回非零，
+    # 会把一台跑得好好的机器误判成"没有 systemd"，进而误判成"没有脱离手段"。
+    if [ -d /run/systemd/system ] && command -v systemd-run >/dev/null 2>&1; then
+        HAS_SYSTEMD_RUN=1
+    fi
+    if [ "$HAS_SYSTEMD_RUN" -eq 0 ] && [ "$HAS_SETSID" -eq 0 ]; then
+        die "缺少 setsid / systemd-run，无法让升级脚本脱离当前会话。
+    你的 SSH 很可能正是通过这个客户端的隧道进来的：原地替换二进制会把连接
+    一起切断，而没有脱离手段时没人接手，升级可能停在半路（客户端停着）。
+    脚本拒绝在缺脱离手段的情况下继续，请先补上 setsid 或改在带外通道升级。"
+    fi
+    # —— 看门狗：独立于 apply、独立于客户端 cgroup ——
+    # 万一 apply 自己也被连带杀掉（KillMode 没写进去、procd 按进程组清场…），
+    # 那段时间客户端就是停着的，没人拉起来 = 彻底失联。先挂一个
+    # "过一会儿还不 alive 就把它拉起来"的独立任务，作为最后一道保险。
+    # 幂等：客户端在跑就什么都不做，重复触发也无害。
+    GUARD="/tmp/natpunch_guard.$$"
+    cat > "$GUARD" <<'GUARD'
+#!/bin/sh
+# 由 uninstall_client.sh 生成：升级看门狗。
+# 等一段时间后确认客户端是否还在跑，不在就按当前环境的服务管理器拉起。
+set -u
+DELAY="${NP_GUARD_DELAY:-90}"
+CLIENT_INIT="${NP_CLIENT_INIT:-/etc/init.d/natpunch-client}"
+LOG="${NP_UPDATE_LOG:-/tmp/natpunch_update.log}"
+log() { echo "$(date '+%F %T') [guard] $*" >> "$LOG" 2>/dev/null; }
+client_running() {
+    SELF_PID=$$
+    if [ -d /proc ]; then
+        for d in /proc/[0-9]*; do
+            p=${d#/proc/}
+            [ "$p" = "$SELF_PID" ] && continue
+            exe=$(readlink "$d/exe" 2>/dev/null) || continue
+            case "$(basename "$exe" 2>/dev/null)" in
+                "natpunch-client"|"natpunch-client (deleted)") return 0 ;;
+            esac
+        done
+        return 1
+    fi
+    ps w 2>/dev/null | grep -v grep | grep -q 'natpunch-client'
+}
+sleep "$DELAY"
+if client_running; then
+    log "客户端在运行，看门狗不介入"
+    exit 0
+fi
+log "等待 ${DELAY}s 后客户端仍不在，尝试拉起"
+if [ -x "$CLIENT_INIT" ]; then
+    "$CLIENT_INIT" start >>"$LOG" 2>&1 || true
+elif command -v systemctl >/dev/null 2>&1; then
+    systemctl start natpunch-client >>"$LOG" 2>&1 || true
+fi
+sleep 3
+if client_running; then
+    log "看门狗已把客户端拉回"
+else
+    log "看门狗拉起失败，需要人工介入"
+fi
+GUARD
+    chmod 755 "$GUARD"
     echo "==> 升级文件已就绪，流程转入后台执行"
     echo "==> SSH 断开后自动完成替换与重启，日志: $UPDATE_LOG"
     echo "==> 完成后客户端自动重启，隧道恢复后请重新连接"
-    # —— setsid 彻底脱离会话 ——
-    if command -v setsid >/dev/null 2>&1; then
-        NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" \
-        NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" \
-        NP_CLIENT_INIT="$CLIENT_INIT" \
-        NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" \
-        setsid sh "$APPLY" > "$UPDATE_LOG" 2>&1 < /dev/null &
+    # 先挂看门狗（独立进程），再起 apply —— 顺序不能反，
+    # 否则 apply 万一瞬间被杀就没有保险了。
+    if [ "$HAS_SYSTEMD_RUN" -eq 1 ]; then
+        systemd-run --unit="natpunch-guard-$$" --collect \
+            --setenv=NP_CLIENT_INIT="$CLIENT_INIT" \
+            --setenv=NP_UPDATE_LOG="$UPDATE_LOG" \
+            /bin/sh "$GUARD" >/dev/null 2>&1 \
+            || warn "看门狗启动失败（systemd-run），升级仍会继续"
+    else
+        NP_CLIENT_INIT="$CLIENT_INIT" NP_UPDATE_LOG="$UPDATE_LOG" \
+            setsid sh "$GUARD" >/dev/null 2>&1 < /dev/null &
+    fi
+    # —— 启动 apply ——
+    if [ "$HAS_SYSTEMD_RUN" -eq 1 ]; then
+        # 独立单元 = 独立 cgroup：客户端怎么被 stop 都杀不到它
+        systemd-run --unit="natpunch-apply-$$" --collect \
+            --property=StandardOutput="append:$UPDATE_LOG" \
+            --property=StandardError="append:$UPDATE_LOG" \
+            --setenv=NP_TMP_DIR="$TMP_DIR" --setenv=NP_BIN_SRC="$BIN_SRC" \
+            --setenv=NP_CLIENT_BIN_1="$CLIENT_BIN_1" \
+            --setenv=NP_CLIENT_BIN_2="$CLIENT_BIN_2" \
+            --setenv=NP_CLIENT_INIT="$CLIENT_INIT" \
+            --setenv=NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" \
+            --setenv=NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" \
+            --setenv=NP_UPDATE_LOG="$UPDATE_LOG" \
+            /bin/sh "$APPLY" >/dev/null 2>&1 \
+            || die "systemd-run 启动升级单元失败，已中止（当前客户端未被动过）"
     else
         NP_TMP_DIR="$TMP_DIR" NP_BIN_SRC="$BIN_SRC" \
         NP_CLIENT_BIN_1="$CLIENT_BIN_1" NP_CLIENT_BIN_2="$CLIENT_BIN_2" \
         NP_CLIENT_INIT="$CLIENT_INIT" \
         NP_CLIENT_SYSTEMD_1="$CLIENT_SYSTEMD_1" NP_CLIENT_SYSTEMD_2="$CLIENT_SYSTEMD_2" \
-        nohup sh "$APPLY" > "$UPDATE_LOG" 2>&1 < /dev/null &
+        setsid sh "$APPLY" > "$UPDATE_LOG" 2>&1 < /dev/null &
     fi
     # 清空 trap，避免 EXIT 删掉 $TMP_DIR（由 apply 脚本清理）
     trap - EXIT INT TERM
