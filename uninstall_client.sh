@@ -218,11 +218,21 @@ ensure_killmode_process() {
     # restart 之后一个 29 分钟前的旧进程和新进程同时连着。
     # 整行覆盖成已知的正确形态，不依赖旧行长什么样；失败只告警，不阻断升级。
     if grep -q '^ExecStart=/bin/sh -c ' "$U" 2>/dev/null; then
-        cp -a "$U" "/tmp/natpunch-unit-$(basename "$U").pre_directexec.bak" 2>/dev/null || true
-        awk '/^ExecStart=\/bin\/sh -c /{print "ExecStart=\/usr\/bin\/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}"; next} {print}' "$U" > "$U.tmp" \
+        BAK="/tmp/natpunch-unit-$(basename "$U").pre_directexec.bak"
+        cp -a "$U" "$BAK" 2>/dev/null || true
+        # 不要写成正则字面量 /^ExecStart=\/bin\/sh -c /、也不要在替换串里写 \/ ——
+        # Debian 的 awk 是 **mawk**，它不把字符串里的 \/ 折成 /，会原样写进文件，
+        # 结果是 ExecStart=\/usr\/bin\/... 这种坏单元（systemd 直接起不来）。
+        # 用 -v 传新行 + 字符串匹配，全程不出现反斜杠，mawk / gawk / busybox awk 一致。
+        awk -v new='ExecStart=/usr/bin/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}' \
+            '$0 ~ "^ExecStart=/bin/sh -c " { print new; next } { print }' "$U" > "$U.tmp" \
             && mv "$U.tmp" "$U" || rm -f "$U.tmp"
-        grep -q '^ExecStart=/usr/bin/natpunch-client ' "$U" 2>/dev/null \
-            || echo "==> 警告: 改写 ExecStart 失败，单元仍是 sh -c 包裹（下次 stop 会留下残留客户端）" >&2
+        if ! grep -q '^ExecStart=/usr/bin/natpunch-client ' "$U" 2>/dev/null; then
+            # 改写没成功就把备份放回去 —— 绝不能留下一个坏单元（那会让服务起不来），
+            # 宁可维持现状（客户端会漏杀，但不影响启动与连接）。
+            [ -f "$BAK" ] && cp -a "$BAK" "$U" 2>/dev/null
+            echo "==> 警告: 改写 ExecStart 失败，已回滚单元原样（不影响启动，但 stop 仍会留下残留客户端）" >&2
+        fi
     fi
     if grep -q '^KillMode=' "$U" 2>/dev/null; then
         # 用 awk 原地替换，busybox 兼容
@@ -344,11 +354,21 @@ ensure_killmode_process() {
     # restart 之后一个 29 分钟前的旧进程和新进程同时连着。
     # 整行覆盖成已知的正确形态，不依赖旧行长什么样；失败只告警，不阻断升级。
     if grep -q '^ExecStart=/bin/sh -c ' "$U" 2>/dev/null; then
-        cp -a "$U" "/tmp/natpunch-unit-$(basename "$U").pre_directexec.bak" 2>/dev/null || true
-        awk '/^ExecStart=\/bin\/sh -c /{print "ExecStart=\/usr\/bin\/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}"; next} {print}' "$U" > "$U.tmp" \
+        BAK="/tmp/natpunch-unit-$(basename "$U").pre_directexec.bak"
+        cp -a "$U" "$BAK" 2>/dev/null || true
+        # 不要写成正则字面量 /^ExecStart=\/bin\/sh -c /、也不要在替换串里写 \/ ——
+        # Debian 的 awk 是 **mawk**，它不把字符串里的 \/ 折成 /，会原样写进文件，
+        # 结果是 ExecStart=\/usr\/bin\/... 这种坏单元（systemd 直接起不来）。
+        # 用 -v 传新行 + 字符串匹配，全程不出现反斜杠，mawk / gawk / busybox awk 一致。
+        awk -v new='ExecStart=/usr/bin/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}' \
+            '$0 ~ "^ExecStart=/bin/sh -c " { print new; next } { print }' "$U" > "$U.tmp" \
             && mv "$U.tmp" "$U" || rm -f "$U.tmp"
-        grep -q '^ExecStart=/usr/bin/natpunch-client ' "$U" 2>/dev/null \
-            || echo "==> 警告: 改写 ExecStart 失败，单元仍是 sh -c 包裹（下次 stop 会留下残留客户端）" >&2
+        if ! grep -q '^ExecStart=/usr/bin/natpunch-client ' "$U" 2>/dev/null; then
+            # 改写没成功就把备份放回去 —— 绝不能留下一个坏单元（那会让服务起不来），
+            # 宁可维持现状（客户端会漏杀，但不影响启动与连接）。
+            [ -f "$BAK" ] && cp -a "$BAK" "$U" 2>/dev/null
+            echo "==> 警告: 改写 ExecStart 失败，已回滚单元原样（不影响启动，但 stop 仍会留下残留客户端）" >&2
+        fi
     fi
     if grep -q '^KillMode=' "$U" 2>/dev/null; then
         awk 'BEGIN{FS=OFS="="} /^KillMode=/{print "KillMode","process"; next} {print}' "$U" > "$U.tmp" \
