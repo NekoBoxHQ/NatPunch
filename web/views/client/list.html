@@ -258,7 +258,10 @@
                 formatter: function (value, row, index) {
                     var dom = location.hostname;
                     var port = "{{if .tls_enable}}{{.tls_p}}{{else}}{{.p}}{{end}}";
-                    var tlsFlag = "{{if .tls_enable}}-tls_enable=true{{end}}";
+                    // 带上桥接证书指纹（F2-2）。上面的「TLS 命令」早就带了，这两个部署按钮一直漏着 ——
+                    // 拿它们装的客户端只会警告"TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，
+                    // 不防中间人"，实测 24 小时能刷 136 条。两个 flag 用空格分隔，install.sh 逐段校验。
+                    var tlsFlag = "{{if .tls_enable}}-tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}{{end}}";
                     var ow = "uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
                     var lx = "wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " " + tlsFlag;
                     return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id

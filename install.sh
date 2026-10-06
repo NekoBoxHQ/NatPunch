@@ -66,9 +66,23 @@ esac
 case "$SERVER" in
     *[!A-Za-z0-9._-]*) die "SERVER 含非法字符（仅允许字母数字 . _ -）";;
 esac
-case "$TLS_FLAG" in
-    *[!A-Za-z0-9._=-]*) die "TLS_FLAG 含非法字符";;
-esac
+# TLS_FLAG 允许带多个 flag（空格分隔），例如
+#   '-tls_enable=true -tls_fingerprint=<sha256>'
+# 面板的「部署」按钮就是这么下发的（带上证书指纹才能防中间人）。
+# 逐段校验：每段必须以 - 开头（是 flag，不是别的命令），字符集只允许字母数字 . _ - =。
+# 空格是段分隔符本身，'　" ; ` $ 这些一概拒绝 —— 它们会破坏 unit / init.d 的引号结构。
+if [ -n "${TLS_FLAG:-}" ]; then
+    # shellcheck disable=SC2086（这里就是要按空格分词）
+    for _tok in $TLS_FLAG; do
+        case "$_tok" in
+            -*) ;;
+            *) die "TLS_FLAG 的每一段都必须是 - 开头的 flag: $_tok";;
+        esac
+        case "$_tok" in
+            *[!A-Za-z0-9._=-]*) die "TLS_FLAG 含非法字符: $_tok";;
+        esac
+    done
+fi
 # ---------- 环境检测 ----------
 IS_OPENWRT=0
 [ -f /etc/openwrt_release ] && IS_OPENWRT=1
@@ -377,16 +391,23 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/natpunch.conf
-# 必须直接 exec 客户端本体，**不要**用 /bin/sh -c 包一层。
-# 包一层的话 systemd 眼里的"主进程"是那个 sh 壳，而 KillMode=process（见下）
-# 只杀主进程 —— 于是 systemctl stop / restart 之后真正的 natpunch-client 会活下来、
-# 被 init 收养（PPID=1），下一次启动又多一个。每升一次级就多一个同 vkey 的客户端，
-# 一起连服务端、抢同一条隧道。真机上抓到过：restart 之后一个 29 分钟前的旧进程
-# 和新进程同时连着服务端，systemd 只能记一句
-#   "Unit process <pid> (natpunch-client) remains running after unit stopped."
-# 变量展开交给 systemd 自己做（EnvironmentFile 里的 ${SERVER} 等）；缺值会直接
-# 起不来而不是静默传空 —— 这正是想要的行为。
-ExecStart=/usr/bin/natpunch-client -server=${SERVER}:${PORT} -vkey=${VKEY} -type=tcp ${TLS_FLAG}
+# 用 /bin/sh -c 'exec ...' 包一层，两个目的同时达成，缺一不可：
+#
+#   · exec：shell 被客户端本体替换掉（PID 不变）→ systemd 眼里的主进程就是客户端，
+#     配合下面的 KillMode=process 才杀得干净。**不 exec** 的写法（主进程=sh 壳）
+#     stop/restart 只杀壳，真正的 natpunch-client 活下来被 init 收养（PPID=1），
+#     下次启动又多一个同 vkey 的客户端、一起连服务端抢同一条隧道。真机上抓到过：
+#     restart 之后一个 29 分钟前的旧进程和新进程同时连着服务端，systemd 只记一句
+#       "Unit process <pid> (natpunch-client) remains running after unit stopped."
+#
+#   · 保留 shell：${TLS_FLAG} 里可能有多个 flag，靠 shell 分词展开。**systemd 自己
+#     不按空格拆分变量** —— 实测 ExecStart=... ${TLS_FLAG} 配
+#     TLS_FLAG='-tls_enable=true -tls_fingerprint=abc' 会把两个 flag 当成**一个参数**
+#     传进去。去掉 shell 就等于把带指纹的那条部署命令悄悄弄坏。
+#
+# ${SERVER} ${PORT} ${VKEY} 仍交给 systemd 从 EnvironmentFile 展开：unit 是 0644，
+# 不能把 vkey 写成字面量。
+ExecStart=/bin/sh -c 'exec /usr/bin/natpunch-client -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG}'
 Restart=always
 RestartSec=3
 # KillMode=process：stop 只杀主进程，不连带杀面板 SSH 场景下的更新子脚本

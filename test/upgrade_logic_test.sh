@@ -230,21 +230,35 @@ echo "== 8. systemd 客户端单元不能把 ExecStart 包成 sh -c =="
 # 活下来被 init 收养（PPID=1），下次启动再多一个同 vkey 的客户端，一起连服务端抢同一条
 # 隧道。真机上抓到过：restart 之后一个 29 分钟前的旧进程和新进程同时在连。
 # 这两条是配套的，改一条必须看另一条。
-if grep -q '^ExecStart=/usr/bin/natpunch-client ' "$INSTALL"; then
-    ok "install.sh 的 ExecStart 直接 exec 客户端本体"
+# 目标形态：/bin/sh -c 'exec <客户端> ...' —— exec 让 systemd 的主进程就是客户端，
+# 保留 shell 又让 ${TLS_FLAG} 里的多个 flag 能按空格展开。两者缺一不可，见单元里的长注释。
+if grep -q "^ExecStart=/bin/sh -c 'exec /usr/bin/natpunch-client " "$INSTALL"; then
+    ok "install.sh 的 ExecStart 是 sh -c 'exec 客户端' 形态"
 else
-    bad "install.sh 的 ExecStart 不是直接 exec 客户端本体 —— 配合 KillMode=process 会漏杀客户端"
+    bad "install.sh 的 ExecStart 不是 sh -c 'exec ...' 形态 —— 要么漏杀客户端，要么多 flag 会被 systemd 当成一个参数"
 fi
-if grep -q 'ExecStart=/bin/sh -c' "$INSTALL"; then
-    bad "install.sh 里还有 ExecStart=/bin/sh -c 包裹（会漏杀客户端）"
+if grep -qE "^ExecStart=/usr/bin/natpunch-client |^ExecStart=/bin/sh -c '/usr/bin/natpunch-client " "$INSTALL"; then
+    bad "install.sh 里还有旧的 ExecStart 形态（不 exec 会漏杀 / 无 shell 时变量不拆分）"
 else
-    ok "install.sh 里没有 sh -c 包裹的 ExecStart"
+    ok "install.sh 里没有旧的 ExecStart 形态"
 fi
-# 存量机器靠更新路径改单元（不是所有人都会重装）
-if grep -q 'pre_directexec' "$SRC" && grep -q 'natpunch-client -server=\${SERVER}' "$SRC"; then
-    ok "uninstall_client.sh 会把存量单元里的 ExecStart 改回直接 exec"
+# TLS_FLAG 必须允许多个 flag：面板的部署命令要带证书指纹
+if grep -q 'TLS_FLAG 的每一段都必须是' "$INSTALL"; then
+    ok "install.sh 逐段校验 TLS_FLAG（允许多 flag）"
 else
-    bad "uninstall_client.sh 不修存量单元的 ExecStart —— 更新后仍会留下残留客户端"
+    bad "install.sh 还只把 TLS_FLAG 当单段 —— 带指纹的部署命令会被它 die 掉"
+fi
+# 面板的部署按钮必须下发证书指纹（手工「TLS 命令」早就带了，这两个按钮一直漏）
+if grep -q 'bridge_fingerprint}} -tls_fingerprint=' web/views/client/list.html 2>/dev/null; then
+    ok "面板部署按钮下发了 -tls_fingerprint"
+else
+    bad "面板部署按钮没带 -tls_fingerprint —— 装出来的客户端只防被动窃听，日志会刷警告"
+fi
+# 存量机器靠更新路径迁移单元（不是所有人都会重装）
+if grep -q 'pre_execform' "$SRC" && grep -q 'exec /usr/bin/natpunch-client' "$SRC"; then
+    ok "uninstall_client.sh 会把存量单元迁移到 exec 形态"
+else
+    bad "uninstall_client.sh 不迁移存量单元的 ExecStart —— 更新后仍会漏杀客户端"
 fi
 
 echo "== 9. 面板终端 WS 必须关掉 beego 的模板渲染 =="
