@@ -2,6 +2,41 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.2（已发布）
+
+### 修复
+- **面板终端的提示符与电脑 SSH 不一致**。面板起 shell 时用 `os.UserHomeDir()` 取家目录，
+  而它读的是**客户端进程**的 `$HOME` —— `natpunch-client` 由 procd / systemd 拉起，
+  那里 `HOME` 就是 `/`。于是 shell 以 `/` 为家，而 bash 在 `HOME="/"` 时不做 `~` 替换，
+  提示符显示成 `root@host:/#`；同一台机器用电脑 SSH 登进去却是 `root@host:~#`。
+  现改为优先查 `/etc/passwd` 里该用户的真实家目录（`CGO_ENABLED=0` 下 `os/user` 走纯 Go
+  解析 `/etc/passwd`，OpenWrt 一样可用），明确拒绝 `/`，最后兜底 `/root`。
+- **面板终端右键无法复制**（`web/views/terminal/index.html`）。`contextmenu` 处理器无条件
+  `e.preventDefault()`，把浏览器自带的右键菜单整个吃掉；而它接下去依赖的
+  `navigator.clipboard.readText()` 只在安全上下文（HTTPS / localhost）才存在 ——
+  面板通常是 `http://ip:8081`，该 API 根本不存在。
+  两者叠加的结果是**右键既不能复制也不能粘贴，等于彻底失效**。
+  现改为：有选中内容时放行浏览器菜单（「复制」恢复可用）；只有没选中、且剪贴板 API 确实
+  存在时才当右键粘贴。另补 `Ctrl+Shift+C` / `Ctrl+Insert` 复制，走 `execCommand('copy')`
+  —— 这是 HTTP 下面板唯一还能用的复制路径（`Ctrl+C` 要留给 SIGINT，不能占用）。
+
+### 工程化
+- **面板 shell 的环境不再整体继承守护进程**（新增 `client/shellenv.go`）。面板 shell 此前是
+  用 `append(os.Environ(), ...)` 起的，有两个问题：
+  - 环境数组里出现重复项时 `getenv` 取的是**第一个**匹配项，直接 append 的注入值会被继承
+    来的旧值静默顶掉 —— 也就是说 `HOME` / `PS1` / `TERM` 三行注入**本来就是无效写法**。
+  - 客户端是被 procd / systemd 拉起的，那份环境与「电脑 SSH 新登录」完全不是一回事。
+
+  现改为 `HOME` / `PS1` / `TERM` / `HOSTNAME` 四个键先摘掉再追加，其余变量原样保留。
+  `HOSTNAME` 用 `os.Hostname()`（内核真名）覆盖：bash 与 busybox ash 都只在 `$HOSTNAME`
+  未设置时才用内核名补上，继承来的陈旧值会被原样留着，而任何用 `$HOSTNAME` 拼提示符的
+  profile 都会显示它。
+  （附一条实测确认的结论：提示符的 `\h` / `\H` 读的是**内核 hostname**，不吃 `$HOSTNAME`
+  —— bash 5.x 与 busybox `libbb/lineedit.c` 的 `safe_gethostname()` 皆然。）
+- 新增 `client/shellenv_test.go`：4 个单测覆盖上述行为，重点断言环境数组里**不出现重复键**
+  以及 `pickHome` 拒绝 `/`。已验证该测试对修复前的实现全部失败（`pickHome(["/"]) = "/"`、
+  四个键重复），不是写完就算的摆设。
+
 ## v26.10.1（已发布）
 
 ### 修复
