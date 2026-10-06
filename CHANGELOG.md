@@ -2,6 +2,29 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.8（已发布）
+
+### 修复
+- **面板「OpenWrt 部署 / Linux 部署」按钮没下发证书指纹**（真机上发现：客户端日志 24 小时
+  刷了 136 条 `TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，不防中间人`）。
+  同一个页面上手工那条「TLS 命令」早就带了 `-tls_fingerprint=`，两个部署按钮一直漏着 ——
+  拿它们装的客户端，桥接证书不会被固定。
+
+  补这条时踩到两个连在一起的坑：
+  - `install.sh` 原来把第 4 个参数 `TLS_FLAG` 当**单段**校验，带空格的
+    `'-tls_enable=true -tls_fingerprint=xxx'` 会被直接 die 掉。现在逐段校验
+    （每段必须 `-` 开头、字符集限定 `A-Za-z0-9._=-`），空格作为分隔符本身。
+  - **systemd 不按空格拆分变量**：`ExecStart=... ${TLS_FLAG}` 配两段值，会把两个 flag 当成
+    **一个参数**传进去（在真机上用一次性 unit 实测确认）。所以 unit 的 ExecStart 改成
+    `/bin/sh -c 'exec <客户端> ... ${TLS_FLAG}'` —— `exec` 保证 systemd 的主进程就是客户端
+    （配合 `KillMode=process` 才杀得干净，v26.10.5 那条），保留 shell 又保证多 flag 能展开。
+    **两者缺一不可**：不 exec 会漏杀客户端；没有 shell 则带指纹的部署命令会被悄悄弄坏。
+  - 更新路径的单元迁移同步改成这个形态；替换行改从 heredoc 写的**文件**里读，不再用
+    `awk -v` 传值（awk -v 会处理反斜杠转义 —— mawk 不折 `\/` 那次就是这么中的）。
+    已在装 mawk 的机器上实测：两种旧形态都能正确迁移、不产生反斜杠、行仍在 `[Service]` 里。
+- `test/upgrade_logic_test.sh` 第 8 节改成钉新形态，并新增两条断言：`install.sh` 必须逐段校验
+  `TLS_FLAG`、面板部署按钮必须下发 `-tls_fingerprint`。
+
 ## v26.10.7（已发布）
 
 ### 工程化
