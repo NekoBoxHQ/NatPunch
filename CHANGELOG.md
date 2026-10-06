@@ -2,6 +2,51 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.3（已发布）
+
+> 本版是拿两台真机（Debian 12 + systemd 的服务端、iStoreOS + procd 的客户端）逐项比对之后改的。
+
+### 修复
+- **面板终端每开一次，服务端就 panic 一次**。beego 在 action 返回后有这么一段判断：
+
+  ```go
+  if !context.ResponseWriter.Started && context.Output.Status == 0 {
+      if BConfig.WebConfig.AutoRender { execController.Render() }
+  }
+  ```
+
+  而 WebSocket 的 hijack 不经过 beego 的 `Write` / `WriteHeader` —— `Started` 一直是 false、
+  `Status` 也还是 0，于是它认定"这个响应还没写过"，按 `控制器名/动作名` 去渲染
+  `views/terminalcontroller/ws.tpl`。那个模板不存在 → `template.go:75` panic →
+  被 beego 的 recover 抓住，打一整串 `[C]` 级别堆栈。
+
+  **成功的终端会话结束时也会走一遍这个判断**，所以是"每开一次终端 panic 一次"。
+  功能不受影响（连接已经 hijack 走了，用户无感），但日志被灌满 `[C]` 堆栈。
+  实测：当天 24 条 `[C]` 全部来自 `/terminal/ws`；把堆栈行拆掉之后，当天**真实的 `[E]` 错误是 0 条** ——
+  也就是说这些堆栈一直在掩盖真错误，排查时第一眼就会被它带偏。
+
+  `Ws()` 开头加 `s.EnableRender = false` 统一收口（`Render()` 的首行就是
+  `if !c.EnableRender { return nil }`）。原有的两处 `SetStatus(403/400)` 之所以没这个问题，
+  是因为 `Output.Status != 0` 让 beego 跳过了渲染 —— 但它们只覆盖 Upgrade 之前的路径，
+  Upgrade 之后的三个 `return` 都管不到。
+
+### 加固
+- **服务端 procd `respawn` 的 retry 从 5 改成 0**（`install_server.sh`）。retry > 0 时
+  procd 崩够次数就**永久放手**；客户端那份（`install.sh`）早就改成 0 了，服务端一直漏着。
+  服务端被守护放弃 = **所有客户端同时掉线且不会自愈**，只能人工上机把服务拉起来，
+  比客户端那边严重。
+- **服务端 systemd 单元补 `StartLimitIntervalSec=0`**（`install_server.sh`）。此前靠
+  `RestartSec=3` 恰好不踩默认的 `10s / Burst=5`，但那是巧合不是设计 —— 谁把 `RestartSec`
+  调到 2 秒以内就会被 systemd 打成 failed 并永久停止重启。
+- **升级看门狗自删**（`uninstall_client.sh`）。`/tmp/natpunch_guard.<pid>` 原先**没有任何地方
+  删它**，每升级一次就留一份（真机上已经攒了 3 份）。现在两条退出路径都会删掉自己。
+
+### 工程化
+- `test/upgrade_logic_test.sh` 第 4 节从"只查 `install.sh`"扩成**两个脚本都查**，并加了
+  反向断言：任何 `retry>0` 的 `respawn` 写法都算失败。上一版就是因为只查客户端，服务端那句
+  `procd_set_param respawn 3600 5 5` 才一路漏到真机上、要靠人工看 `ubus` 才发现。
+  已验证新断言对修复前的 `install_server.sh` **全部失败**（不是写完就算数的摆设）。
+
 ## v26.10.2（已发布）
 
 ### 修复
