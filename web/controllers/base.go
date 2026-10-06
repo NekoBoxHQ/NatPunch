@@ -250,12 +250,6 @@ func (s *BaseController) CheckUserAuth() {
 			return
 		}
 	case "index":
-		// Reorder 的参数是 ids（不含 id），且 server.ReorderTasks 会重写*所有*任务的 Sort
-		// （全局排序），无法按归属校验 → 非管理员一律拒绝（复评🟡）。
-		if s.actionName == "reorder" {
-			s.deny()
-			return
-		}
 		if id := s.GetIntNoErr("id"); id != 0 && !s.tunnelBelongsToMe(id, myClientId) {
 			s.deny()
 			return
@@ -283,7 +277,7 @@ func (s *BaseController) deny() {
 //
 // 只查任务表：Tasks 与 Hosts 是两套彼此独立的自增 id，都从 1 起各自增长、必然重号。
 // 原实现"两者任一命中即放行"，于是只要自己名下有 Host #N，就能用 id=N 去
-// del / stop / start / edit / getonetunnel / copy 别人的 Task #N。
+// del / stop / start / edit 别人的 Task #N。
 // 而 index 控制器的这些动作全部只操作 Task（web/ 里没有任何地方操作 Host），
 // 所以 Host 分支没有任何正当用途，只会增加攻击面，这里直接去掉。
 func (s *BaseController) tunnelBelongsToMe(id, myClientId int) bool {

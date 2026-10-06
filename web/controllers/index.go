@@ -21,27 +21,11 @@ func (s *IndexController) Index() {
 	s.SetInfo("dashboard")
 	s.display("index/index")
 }
-func (s *IndexController) Help() {
-	s.SetInfo("about")
-	s.display("index/help")
-}
-
-func (s *IndexController) Tcp() {
-	s.SetInfo("tcp")
-	s.SetType("tcp")
-	s.display("index/list")
-}
 
 // Tcpudp 隧道管理：TCP / UDP 隧道统一列表
 func (s *IndexController) Tcpudp() {
 	s.SetInfo("tcpudp")
 	s.SetType("tcp+udp")
-	s.display("index/list")
-}
-
-func (s *IndexController) Udp() {
-	s.SetInfo("udp")
-	s.SetType("udp")
 	s.display("index/list")
 }
 
@@ -56,29 +40,8 @@ func (s *IndexController) Http() {
 	s.SetType("httpProxy")
 	s.display("index/list")
 }
-func (s *IndexController) File() {
-	s.SetInfo("file server")
-	s.SetType("file")
-	s.display("index/list")
-}
 
-func (s *IndexController) Secret() {
-	s.SetInfo("secret")
-	s.SetType("secret")
-	s.display("index/list")
-}
-func (s *IndexController) P2p() {
-	s.SetInfo("p2p")
-	s.SetType("p2p")
-	s.display("index/list")
-}
-
-func (s *IndexController) Host() {
-	s.SetInfo("host")
-	s.SetType("hostServer")
-	s.display("index/list")
-}
-
+// All 列出指定客户端的全部隧道（客户端列表页的「隧道」按钮进入）
 func (s *IndexController) All() {
 	s.Data["menu"] = "client"
 	clientId := s.getEscapeString("client_id")
@@ -196,67 +159,6 @@ func (s *IndexController) Add() {
 	}
 }
 
-func (s *IndexController) Copy() {
-	oldId := s.GetIntNoErr("id")
-	if oldTask, err := file.GetDb().GetTask(oldId); err != nil {
-		s.error()
-	} else {
-		if client, err := file.GetDb().GetClient(oldTask.Client.Id); err != nil {
-			s.AjaxErr("modified error,the client is not exist")
-			return
-		} else {
-			oldTask.Client = client
-		}
-
-		id := int(file.GetDb().JsonDb.GetTaskId())
-		newTask := &file.Tunnel{
-			Client:       oldTask.Client,
-			Port:         tool.GenerateServerPort(oldTask.Mode),
-			ServerIp:     oldTask.ServerIp,
-			Mode:         oldTask.Mode,
-			Target:       oldTask.Target,
-			Id:           id,
-			Status:       true,
-			Remark:       oldTask.Remark,
-			MultiAccount: oldTask.MultiAccount,
-			Password:     oldTask.Password,
-			LocalPath:    oldTask.LocalPath,
-			StripPre:     oldTask.StripPre,
-			ProtoVersion: oldTask.ProtoVersion,
-			AccessPath:   oldTask.AccessPath,
-			Https:        oldTask.Https,
-			Flow:         &file.Flow{},
-		}
-		if !tool.TestServerPort(newTask.Port, newTask.Mode) {
-			s.AjaxErr("The port cannot be opened because it may has been occupied or is no longer allowed.")
-		}
-
-		if newTask.Client.MaxTunnelNum != 0 && newTask.Client.GetTunnelNum() >= newTask.Client.MaxTunnelNum {
-			s.AjaxErr("The number of tunnels exceeds the limit")
-		}
-		if err := file.GetDb().NewTask(newTask); err != nil {
-			s.AjaxErr(err.Error())
-		}
-		if err := server.AddTask(newTask); err != nil {
-			s.AjaxErr(err.Error())
-		} else {
-			s.AjaxOkWithId("add success", id)
-		}
-	}
-}
-
-func (s *IndexController) GetOneTunnel() {
-	id := s.GetIntNoErr("id")
-	data := make(map[string]interface{})
-	if t, err := file.GetDb().GetTask(id); err != nil {
-		data["code"] = 0
-	} else {
-		data["code"] = 1
-		data["data"] = t
-	}
-	s.Data["json"] = data
-	s.ServeJSON()
-}
 func (s *IndexController) Edit() {
 	id := s.GetIntNoErr("id")
 	if s.Ctx.Request.Method == "GET" {
@@ -345,37 +247,6 @@ func (s *IndexController) Del() {
 		s.AjaxErr("delete error")
 	}
 	s.AjaxOk("delete success")
-}
-
-// Reorder 拖拽排序：接收新顺序的 id 数组（ids=1&ids=3&ids=2）
-func (s *IndexController) Reorder() {
-	raw := s.Ctx.Request.Form["ids"]
-	ids := make([]int, 0, len(raw))
-	for _, str := range raw {
-		if str == "" {
-			continue
-		}
-		n := 0
-		for _, c := range str {
-			if c < '0' || c > '9' {
-				n = 0
-				break
-			}
-			n = n*10 + int(c-'0')
-		}
-		if n > 0 {
-			ids = append(ids, n)
-		}
-	}
-	if len(ids) == 0 {
-		s.AjaxErr("empty order")
-		return
-	}
-	if err := server.ReorderTasks(ids); err != nil {
-		s.AjaxErr("reorder error")
-		return
-	}
-	s.AjaxOk("reorder success")
 }
 
 func (s *IndexController) Start() {

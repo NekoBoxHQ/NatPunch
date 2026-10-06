@@ -15,7 +15,6 @@ func Init() {
 			beego.NSAutoRouter(&controllers.ClientController{}),
 			beego.NSAutoRouter(&controllers.AuthController{}),
 			beego.NSRouter("/auth/ipwhiteauth", &controllers.AuthController{}, "*:IpWhiteAuth"),
-			beego.NSAutoRouter(&controllers.GlobalController{}),
 			beego.NSAutoRouter(&controllers.TerminalController{}),
 			beego.NSRouter("/terminal/getcmds", &controllers.TerminalController{}, "get:GetCmds"),
 			beego.NSRouter("/terminal/savecmds", &controllers.TerminalController{}, "post:SaveCmds"),
@@ -28,7 +27,6 @@ func Init() {
 		beego.AutoRouter(&controllers.ClientController{})
 		beego.AutoRouter(&controllers.AuthController{})
 		beego.Router("/auth/ipwhiteauth", &controllers.AuthController{}, "*:IpWhiteAuth")
-		beego.AutoRouter(&controllers.GlobalController{})
 		beego.AutoRouter(&controllers.TerminalController{})
 		beego.Router("/terminal/getcmds", &controllers.TerminalController{}, "get:GetCmds")
 		beego.Router("/terminal/savecmds", &controllers.TerminalController{}, "post:SaveCmds")

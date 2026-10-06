@@ -50,6 +50,21 @@
 ### 已知未修（需单独决策）
 - TLS 未配置 `tls_fingerprint` 时仍以 `InsecureSkipVerify` 放行（只防被动窃听，不防中间人），需 `tls_strict=true` 才拒绝启动。**这次没有改默认值**：现网客户端是以 `-tls_enable=true` 起的，把默认改成 fail-closed 会让它们升级后直接拒绝启动 —— 正是「不可以无缘无故不启动」要避免的那类故障。要收紧请在客户端显式加 `-tls_strict=true -tls_fingerprint=<服务端桥接证书指纹>`。
 
+### 界面冗余清理（以面板实际入口为准）
+逐项核对「面板上真有入口的才算功能」，删掉全部不可达的页面与接口：
+
+- **隧道列表的 8 个无入口筛选页**：`/index/tcp`、`/index/udp`、`/index/file`、`/index/secret`、`/index/p2p`、`/index/host`、`/index/help`，以及无任何前端调用的 `/index/getonetunnel` 与 `/index/reorder`。菜单本来就只挂了 `tcpudp` / `http` / `socks5` 三个；`/index/all` 由客户端列表页的「隧道」按钮进入，保留。
+  （注：表头里的 `sortable` 是 bootstrap-table 的列排序，与 reorder 接口无关，全仓库没有任何地方调用它。`server.ReorderTasks` 与 `CheckUserAuth` 里针对 reorder 的守卫分支随之删除。）
+- **全局配置页** `GlobalController` + `views/global/index.html`：没有任何入口（`CheckUserAuth` 里非管理员本来就被 deny），连同路由注册一并删除。
+- **`AuthController.GetTime`**：没有任何前端引用。
+- **`index/list.html` 里 `row.Mode == "p2p"` / `"secret"` 的快令区块**：该模板只被 tcpudp（过滤 tcp+udp/tcp/udp）、http（httpProxy）、socks5 三个页面使用，这两个条件**恒为假**。
+- **`static/js/echarts.min.js`**：面板没有任何图表用它（仪表盘是数字条 + CSS），却每个页面都在加载，从内嵌资源里去掉。
+- **`conf/natpunch_client.conf`**：无人引用的上游样例配置（里面还留着原作者的本机路径与 IP），且它示范的 `file`/`secret`/`p2p` 模式已不在界面上。
+
+**保留**（有入口或有配置 / CLI 可达）：终端（客户端列表页的 SSH 按钮进入）、注册页（`allow_user_register=true` 时登录页出现入口）、`/index/all`、`/auth/ipwhiteauth`（客户端 IP 白名单 API，不是界面功能）。
+
+**本次未动**：`file` / `secret` / `p2p` 三种隧道模式在服务端与客户端的实现。它们在界面上确实建不出来，但客户端的配置文件与 `-local_type=` 仍能创建（随包的客户端样例里就写着 `mode=file`），属于配置 / CLI 可达，不是「界面弃用」。
+
 ## v26.9.111（已发布）
 
 ### 变更

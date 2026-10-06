@@ -362,18 +362,6 @@ func DelTask(id int) error {
 	return file.GetDb().DelTask(id)
 }
 
-// ReorderTasks 按新顺序重新分配 Sort（拖拽排序）
-func ReorderTasks(ids []int) error {
-	for newPos, oldId := range ids {
-		if t, err := file.GetDb().GetTask(oldId); err == nil {
-			t.Sort = newPos + 1
-			file.GetDb().UpdateTask(t)
-		}
-	}
-	return nil
-}
-
-// get task list by page num
 func GetTunnel(start, length int, typeVal string, clientId int, search string, sortField string, order string) ([]*file.Tunnel, int) {
 	all_list := make([]*file.Tunnel, 0)
 
