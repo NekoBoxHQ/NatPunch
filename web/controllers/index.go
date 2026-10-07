@@ -15,6 +15,21 @@ type IndexController struct {
 	BaseController
 }
 
+// normalizeTunnelMode 归一化隧道模式。
+//
+// 查询串里的 '+' 会被解码成**空格**：`?type=tcp+udp` 送到这里已经是 "tcp udp"。
+// 这个值既用来筛列表 / 决定页面显示哪一种模式，也会被当成隧道的 Mode 存下来 ——
+// 带个空格进去，服务端按 mode 起监听时认不出来，那条隧道等于没建起来。
+// 以前这个坑被页面上的 `<select>` 掩盖了（值对不上选项时会回退到第一项），
+// 换成隐藏域之后就直接暴露了。所以在入口统一收口。
+func normalizeTunnelMode(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	return strings.ReplaceAll(v, " ", "+")
+}
+
 func (s *IndexController) Index() {
 	s.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
 	s.Data["data"] = server.GetDashboardData()
@@ -52,7 +67,7 @@ func (s *IndexController) All() {
 
 func (s *IndexController) GetTunnel() {
 	start, length := s.GetAjaxParams()
-	taskType := s.getEscapeString("type")
+	taskType := normalizeTunnelMode(s.getEscapeString("type"))
 	clientId := s.GetIntNoErr("client_id")
 	// 非管理员仅可查看自己的隧道（F2-9 IDOR）
 	if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
@@ -83,12 +98,12 @@ func normAccessPath(p string) string {
 
 func (s *IndexController) Add() {
 	if s.Ctx.Request.Method == "GET" {
-		s.Data["type"] = s.getEscapeString("type")
+		s.Data["type"] = normalizeTunnelMode(s.getEscapeString("type"))
 		s.Data["client_id"] = s.getEscapeString("client_id")
 		s.SetInfo("add tunnel")
 		s.display()
 	} else {
-		mode := s.getEscapeString("type")
+		mode := normalizeTunnelMode(s.getEscapeString("type"))
 		username := s.getEscapeString("username")
 		password := s.getEscapeString("password")
 
@@ -201,7 +216,7 @@ func (s *IndexController) Edit() {
 				}
 			}
 			t.ServerIp = s.getEscapeString("server_ip")
-			t.Mode = s.getEscapeString("type")
+			t.Mode = normalizeTunnelMode(s.getEscapeString("type"))
 			t.Password = s.getEscapeString("password")
 			// HTTP / SOCKS5 代理账号密码
 			u := s.getEscapeString("username")

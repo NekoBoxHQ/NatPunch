@@ -125,6 +125,15 @@
         $(".form-group[id]").css("display", "none");
         $("#usecase span").css("display", "none");
         o = $("#type").val();
+        // 同 add.html：模式值不能被查询串里的 '+' 被解码成空格这件事污染 ——
+        // 它随表单提交上去就存成这条隧道的模式。先归一化，认不出来兜底成双端隧道。
+        if (typeof o == "string" && o.indexOf("+") < 0 && o.indexOf(" ") >= 0) {
+            o = $.trim(o).replace(/\s+/g, "+");
+        }
+        if ($("#case" + o).length == 0) {
+            o = "tcp+udp";
+        }
+        $("#type").val(o); // 写回表单，提交上去的才是干净的模式
         $('#case' + o).css("display", "inline")
         for (var i = 0; i < arr[o].length; i++) {
             $("#" + arr[o][i]).css("display", "block")
