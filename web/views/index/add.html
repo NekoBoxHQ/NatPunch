@@ -85,6 +85,9 @@
                         <div class="col-sm-10">
                             <input class="form-control" type="password" name="password" placeholder=""
                                    langtag="info-unrestricted">
+                            <!-- 文案按模式变（见 resetForm）：Shadowsocks 的这个框装的是密钥，
+                                 语义跟代理的"账号密码"完全不同，不能沿用那套说明 -->
+                            <span class="help-block m-b-none" id="password_tip"></span>
                         </div>
                     </div>
 
@@ -109,13 +112,15 @@
     arr["tcp+udp"] = ["client_id", "port", "target", "access_path", "https"]
     arr["socks5"] = ["client_id", "port", "username", "password"]
     arr["httpProxy"] = ["client_id", "port", "username", "password"]
+    // Shadowsocks：只要一个密码框（里面装的是 PSK，留空会自动生成）
+    arr["shadowsocks"] = ["client_id", "port", "password"]
 
     // 只在白名单里挑模式。这个值一头要拿去拼选择器、一头会随表单提交存成隧道的 Mode，
     // 拿任意字符串去拼是危险的：里面带个 '#' / '&' 就能让 jQuery 的选择器直接抛错。
     // tcp / udp 是弃用模式：面板只有「隧道管理 / HTTP代理 / SOCKS代理」三个入口，
     // 没有任何一个会传它们，arr 里也没有对应字段 —— 留在白名单里只会让手敲
     // /index/add?type=tcp 这种深链在 arr[o].length 上抛错。认不出来就回落到 tcp+udp。
-    var KNOWN_MODES = {"tcp+udp": 1, "httpProxy": 1, "socks5": 1};
+    var KNOWN_MODES = {"tcp+udp": 1, "httpProxy": 1, "socks5": 1, "shadowsocks": 1};
 
     function resetForm() {
         $(".form-group[id]").css("display", "none");
@@ -131,6 +136,12 @@
         $("#port_tip").html("")
         if (o == "tcp+udp") {
             $("#port_tip").html("同一端口同时监听 TCP 和 UDP")
+        }
+        $("#password_tip").html("")
+        if (o == "shadowsocks") {
+            $("#password_tip").html("留空自动生成 16 字节密钥（2022-blake3-aes-128-gcm）；要自己指定就填 16 字节的 base64，例如 openssl rand -base64 16 的输出")
+        } else if (o == "socks5" || o == "httpProxy") {
+            $("#password_tip").html("不填则代理无需认证")
         }
         for (var i = 0; i < arr[o].length; i++) {
             $("#" + arr[o][i]).css("display", "block")

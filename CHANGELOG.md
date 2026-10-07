@@ -2,6 +2,45 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.34（已发布）
+
+### 新增
+
+- **第四种隧道模式：Shadowsocks 代理**（导航菜单里排在「SOCKS代理」下面）。
+
+  它跟 HTTP / SOCKS 代理是同一件事的第三种入口：公网服务器的这个端口收下
+  Shadowsocks 流量，解密之后照常交给隧道送给客户端。**客户端侧一个字节都没改** ——
+  转发直接复用 `BaseServer.DealClient`。手机 / 电脑上已经装了 mihomo、sing-box 的，
+  不用再配代理，把列表里复制出来的 `ss://` 链接粘进去就能用。
+
+  - **只支持一种加密**：`2022-blake3-aes-128-gcm`。面板上不给「加密方式」这个选项，
+    就是为了少一类「配错了连不上、还看不出哪里错」的故障。
+  - **TCP 和 UDP 都支持**（同一个端口，跟双端隧道一样两个监听一起开）。
+  - **密钥留空自动生成**：新建时什么都不用填，面板会生成 16 字节的 PSK；
+    想自己掌控就填 16 字节的 base64（`openssl rand -base64 16`）。
+    **编辑时留空表示不改动原密钥** —— 否则改个备注就会把密钥抹掉、客户端全部失联。
+  - 列表页选项列多一个「复制 ss:// 链接」按钮，格式是 SIP002 的 URL 编码写法，
+    跟 mihomo 自己导出的那份一致。
+  - 仪表盘的协议类型饼图多一块；隧道 / 客户端列表里 Username、Password 两列对
+    Shadowsocks 隐藏（它没有用户名，密钥走 `ss://` 链接）。
+
+  实现用 `github.com/sagernet/sing-shadowsocks`（sing-box 在用的参考实现，GPLv3 兼容，
+  署名见 NOTICE），**没有自己写 AEAD-2022** —— SS2022 的 TCP / UDP 是两套 nonce 与
+  子密钥派生，还强制 salt 重放保护，手写出错点太密。服务端二进制因此大约 +450KB
+  （17.9MB → 18.4MB）。
+
+  ⚠️ 实现是照着 `socks5.handleUDP` 写的，但有三个坑**只有真跑起来才暴露**，
+  现在都钉进测试了：① `Start()` 里的 TCP accept 是阻塞的，照抄
+  `conn.NewTcpListenerAndProcess` 会让后面的 UDP 监听永远建不起来（TCP 通、UDP 静默不通）；
+  ② `udp5` 链路两边的报文格式**不对称**（客户端 → 服务端带 4 字节小端长度前缀，
+  服务端 → 客户端不带），回程直接 `common.ReadUDPDatagram` 会卡死在 `io.ReadAll` 上；
+  ③ 交给 SS 层的 buffer 必须**两头**预留空间，否则它 `ExtendHeader` / `Extend`
+  直接 panic("buffer overflow")。
+
+  新增 `server/proxy/shadowsocks_test.go`：PSK 生成 / 坏密钥拒绝 / 地址往返转换，
+  外加两条**真的端到端**（真 SS 客户端 ↔ 真 SS 服务端 ↔ 假 NatPunch 客户端 ↔ 真 echo
+  服务，TCP 与 UDP 各一条）。
+
 ## v26.10.33（已发布）
 
 ### 变更

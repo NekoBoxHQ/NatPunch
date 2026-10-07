@@ -149,7 +149,9 @@
                 sortable: false, //计算列，按 Port 排序即可
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    if (row.Mode == 'socks5' || row.Mode == 'httpProxy') {
+                    // 代理类（SOCKS / HTTP / Shadowsocks）没有一个能点的 http(s) 地址，
+                    // 只显示公网 IP；Shadowsocks 的可用入口是下面那个复制 ss:// 按钮。
+                    if (row.Mode == 'socks5' || row.Mode == 'httpProxy' || row.Mode == 'shadowsocks') {
                         return {{.ip}}
                     }
                     var scheme = (row.Https) ? "https" : "http"
@@ -170,7 +172,8 @@
                 title: '<span langtag="word-username"></span>',//标题
                 halign: 'center',
                 sortable: false,
-                visible: '{{.type}}' !== 'tcp+udp',//隧道管理页隐藏，代理页显示
+                // 隧道管理页隐藏；Shadowsocks 没有用户名这个概念，也隐藏
+                visible: '{{.type}}' !== 'tcp+udp' && '{{.type}}' !== 'shadowsocks',
                 formatter: function (value, row, index) {
                     if (row.MultiAccount && row.MultiAccount.AccountMap) {
                         for (var k in row.MultiAccount.AccountMap) { return k }
@@ -183,7 +186,9 @@
                 title: '<span langtag="word-password"></span>',//标题
                 halign: 'center',
                 sortable: false,
-                visible: '{{.type}}' !== 'tcp+udp',//隧道管理页隐藏
+                // 这一列显示的是 MultiAccount 里的密码；Shadowsocks 的密钥不在这儿
+                // （它走 ss:// 链接复制），所以也隐藏
+                visible: '{{.type}}' !== 'tcp+udp' && '{{.type}}' !== 'shadowsocks',
                 formatter: function (value, row, index) {
                     if (row.MultiAccount && row.MultiAccount.AccountMap) {
                         for (var k in row.MultiAccount.AccountMap) { return row.MultiAccount.AccountMap[k] }
@@ -266,6 +271,16 @@
                         var scheme = row.Mode == 'socks5' ? 'socks5' : 'http'
                         var link = scheme + '://' + un + ':' + pw + '@' + {{.ip}} + ':' + row.Port
                         btn_group += '<button class="btn btn-outline btn-info copylink" data-clipboard-text="' + link + '"><i class="fa fa-link"></i></button>'
+                    }
+                    if (row.Mode == 'shadowsocks') {
+                        // SIP002 的 URL 编码写法（跟 mihomo 自己导出的格式一致）：
+                        // ss://<method>:<urlencode(psk)>@host:port#<urlencode(备注)>
+                        // PSK 是标准 base64，里面 + / = 都是 URL 保留字符 —— 不编码的话
+                        // 客户端会把 + 当空格解，密钥就废了。
+                        var ss = 'ss://' + encodeURIComponent('2022-blake3-aes-128-gcm:' + (row.Password || '')) +
+                            '@' + {{.ip}} + ':' + row.Port
+                        if (row.Client && row.Client.Remark) { ss += '#' + encodeURIComponent(row.Client.Remark) }
+                        btn_group += '<button class="btn btn-outline btn-info copylink" data-clipboard-text="' + ss + '"><i class="fa fa-link"></i></button>'
                     }
                     btn_group += '</div>'
                     return btn_group

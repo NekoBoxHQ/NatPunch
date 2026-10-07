@@ -195,6 +195,8 @@ func NewMode(Bridge *bridge.Bridge, c *file.Tunnel) proxy.Service {
 	switch c.Mode {
 	case "socks5":
 		service = proxy.NewSock5ModeServer(Bridge, c)
+	case "shadowsocks":
+		service = proxy.NewShadowsocksModeServer(Bridge, c)
 	case "httpProxy":
 		service = proxy.NewTunnelModeServer(proxy.ProcessHttp, Bridge, c)
 	case "tcpTrans":
@@ -293,7 +295,8 @@ func StopServer(id int) error {
 // add task
 func AddTask(t *file.Tunnel) error {
 	if t.Mode != "httpHostServer" {
-		if t.Mode == "tcp+udp" {
+		if t.Mode == "tcp+udp" || t.Mode == "shadowsocks" {
+			// 这两种都是同一个端口上同时开 TCP 和 UDP，两个都得能开
 			if !tool.TestServerPort(t.Port, "tcp") || !tool.TestServerPort(t.Port, "udp") {
 				logs.Error("taskId %d start error port %d open failed", t.Id, t.Port)
 				return errors.New("the port open error")
@@ -492,7 +495,7 @@ func GetDashboardData() map[string]interface{} {
 	data["clientOnlineCount"] = c
 	data["inletFlowCount"] = int(in)
 	data["exportFlowCount"] = int(out)
-	var tcp, socks5, http int
+	var tcp, socks5, http, ss int
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		switch value.(*file.Tunnel).Mode {
 		case "tcp+udp": // 双端隧道（面板里唯一的 TCP/UDP 隧道形态）
@@ -501,6 +504,8 @@ func GetDashboardData() map[string]interface{} {
 			socks5 += 1
 		case "httpProxy":
 			http += 1
+		case "shadowsocks":
+			ss += 1
 		}
 		return true
 	})
@@ -508,6 +513,7 @@ func GetDashboardData() map[string]interface{} {
 	data["tcpC"] = tcp
 	data["socks5Count"] = socks5
 	data["httpProxyCount"] = http
+	data["shadowsocksCount"] = ss
 	data["bridgeType"] = beego.AppConfig.String("bridge_type")
 	data["httpProxyPort"] = beego.AppConfig.String("http_proxy_port")
 	data["httpsProxyPort"] = beego.AppConfig.String("https_proxy_port")

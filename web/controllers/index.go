@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/NekoBoxHQ/NatPunch/server"
 	"github.com/NekoBoxHQ/NatPunch/server/tool"
@@ -30,6 +31,8 @@ func caseKeyForTunnelMode(mode string) string {
 		return "info-casehttpproxy"
 	case "socks5":
 		return "info-casesocks5"
+	case "shadowsocks":
+		return "info-caseshadowsocks"
 	default:
 		return "info-casetcpudp"
 	}
@@ -67,6 +70,12 @@ func (s *IndexController) Tcpudp() {
 func (s *IndexController) Socks5() {
 	s.SetInfo("socks5")
 	s.SetType("socks5")
+	s.display("index/list")
+}
+
+func (s *IndexController) Shadowsocks() {
+	s.SetInfo("shadowsocks")
+	s.SetType("shadowsocks")
 	s.display("index/list")
 }
 
@@ -175,6 +184,11 @@ func (s *IndexController) Add() {
 			if (m == "httpProxy" || m == "socks5") && username != "" && password != "" {
 				t.MultiAccount = &file.MultiAccount{AccountMap: map[string]string{username: password}}
 			}
+			// Shadowsocks：密码框里装的就是 PSK（BaseServer 从 t.Password 取它）。
+			// 留空则生成一个新的 —— 面板上不填任何东西也能直接建出一条能用的隧道。
+			if m == "shadowsocks" && strings.TrimSpace(t.Password) == "" {
+				t.Password = crypt.NewShadowsocksPSK()
+			}
 			if err := file.GetDb().NewTask(t); err != nil {
 				return 0, err
 			}
@@ -247,6 +261,9 @@ func (s *IndexController) Edit() {
 			}
 			t.ServerIp = s.getEscapeString("server_ip")
 			t.Mode = normalizeTunnelMode(s.getEscapeString("type"))
+			// 注意 t 是库里那个对象的指针，赋值就是改原值 —— 新的 PSK 想"留空保留"
+			// 的话必须先把旧的存下来。
+			oldPassword := t.Password
 			t.Password = s.getEscapeString("password")
 			// HTTP / SOCKS5 代理账号密码
 			u := s.getEscapeString("username")
@@ -255,6 +272,12 @@ func (s *IndexController) Edit() {
 				t.MultiAccount = &file.MultiAccount{AccountMap: map[string]string{u: p}}
 			} else {
 				t.MultiAccount = nil
+			}
+			// Shadowsocks：密码框里是 PSK，留空表示"不动原密钥"。
+			// 编辑页不回填它（列表里的 ss:// 链接随时能取），所以留空是最常见的情况；
+			// 要是把它当成"清空"，用户改个备注就会把密钥抹掉、所有客户端一起失联。
+			if t.Mode == "shadowsocks" && strings.TrimSpace(t.Password) == "" {
+				t.Password = oldPassword
 			}
 			t.Id = id
 			t.LocalPath = s.getEscapeString("local_path")

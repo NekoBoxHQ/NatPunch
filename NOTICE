@@ -55,6 +55,22 @@ NatPunch 是基于 **ehang-io/nps** 的修改版（fork）。
 - 发布矩阵补 armv7/mipsle；安装脚本未知架构显式报错；
 - 文档体系（docs/）、安全加固指南、版本号一致、GPL 声明、AUP、终端审计日志。
 
+第三方依赖
+----------
+Shadowsocks 代理模式使用以下第三方库，许可均为 GPLv3 兼容：
+
+- **github.com/sagernet/sing-shadowsocks** —— Shadowsocks 2022（AEAD-2022）协议实现。
+  服务端只用它做 `2022-blake3-aes-128-gcm` 的单用户解密/加密，没有自己实现密码学。
+  版权 (C) 2022 nekohasekai <contact-sagernet@sekai.icu>，GPLv3。
+  上游：https://github.com/SagerNet/sing-shadowsocks
+- **github.com/sagernet/sing** —— 上面那个库依赖的基础库（地址类型、缓冲区、UDP NAT）。
+  版权 (C) 2022 nekohasekai <contact-sagernet@sekai.icu>，GPLv3。
+  上游：https://github.com/SagerNet/sing
+- **lukechampine.com/blake3** —— BLAKE3 哈希（SS2022 的子密钥派生要用），MIT 许可。
+  上游：https://github.com/lukechampine/blake3
+
+（`go.mod` / `go.sum` 里有完整的依赖清单与版本。）
+
 授权说明
 --------
 本项目以 GPLv3 许可分发，详见 LICENSE。

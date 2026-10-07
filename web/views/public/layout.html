@@ -232,6 +232,10 @@
                     <a href="{{.web_base_url}}/index/socks5"><i class="fa fa-layer-group fa-lg"></i>
                     <span class="nav-label" langtag="scheme-socks5"></span></a>
                 </li>
+                <li class="{{if eq "shadowsocks" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/index/shadowsocks"><i class="fa fa-user-secret fa-lg"></i>
+                    <span class="nav-label" langtag="scheme-shadowsocks"></span></a>
+                </li>
 
             </ul>
         </div>

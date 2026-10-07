@@ -35,6 +35,10 @@
 		<zh-CN>SOCKS 代理</zh-CN>
 		<en-US>SOCKS 5</en-US>
 	</lang>
+	<lang id="scheme-shadowsocks">
+		<zh-CN>Shadowsocks 代理</zh-CN>
+		<en-US>Shadowsocks</en-US>
+	</lang>
 
 	<lang id="page-clientlist">
 		<zh-CN>客户端列表</zh-CN>
@@ -63,6 +67,10 @@
 	<lang id="page-listsocks5">
 		<zh-CN>SOCKS 代理列表</zh-CN>
 		<en-US>SOCKS 5 list</en-US>
+	</lang>
+	<lang id="page-listshadowsocks">
+		<zh-CN>Shadowsocks 代理列表</zh-CN>
+		<en-US>Shadowsocks list</en-US>
 	</lang>
 	<lang id="page-add">
 		<zh-CN>新增</zh-CN>
@@ -469,6 +477,10 @@
 		<zh-CN>将公网服务器1.1.1.1的8003端口作为SOCKS5代理，访问内网任意设备或者资源。</zh-CN>
 		<en-US>Use port 8003 of public server 1.1.1.1 as Socks5 proxy to access any device or resource in the Intranet.</en-US>
 	</lang>
+	<lang id="info-caseshadowsocks">
+		<zh-CN>将公网服务器1.1.1.1的8004端口作为Shadowsocks代理（2022-blake3-aes-128-gcm），用 mihomo / sing-box 等客户端导入 ss:// 链接即可访问内网。</zh-CN>
+		<en-US>Use port 8004 of public server 1.1.1.1 as a Shadowsocks proxy (2022-blake3-aes-128-gcm). Import the ss:// link into mihomo / sing-box to reach the Intranet.</en-US>
+	</lang>
 	<lang id="info-casetcpudp">
 		<zh-CN>将公网服务器1.1.1.1的8001端口作为双端隧道，和客户端交互。</zh-CN>
 		<en-US>Use port 8001 of public server 1.1.1.1 as a dual-end tunnel to talk to the client.</en-US>
@@ -803,6 +815,10 @@
 					<array id="2">
 						<zh-CN>SOCKS 代理</zh-CN>
 						<en-US>SOCKS 5</en-US>
+					</array>
+					<array id="3">
+						<zh-CN>Shadowsocks 代理</zh-CN>
+						<en-US>Shadowsocks</en-US>
 					</array>
 				</data>
 			</legend>

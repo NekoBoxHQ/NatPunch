@@ -3,6 +3,7 @@ package crypt
 import (
 	"crypto/md5"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 )
 
@@ -36,4 +37,17 @@ func GetVkey() string {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(buf)
+}
+
+// NewShadowsocksPSK 生成一个 Shadowsocks 2022 用的 PSK：16 字节随机数 → 标准 base64。
+//
+// 16 字节不是随便定的 —— SIP022 要求 `2022-blake3-aes-128-gcm` 的预共享密钥
+// 正好是密钥长度（16 字节），且必须是 base64 编码的随机字节，**不允许**从口令派生。
+// 长度写死在 server/proxy 的 SSKeySize，两边要一起改。
+func NewShadowsocksPSK() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return base64.StdEncoding.EncodeToString(buf)
 }

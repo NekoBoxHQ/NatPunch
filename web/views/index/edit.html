@@ -93,6 +93,9 @@
                             <input value="{{if .t.MultiAccount}}{{range $k, $v := .t.MultiAccount.AccountMap}}{{$v}}{{end}}{{end}}"
                                    class="form-control" type="password" name="password" placeholder=""
                                    langtag="info-unrestricted">
+                            <!-- 文案按模式变（见 resetForm）。Shadowsocks 的这个框装的是密钥，
+                                 编辑页**不回填**它：留空表示不改动原密钥（回填等于把密钥写进页面） -->
+                            <span class="help-block m-b-none" id="password_tip"></span>
                         </div>
                     </div>
 
@@ -118,10 +121,12 @@
     arr["tcp+udp"] = ["client_id", "port", "target", "access_path", "https"]
     arr["socks5"] = ["client_id", "port", "username", "password"]
     arr["httpProxy"] = ["client_id", "port", "username", "password"]
+    // Shadowsocks：只要一个密码框（里面装的是 PSK，留空表示不改动原密钥）
+    arr["shadowsocks"] = ["client_id", "port", "password"]
 
     // 与 add.html 完全一致：隧道的 Mode 只可能是 tcp+udp / httpProxy / socks5 三种。
     // TCP隧道 / UDP隧道 已弃用 —— 没有创建入口，存量也没有一条，所以这里不再为它们留字段。
-    var KNOWN_MODES = {"tcp+udp": 1, "httpProxy": 1, "socks5": 1};
+    var KNOWN_MODES = {"tcp+udp": 1, "httpProxy": 1, "socks5": 1, "shadowsocks": 1};
 
     function resetForm() {
         $(".form-group[id]").css("display", "none");
@@ -133,6 +138,12 @@
             o = "tcp+udp";
         }
         $("#type").val(o); // 干净的写回表单，提交上去的才是有效的 Mode
+        $("#password_tip").html("")
+        if (o == "shadowsocks") {
+            $("#password_tip").html("留空 = 不改动原密钥。要换密钥就填新的 16 字节 base64（openssl rand -base64 16）；当前密钥可以从列表里的 ss:// 链接复制")
+        } else if (o == "socks5" || o == "httpProxy") {
+            $("#password_tip").html("不填则代理无需认证")
+        }
         for (var i = 0; i < arr[o].length; i++) {
             $("#" + arr[o][i]).css("display", "block")
         }
