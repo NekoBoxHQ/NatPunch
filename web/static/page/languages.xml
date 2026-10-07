@@ -750,18 +750,20 @@
 			</series>
 		</lang>
 <lang id="bandwidth">
-			<legend>
-				<data>
-					<array id="0">
+			<series>
+				<array id="0">
+					<name>
 						<zh-CN>下载</zh-CN>
 						<en-US>Download</en-US>
-					</array>
-					<array id="1">
+					</name>
+				</array>
+				<array id="1">
+					<name>
 						<zh-CN>上传</zh-CN>
 						<en-US>Upload</en-US>
-					</array>
-				</data>
-			</legend>
+					</name>
+				</array>
+			</series>
 		</lang>
 <lang id="flow">
 			<legend>
@@ -843,6 +845,12 @@
 							<name>
 								<zh-CN>SOCKS 代理</zh-CN>
 								<en-US>SOCKS 5</en-US>
+							</name>
+						</array>
+						<array id="3">
+							<name>
+								<zh-CN>Shadowsocks</zh-CN>
+								<en-US>Shadowsocks</en-US>
 							</name>
 						</array>
 					</data>

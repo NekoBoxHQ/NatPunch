@@ -2,6 +2,27 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.44（已发布）
+
+### 修复
+
+- **仪表盘七张图全空**（根因：`setchartlang` 崩溃）。
+
+  v26.10.42 给 `bandwidth` 词条改文案时，把它的结构从 `<series>` **错换成了
+  `<legend>`** —— 而 `chartdatas['bandwidth']` 里**没有** `legend` 键。`setchartlang`
+  递归到那一步拿 `undefined.hasOwnProperty(...)`，抛 TypeError，把同一个 `setLang`
+  里**后面真正画图的那段循环**一起带走，于是七张图全空白、控制台也只有一个不起眼的报错。
+
+  修法：`bandwidth` 词条恢复成 `<series>` 结构，只改里面的文案（入口→下载、出口→上传）。
+
+- **协议类型饼图第 4 块（Shadowsocks）没名字**：加 Shadowsocks 时词条里的
+  `<series><data>` 只补到 3 个（双端/HTTP/SOCKS），第 4 块一直显示 N/A —— 补上第 4 条。
+
+### 变更（续 v26.10.43，已上线的那几条）
+
+- 标签统一「上传带宽 / 下载带宽」、带宽曲线与流量饼图图例「上传 / 下载」；
+- 「已建立连接」那行从 `{{.data.tcp}}`（键不存在，一直是空）改成 `{{.data.tcpCount}}`。
+
 ## v26.10.43（已发布）
 
 ### 修复
