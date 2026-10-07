@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"errors"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"math"
 	stdnet "net"
 	"net/http"

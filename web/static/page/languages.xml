@@ -89,10 +89,6 @@
 		<zh-CN>管理员</zh-CN>
 		<en-US>Admin</en-US>
 	</lang>
-	<lang id="word-all">
-		<zh-CN>所有</zh-CN>
-		<en-US>All</en-US>
-	</lang>
 	<lang id="word-bandwidth">
 		<zh-CN>带宽</zh-CN>
 		<en-US>Bandwidth</en-US>
@@ -105,17 +101,9 @@
 		<zh-CN>Basic 认证用户名</zh-CN>
 		<en-US>Basic authentication username</en-US>
 	</lang>
-	<lang id="word-ishttp">
-		<zh-CN>是否为HTTP</zh-CN>
-		<en-US>Is HTTP</en-US>
-	</lang>
 	<lang id="word-bridgingmode">
 		<zh-CN>桥接模式</zh-CN>
 		<en-US>Bridging mode</en-US>
-	</lang>
-	<lang id="word-clientid">
-		<zh-CN>客户端 ID</zh-CN>
-		<en-US>Client ID</en-US>
 	</lang>
 	<lang id="word-clientstatus">
 		<zh-CN>客户端状态</zh-CN>
@@ -128,38 +116,6 @@
 	<lang id="word-close">
 		<zh-CN>关闭</zh-CN>
 		<en-US>Close</en-US>
-	</lang>
-	<lang id="word-commandaccessp2ps">
-		<zh-CN>访问端命令 (SOCKS 5)</zh-CN>
-		<en-US>Access command (SOCKS 5)</en-US>
-	</lang>
-	<lang id="word-commandaccessp2pt">
-		<zh-CN>访问端命令 (透明代理)</zh-CN>
-		<en-US>Access command (Transparent proxy)</en-US>
-	</lang>
-	<lang id="word-commandaccessp2p">
-		<zh-CN>访问端命令 (TCP)</zh-CN>
-		<en-US>Access command (TCP)</en-US>
-	</lang>
-	<lang id="word-commandaccess">
-		<zh-CN>访问端命令</zh-CN>
-		<en-US>Access command</en-US>
-	</lang>
-	<lang id="word-commandaccess-tls">
-		<zh-CN>访问端命令 (TLS)</zh-CN>
-		<en-US>Access command (TLS)</en-US>
-	</lang>
-	<lang id="word-commandaccessp2p-tls">
-		<zh-CN>访问端命令 (TCP / TLS)</zh-CN>
-		<en-US>Access command (TCP / TLS)</en-US>
-	</lang>
-	<lang id="word-commandaccessp2ps-tls">
-		<zh-CN>访问端命令 (SOCKS 5 / TLS)</zh-CN>
-		<en-US>Access command (SOCKS 5 / TLS)</en-US>
-	</lang>
-	<lang id="word-commandaccessp2pt-tls">
-		<zh-CN>访问端命令 (透明代理 / TLS)</zh-CN>
-		<en-US>Access command (Transparent proxy / TLS)</en-US>
 	</lang>
 	<lang id="word-protoversion">
 		<zh-CN>Proxy Protocol Version</zh-CN>
@@ -238,33 +194,13 @@
 		<zh-CN>SSH终端</zh-CN>
 		<en-US>SSH Terminal</en-US>
 	</lang>
-	<lang id="word-term-selectclient">
-		<zh-CN>选择客户端</zh-CN>
-		<en-US>Select client</en-US>
-	</lang>
-	<lang id="word-term-connect">
-		<zh-CN>连接</zh-CN>
-		<en-US>Connect</en-US>
-	</lang>
-	<lang id="word-term-disconnect">
-		<zh-CN>断开</zh-CN>
-		<en-US>Disconnect</en-US>
-	</lang>
 	<lang id="word-term-cmd">
 		<zh-CN>快捷命令</zh-CN>
 		<en-US>Quick commands</en-US>
 	</lang>
-	<lang id="word-term-star">
-		<zh-CN>收藏</zh-CN>
-		<en-US>Favorites</en-US>
-	</lang>
 	<lang id="word-term-send">
 		<zh-CN>发送</zh-CN>
 		<en-US>Send</en-US>
-	</lang>
-	<lang id="word-globalparam">
-		<zh-CN>全局参数</zh-CN>
-		<en-US>Global Params</en-US>
 	</lang>
 	<lang id="word-exportflow">
 		<zh-CN>出口流量</zh-CN>
@@ -278,29 +214,7 @@
 		<zh-CN>流量限制</zh-CN>
 		<en-US>Flow limit</en-US>
 	</lang>
-	<lang id="word-go">
-		<zh-CN>进入</zh-CN>
-		<en-US>go</en-US>
-	</lang>
-	<lang id="word-help">
-		<zh-CN>使用说明</zh-CN>
-		<en-US>Manual</en-US>
-	</lang>
-	<lang id="word-http">HTTP
-	</lang>
-	<lang id="word-httpscert">
-		<zh-CN>HTTPS 证书（或证书路径）</zh-CN>
-		<en-US>HTTPS cert</en-US>
-	</lang>
 	<lang id="word-https">HTTPS
-	</lang>
-	<lang id="word-httpskey">
-		<zh-CN>HTTPS 密钥（或秘钥路径）</zh-CN>
-		<en-US>HTTPS key</en-US>
-	</lang>
-	<lang id="word-identificationkey">
-		<zh-CN>唯一标识密钥</zh-CN>
-		<en-US>Unique identification  Key</en-US>
 	</lang>
 	<lang id="word-id">ID
 	</lang>
@@ -312,21 +226,9 @@
 		<zh-CN>入口流量</zh-CN>
 		<en-US>Inlet Flow</en-US>
 	</lang>
-	<lang id="word-iprestriction">
-		<zh-CN>IP 限制</zh-CN>
-		<en-US>IP restriction</en-US>
-	</lang>
 	<lang id="word-load">
 		<zh-CN>负载</zh-CN>
 		<en-US>Load</en-US>
-	</lang>
-	<lang id="word-localpath">
-		<zh-CN>本地路径</zh-CN>
-		<en-US>Local path</en-US>
-	</lang>
-	<lang id="word-location">
-		<zh-CN>位置</zh-CN>
-		<en-US>Location</en-US>
 	</lang>
 	<lang id="word-login">
 		<zh-CN>登录</zh-CN>
@@ -380,10 +282,6 @@
 		<zh-CN>流出带宽</zh-CN>
 		<en-US>Out</en-US>
 	</lang>
-	<lang id="word-p2pport">
-		<zh-CN>P2P 端口</zh-CN>
-		<en-US>P2P port</en-US>
-	</lang>
 	<lang id="word-password">
 		<zh-CN>密码</zh-CN>
 		<en-US>Password</en-US>
@@ -414,10 +312,6 @@
 		<en-US>Enable HTTPS on tunnel port (reuses panel certificate, TLS terminated at server then forwarded); TCP only</en-US>
 	</lang>
 
-	<lang id="word-proxytolocal">
-		<zh-CN>代理到服务器本地</zh-CN>
-		<en-US>Proxy to server local</en-US>
-	</lang>
 	<lang id="word-publicvkey">
 		<zh-CN>公钥</zh-CN>
 		<en-US>Public vkey</en-US>
@@ -426,10 +320,6 @@
 		<zh-CN>带宽限制</zh-CN>
 		<en-US>Rate limit</en-US>
 	</lang>
-	<lang id="word-readmore">
-		<zh-CN>更多说明</zh-CN>
-		<en-US>Read more</en-US>
-	</lang>
 	<lang id="word-register">
 		<zh-CN>注册</zh-CN>
 		<en-US>Register</en-US>
@@ -437,10 +327,6 @@
 	<lang id="word-remark">
 		<zh-CN>备注</zh-CN>
 		<en-US>Remark</en-US>
-	</lang>
-	<lang id="word-requestheader">
-		<zh-CN>请求头部信息修改</zh-CN>
-		<en-US>Header modify</en-US>
 	</lang>
 	<lang id="word-runstatus">
 		<zh-CN>运行状态</zh-CN>
@@ -453,14 +339,6 @@
 	<lang id="word-scheme">
 		<zh-CN>模式</zh-CN>
 		<en-US>Scheme</en-US>
-	</lang>
-	<lang id="word-serverip">
-		<zh-CN>服务端 IP</zh-CN>
-		<en-US>Server IP</en-US>
-	</lang>
-	<lang id="word-serveriP">
-		<zh-CN>服务端 IP</zh-CN>
-		<en-US>Server IP</en-US>
 	</lang>
 	<lang id="word-serveripv4">
 		<zh-CN>服务端 IPv4</zh-CN>
@@ -490,21 +368,9 @@
 		<zh-CN>状态</zh-CN>
 		<en-US>Status</en-US>
 	</lang>
-	<lang id="word-stripprefix">
-		<zh-CN>访问前缀</zh-CN>
-		<en-US>Strip prefix</en-US>
-	</lang>
-	<lang id="word-swapmemory">
-		<zh-CN>交换空间</zh-CN>
-		<en-US>Swap memory</en-US>
-	</lang>
 	<lang id="word-systeminformation">
 		<zh-CN>系统信息</zh-CN>
 		<en-US>System information</en-US>
-	</lang>
-	<lang id="word-system">
-		<zh-CN>管理系统</zh-CN>
-		<en-US>System</en-US>
 	</lang>
 	<lang id="word-target">
 		<zh-CN>目标 (IP:端口)</zh-CN>
@@ -546,10 +412,6 @@
 		<zh-CN>单位</zh-CN>
 		<en-US>Flow limit</en-US>
 	</lang>
-	<lang id="word-urlroute">
-		<zh-CN>URL 路由</zh-CN>
-		<en-US>Url router</en-US>
-	</lang>
 	<lang id="word-usecase">
 		<zh-CN>使用场景</zh-CN>
 		<en-US>Use Case</en-US>
@@ -570,10 +432,6 @@
 		<zh-CN>版本</zh-CN>
 		<en-US>Version</en-US>
 	</lang>
-	<lang id="word-virtualmemory">
-		<zh-CN>虚拟内存</zh-CN>
-		<en-US>Virtual memory</en-US>
-	</lang>
 	<lang id="word-webpassword">
 		<zh-CN>Web登陆密码</zh-CN>
 		<en-US>Password of Web login</en-US>
@@ -590,14 +448,8 @@
 		<zh-CN>是</zh-CN>
 		<en-US>Yes</en-US>
 	</lang>
-	<lang id="word-">
-	</lang>
 
 
-	<lang id="word-globalparam">
-		<zh-CN>全局参数</zh-CN>
-		<en-US>global Param</en-US>
-	</lang>
 
 	<lang id="info-autogenerated">
 		<zh-CN>唯一值，不填将自动生成</zh-CN>
@@ -633,50 +485,6 @@
 		<zh-CN>已经有帐号了？</zh-CN>
 		<en-US>Already have an account?</en-US>
 	</lang>
-	<lang id="info-header">
-		<zh-CN>冒号分割，多个头部请填写多行</zh-CN>
-		<en-US>Colon separated, multiple lines please fill in</en-US>
-	</lang>
-	<lang id="info-identificationkey">
-		<zh-CN>P2P连接和私密代理模式需要</zh-CN>
-		<en-US>When P2P or Secret</en-US>
-	</lang>
-	<lang id="info-feature1">
-		<zh-CN>双端隧道：SSH / 远程桌面 / 任意端口，公网直达内网设备</zh-CN>
-		<en-US>Dual-end tunnels: SSH, RDP, any port, reach intranet devices from public network</en-US>
-	</lang>
-	<lang id="info-feature2">
-		<zh-CN>HTTP 代理 / SOCKS5 代理：带账号密码，安全出网</zh-CN>
-		<en-US>HTTP / SOCKS5 proxy with username and password for secure outbound access</en-US>
-	</lang>
-	<lang id="info-feature3">
-		<zh-CN>TLS 全程加密桥接，客户端与服务端数据安全传输</zh-CN>
-		<en-US>TLS encrypted bridge, secure data transfer between client and server</en-US>
-	</lang>
-	<lang id="info-feature4">
-		<zh-CN>OpenWrt / Linux / Windows 客户端一键安装，注册为系统服务静默运行</zh-CN>
-		<en-US>One-click install for OpenWrt / Linux / Windows, runs silently as system service</en-US>
-	</lang>
-	<lang id="info-feature5">
-		<zh-CN>添加客户端 → 复制部署命令 → 自动建立隧道</zh-CN>
-		<en-US>Add client -> copy deploy command -> tunnel established automatically</en-US>
-	</lang>
-	<lang id="info-feature6">
-		<zh-CN>实时展示在线状态、隧道数、流量与带宽统计</zh-CN>
-		<en-US>Real-time online status, tunnel count, traffic and bandwidth stats</en-US>
-	</lang>
-	<lang id="info-feature7">
-		<zh-CN>无公网设备管理：软路由与服务器随时被远程管控</zh-CN>
-		<en-US>Manage devices without public IP: always reachable soft routers and servers</en-US>
-	</lang>
-	<lang id="info-feature8">
-		<zh-CN>轻量自用：只保留隧道与代理，无多余功能</zh-CN>
-		<en-US>Lightweight self-hosted: only tunnels and proxies, no extra bloat</en-US>
-	</lang>
-	<lang id="info-feature9">
-		<zh-CN>自用部署：服务端与客户端一键互通</zh-CN>
-		<en-US>Self-hosted: one-click client-server interconnection</en-US>
-	</lang>
 	<lang id="info-noaccount">
 		<zh-CN>还没有有帐号？</zh-CN>
 		<en-US>Do not have an account?</en-US>
@@ -689,33 +497,13 @@
 		<zh-CN>注册</zh-CN>
 		<en-US>Register to NatPunch</en-US>
 	</lang>
-	<lang id="info-suchashost">
-		<zh-CN>例如 a.proxy.com</zh-CN>
-		<en-US>such as a.proxy.com</en-US>
-	</lang>
-	<lang id="info-suchasip">
-		<zh-CN>例如 0.0.0.0</zh-CN>
-		<en-US>such as 0.0.0.0</en-US>
-	</lang>
 	<lang id="info-suchasiplist">
 		<zh-CN>例如&#10;10.1.50.203:80&#10;10.1.50.202:80</zh-CN>
 		<en-US>such as&#10;10.1.50.203:80&#10;10.1.50.202:80</en-US>
 	</lang>
-	<lang id="info-suchaslocalpath">
-		<zh-CN>例如 /tmp</zh-CN>
-		<en-US>such as /tmp</en-US>
-	</lang>
 	<lang id="info-suchasport">
 		<zh-CN>例如 8024</zh-CN>
 		<en-US>such as 8024</en-US>
-	</lang>
-	<lang id="info-suchasstripprefix">
-		<zh-CN>例如 static</zh-CN>
-		<en-US>such as static</en-US>
-	</lang>
-	<lang id="info-targethost">
-		<zh-CN>分行填写多个目标可实现负载均衡</zh-CN>
-		<en-US>Line break if load balancing</en-US>
 	</lang>
 	<lang id="info-targettunnel">
 		<zh-CN>代理到本地可以只填写端口号，只有TCP模式支持负载均衡</zh-CN>
@@ -739,20 +527,8 @@
 	</lang>
 
 
-	<lang id="word-globalblackiplist">
-		<zh-CN>全局IP黑名单（防暴力破解）</zh-CN>
-		<en-US>Global IP Black List</en-US>
-	</lang>
 
-	<lang id="word-serverurl">
-		<zh-CN>服务地址</zh-CN>
-		<en-US>Server</en-US>
-	</lang>
 
-	<lang id="info-servertips">
-		<zh-CN>客户端命令地址显示、隧道访问显示</zh-CN>
-		<en-US>Server URL, Tunnel Access</en-US>
-	</lang>
 
 	<lang id="info-suchasblackiplist">
 		<zh-CN>例如&#10;10.1.50.203&#10;10.1.50.202</zh-CN>
@@ -823,10 +599,6 @@
 			<zh-CN>你确定你要停止它吗？</zh-CN>
 			<en-US>Are you sure you want to stop it?</en-US>
 		</lang>
-		<lang id="copy">
-			<zh-CN>你确定要复制它吗？</zh-CN>
-			<en-US>Are you sure you want to copy it?</en-US>
-		</lang>
 		<lang id="noselected">
 			<zh-CN>请先选择要删除的项目！</zh-CN>
 			<en-US>Please select items to delete!</en-US>
@@ -834,10 +606,6 @@
 	</confirm>
 
 	<reply>
-		<lang id="adderrortheclientcannotbefound">
-			<zh-CN>添加错误，找不到客户端</zh-CN>
-			<en-US>Add error, the client can not be found</en-US>
-		</lang>
 		<lang id="addsuccess">
 			<zh-CN>添加成功</zh-CN>
 			<en-US>Add success</en-US>
@@ -882,7 +650,7 @@
 			<zh-CN>停止成功</zh-CN>
 			<en-US>Stop success</en-US>
 		</lang>
-		<lang id="Thenumberoftunnelsexceedsthelimit">
+		<lang id="thenumberoftunnelsexceedsthelimit">
 			<zh-CN>隧道数量超过限制</zh-CN>
 			<en-US>The number of tunnels exceeds the limit</en-US>
 		</lang>

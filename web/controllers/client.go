@@ -166,26 +166,26 @@ func (s *ClientController) GetClient() {
 			}
 			// 字段名与 Client struct 序列化一致（前端 bootstrap-table 使用 Go 字段名）
 			data["data"] = map[string]interface{}{
-				"Id":                c.Id,
-				"VerifyKey":         vkey,
-				"Addr":              c.Addr,
-				"LocalAddr":         c.LocalAddr,
-				"Remark":            c.Remark,
-				"Status":            c.Status,
-				"IsConnect":         c.IsConnect,
-				"RateLimit":         c.RateLimit,
-				"Flow":              c.Flow,
-				"WebUserName":       c.WebUserName,
-				"ConfigConnAllow":   c.ConfigConnAllow,
-				"MaxConn":           c.MaxConn,
-				"MaxTunnelNum":      c.MaxTunnelNum,
-				"Version":           c.Version,
-				"BlackIpList":       c.BlackIpList,
-				"CreateTime":        c.CreateTime,
-				"LastOnlineTime":    c.LastOnlineTime,
-				"IpWhite":           c.IpWhite,
-				"IpWhitePass":       ipWhitePass,
-				"IpWhiteList":       c.IpWhiteList,
+				"Id":              c.Id,
+				"VerifyKey":       vkey,
+				"Addr":            c.Addr,
+				"LocalAddr":       c.LocalAddr,
+				"Remark":          c.Remark,
+				"Status":          c.Status,
+				"IsConnect":       c.IsConnect,
+				"RateLimit":       c.RateLimit,
+				"Flow":            c.Flow,
+				"WebUserName":     c.WebUserName,
+				"ConfigConnAllow": c.ConfigConnAllow,
+				"MaxConn":         c.MaxConn,
+				"MaxTunnelNum":    c.MaxTunnelNum,
+				"Version":         c.Version,
+				"BlackIpList":     c.BlackIpList,
+				"CreateTime":      c.CreateTime,
+				"LastOnlineTime":  c.LastOnlineTime,
+				"IpWhite":         c.IpWhite,
+				"IpWhitePass":     ipWhitePass,
+				"IpWhiteList":     c.IpWhiteList,
 			}
 		}
 		s.Data["json"] = data
@@ -199,7 +199,10 @@ func (s *ClientController) Edit() {
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "client"
 		if c, err := file.GetDb().GetClient(id); err != nil {
+			// error() 只设 TplName，不中断请求；不 return 的话下面 display() 会把它
+			// 覆盖成 client/edit.html，用空数据渲染出一个"客户端字段全空"的编辑页。
 			s.error()
+			return
 		} else {
 			s.Data["c"] = c
 			s.Data["BlackIpList"] = strings.Join(c.BlackIpList, "\r\n")
@@ -219,7 +222,8 @@ func (s *ClientController) Edit() {
 			}
 		}
 		if c, err := file.GetDb().GetClient(id); err != nil {
-			s.error()
+			// 这条分支走 AJAX：AjaxErr 已经 ServeJSON + StopRun，上面原来那句
+			// s.error() 是纯空转（设了 TplName 也没人渲染），删掉。
 			s.AjaxErr("client ID not found")
 			return
 		} else {

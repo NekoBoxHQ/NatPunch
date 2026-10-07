@@ -26,20 +26,19 @@ func NewJsonDb(runPath string) *JsonDb {
 }
 
 type JsonDb struct {
-	Tasks            sync.Map
-	Hosts            sync.Map
-	HostsTmp         sync.Map
-	Clients          sync.Map
-	Global           *Glob
-	Quick            *QuickCmds
-	RunPath          string
-	ClientIncreaseId int32  //client increased id
-	TaskIncreaseId   int32  //task increased id
-	HostIncreaseId   int32  //host increased id
-	TaskFilePath     string //task file path
-	HostFilePath     string //host file path
-	ClientFilePath   string //client file path
-	GlobalFilePath   string //global file path
+	Tasks             sync.Map
+	Hosts             sync.Map
+	Clients           sync.Map
+	Global            *Glob
+	Quick             *QuickCmds
+	RunPath           string
+	ClientIncreaseId  int32  //client increased id
+	TaskIncreaseId    int32  //task increased id
+	HostIncreaseId    int32  //host increased id
+	TaskFilePath      string //task file path
+	HostFilePath      string //host file path
+	ClientFilePath    string //client file path
+	GlobalFilePath    string //global file path
 	QuickCmdsFilePath string //quick cmds file path
 }
 

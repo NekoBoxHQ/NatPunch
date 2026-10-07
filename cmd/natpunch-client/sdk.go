@@ -3,7 +3,8 @@
 // SDK 入口（CGO c-shared 构建）：普通 go build / go vet / go test 不编译本文件，
 // 避免与 main.go 的 main() 冲突（main redeclared，CI 在 CGO_ENABLED=1 下会失败）。
 // 构建 SDK 库（需 gcc）：
-//   go build -tags natpunchsdk -buildmode=c-shared -o natpunch_sdk.so ./cmd/natpunch-client
+//
+//	go build -tags natpunchsdk -buildmode=c-shared -o natpunch_sdk.so ./cmd/natpunch-client
 package main
 
 import (

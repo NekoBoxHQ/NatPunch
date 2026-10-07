@@ -3,6 +3,8 @@ package proxy
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/json"
+	"fmt"
 	"github.com/NekoBoxHQ/NatPunch/bridge"
 	"github.com/NekoBoxHQ/NatPunch/lib/cache"
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
@@ -11,8 +13,6 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/lib/goroutine"
 	"github.com/NekoBoxHQ/NatPunch/server/connection"
 	"github.com/NekoBoxHQ/NatPunch/web"
-	"encoding/json"
-	"fmt"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 	"io"

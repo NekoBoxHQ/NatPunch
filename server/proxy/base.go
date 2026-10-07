@@ -7,7 +7,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/NekoBoxHQ/NatPunch/bridge"
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/conn"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
@@ -30,31 +29,6 @@ type BaseServer struct {
 	errorContent []byte
 	errorCode    int
 	sync.Mutex
-}
-
-func NewBaseServer(bridge *bridge.Bridge, task *file.Tunnel) *BaseServer {
-	return &BaseServer{
-		bridge:       bridge,
-		task:         task,
-		errorContent: nil,
-		Mutex:        sync.Mutex{},
-	}
-}
-
-// add the flow
-func (s *BaseServer) FlowAdd(in, out int64) {
-	s.Lock()
-	defer s.Unlock()
-	s.task.Flow.ExportFlow += out
-	s.task.Flow.InletFlow += in
-}
-
-// change the flow
-func (s *BaseServer) FlowAddHost(host *file.Host, in, out int64) {
-	s.Lock()
-	defer s.Unlock()
-	host.Flow.ExportFlow += out
-	host.Flow.InletFlow += in
 }
 
 // write fail bytes to the connection

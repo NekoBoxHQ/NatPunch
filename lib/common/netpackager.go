@@ -9,11 +9,6 @@ import (
 	"strconv"
 )
 
-type NetPackager interface {
-	Pack(writer io.Writer) (err error)
-	UnPack(reader io.Reader) (err error)
-}
-
 const (
 	ipV4       = 1
 	domainName = 3

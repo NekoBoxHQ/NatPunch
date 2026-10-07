@@ -39,6 +39,8 @@ func (lg *StoreMsg) WriteMsg(when time.Time, msg string, level int) error {
 	return nil
 }
 
+// Destroy 是 beego logs.Logger 接口要求的方法，本实现无资源要释放，留空即可。
+// （不是死代码 —— 删了 *StoreMsg 就不再实现 logs.Logger，编译直接失败。）
 func (lg *StoreMsg) Destroy() {
 	return
 }

@@ -1,16 +1,16 @@
 package common
 
 const (
-	CONN_DATA_SEQ     = "*#*" //Separator
-	VERIFY_EER        = "vkey"
-	VERIFY_SUCCESS    = "sucs"
-	WORK_MAIN         = "main"
-	WORK_CHAN         = "chan"
-	WORK_CONFIG       = "conf"
-	WORK_REGISTER     = "rgst"
-	WORK_STATUS       = "stus"
-	RES_MSG           = "msg0"
-	RES_CLOSE         = "clse"
+	CONN_DATA_SEQ  = "*#*" //Separator
+	VERIFY_EER     = "vkey"
+	VERIFY_SUCCESS = "sucs"
+	WORK_MAIN      = "main"
+	WORK_CHAN      = "chan"
+	WORK_CONFIG    = "conf"
+	WORK_REGISTER  = "rgst"
+	WORK_STATUS    = "stus"
+	RES_MSG        = "msg0"
+	RES_CLOSE      = "clse"
 	// REPORT_LOCAL_IP: server requests client local/private IPs on WORK_MAIN.
 	// New clients reply with WriteLenContent; old clients ignore the flag (server times out).
 	REPORT_LOCAL_IP   = "rlip"

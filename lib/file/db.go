@@ -118,12 +118,6 @@ func (s *DbUtils) UpdateTask(t *Tunnel) error {
 	return nil
 }
 
-func (s *DbUtils) SaveGlobal(t *Glob) error {
-	s.JsonDb.Global = t
-	s.JsonDb.StoreGlobalToJsonFile()
-	return nil
-}
-
 func (s *DbUtils) DelTask(id int) error {
 	s.JsonDb.Tasks.Delete(id)
 	s.JsonDb.StoreTasksToJsonFile()

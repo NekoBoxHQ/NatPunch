@@ -5,15 +5,8 @@ import (
 )
 
 const PoolSize = 64 * 1024
-const PoolSizeSmall = 100
 const PoolSizeUdp = 1472 + 200
 const PoolSizeCopy = 32 << 10
-
-var BufPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, PoolSize)
-	},
-}
 
 var BufPoolUdp = sync.Pool{
 	New: func() interface{} {
@@ -24,32 +17,6 @@ var BufPoolMax = sync.Pool{
 	New: func() interface{} {
 		return make([]byte, PoolSize)
 	},
-}
-var BufPoolSmall = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, PoolSizeSmall)
-	},
-}
-var BufPoolCopy = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, PoolSizeCopy)
-	},
-}
-
-func PutBufPoolUdp(buf []byte) {
-	if cap(buf) == PoolSizeUdp {
-		BufPoolUdp.Put(buf[:PoolSizeUdp])
-	}
-}
-
-func PutBufPoolCopy(buf []byte) {
-	if cap(buf) == PoolSizeCopy {
-		BufPoolCopy.Put(buf[:PoolSizeCopy])
-	}
-}
-
-func GetBufPoolCopy() []byte {
-	return (BufPoolCopy.Get().([]byte))[:PoolSizeCopy]
 }
 
 func PutBufPoolMax(buf []byte) {

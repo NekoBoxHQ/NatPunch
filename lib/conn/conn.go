@@ -3,10 +3,10 @@ package conn
 import (
 	"bufio"
 	"bytes"
-	"github.com/NekoBoxHQ/NatPunch/lib/goroutine"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/NekoBoxHQ/NatPunch/lib/goroutine"
 	"github.com/astaxie/beego/logs"
 	"io"
 	"net"
@@ -156,18 +156,6 @@ func (s *Conn) SetAlive(tp string) {
 	}
 }
 
-// set read deadline
-func (s *Conn) SetReadDeadlineBySecond(t time.Duration) {
-	switch s.Conn.(type) {
-	case *kcp.UDPSession:
-		s.Conn.(*kcp.UDPSession).SetReadDeadline(time.Now().Add(time.Duration(t) * time.Second))
-	case *net.TCPConn:
-		s.Conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(time.Duration(t) * time.Second))
-	case *pmux.PortConn:
-		s.Conn.(*pmux.PortConn).SetReadDeadline(time.Now().Add(time.Duration(t) * time.Second))
-	}
-}
-
 // get link info from conn
 func (s *Conn) GetLinkInfo() (lk *Link, err error) {
 	err = s.getInfo(&lk)
@@ -312,21 +300,6 @@ func (s *Conn) Read(b []byte) (n int, err error) {
 // write sign flag
 func (s *Conn) WriteClose() (int, error) {
 	return s.Write([]byte(common.RES_CLOSE))
-}
-
-// write main
-func (s *Conn) WriteMain() (int, error) {
-	return s.Write([]byte(common.WORK_MAIN))
-}
-
-// write main
-func (s *Conn) WriteConfig() (int, error) {
-	return s.Write([]byte(common.WORK_CONFIG))
-}
-
-// write chan
-func (s *Conn) WriteChan() (int, error) {
-	return s.Write([]byte(common.WORK_CHAN))
 }
 
 // get task or host result of add

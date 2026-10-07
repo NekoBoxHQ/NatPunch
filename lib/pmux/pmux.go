@@ -174,8 +174,8 @@ func (pMux *PortMux) Close() error {
 	if pMux.Listener != nil {
 		_ = pMux.Listener.Close() // 停止接收新连接，触发 accept 协程退出
 	}
-	close(pMux.done)          // 唤醒 in-flight process()
-	pMux.wg.Wait()            // 等待所有 process() 退出后再 close conn channel
+	close(pMux.done) // 唤醒 in-flight process()
+	pMux.wg.Wait()   // 等待所有 process() 退出后再 close conn channel
 	close(pMux.clientConn)
 	close(pMux.httpsConn)
 	close(pMux.httpConn)

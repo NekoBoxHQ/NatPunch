@@ -3,10 +3,7 @@ package crypt
 import (
 	"crypto/md5"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
-	"errors"
-	"strings"
 )
 
 // Generate 32-bit MD5 strings
@@ -39,32 +36,4 @@ func GetVkey() string {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(buf)
-}
-
-func Base64Decoding(encodedString string) (string, error) {
-	decodedBytes, err := base64.StdEncoding.DecodeString(encodedString)
-	decodedString := string(decodedBytes)
-
-	// 面板当前生成的格式：name|addr|key|tls[|fp]（无前缀，F2-2 快速命令携带指纹）
-	if err == nil && strings.Contains(decodedString, "|") {
-		return joinQuickCmd(decodedString)
-	}
-
-	return "", errors.New("快捷启动命令错误，请检查")
-}
-
-// joinQuickCmd 把 "name|addr|vkey|tls[|fp]" 拼成 "addr vkey tls[ fp]"（startClientServer 用 Fields 解析）
-func joinQuickCmd(s string) (string, error) {
-	parts := strings.Split(s, "|")
-	if len(parts) < 4 {
-		return "", errors.New("快捷启动命令格式错误，请检查")
-	}
-	addr := strings.TrimSpace(parts[1])
-	key := strings.TrimSpace(parts[2])
-	tls := strings.TrimSpace(parts[3])
-	ret := addr + " " + key + " " + tls
-	if len(parts) > 4 && strings.TrimSpace(parts[4]) != "" {
-		ret += " " + strings.TrimSpace(parts[4])
-	}
-	return ret, nil
 }

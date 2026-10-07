@@ -3,11 +3,11 @@ package common
 import (
 	"bytes"
 	"crypto/subtle"
-	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 	"golang.org/x/crypto/bcrypt"
@@ -271,19 +271,6 @@ func GetIpByAddr(addr string) string {
 		addr = strings.Split(addr, ":")[0]
 	}
 	return addr
-}
-
-// get port from the complete address
-func GetPortByAddr(addr string) int {
-	arr := strings.Split(addr, ":")
-	if len(arr) < 2 {
-		return 0
-	}
-	p, err := strconv.Atoi(arr[1])
-	if err != nil {
-		return 0
-	}
-	return p
 }
 
 // in 判断 target 是否在 str_array 中。

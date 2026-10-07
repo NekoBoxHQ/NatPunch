@@ -1,6 +1,3 @@
-//go:build !natpunchgui
-// +build !natpunchgui
-
 package proxy
 
 import (

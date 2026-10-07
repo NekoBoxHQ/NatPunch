@@ -151,10 +151,9 @@ func (Self *priorityQueue) Stop() {
 }
 
 type connQueue struct {
-	chain    *bufChain
-	starving uint8
-	stop     bool
-	cond     *sync.Cond
+	chain *bufChain
+	stop  bool
+	cond  *sync.Cond
 }
 
 func (Self *connQueue) New() {

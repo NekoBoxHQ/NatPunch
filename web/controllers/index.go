@@ -200,7 +200,11 @@ func (s *IndexController) Edit() {
 	id := s.GetIntNoErr("id")
 	if s.Ctx.Request.Method == "GET" {
 		if t, err := file.GetDb().GetTask(id); err != nil {
+			// error() 只设 TplName，不会中断请求：这里不 return 的话，下面那句
+			// display() 会把 TplName 覆盖成 index/edit.html，拿一份空数据把编辑页
+			// 渲染出来（看着像"隧道字段全空了"）。返回才能真的出错误页。
 			s.error()
+			return
 		} else {
 			s.Data["t"] = t
 			s.Data["case_key"] = caseKeyForTunnelMode(t.Mode)
@@ -209,7 +213,10 @@ func (s *IndexController) Edit() {
 		s.display()
 	} else {
 		if t, err := file.GetDb().GetTask(id); err != nil {
-			s.error()
+			// 这条分支走 AJAX，回 HTML 错误页没用；原来那句 s.error() 也会被紧随其后的
+			// AjaxOk 覆盖掉 —— 结果是 id 不存在时反而回 "modified success"。
+			s.AjaxErr("task ID not found")
+			return
 		} else {
 			// 非管理员编辑时 client 强制为本人的（F2-9 IDOR）
 			editClientId := s.GetIntNoErr("client_id")

@@ -2,10 +2,10 @@ package bridge
 
 import (
 	"crypto/tls"
-	"github.com/NekoBoxHQ/NatPunch/lib/natpunch_mux"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/NekoBoxHQ/NatPunch/lib/natpunch_mux"
 	"net"
 	"strconv"
 	"strings"
@@ -57,8 +57,8 @@ type Bridge struct {
 
 func NewTunnel(tunnelPort int, tunnelType string, ipVerify bool, runList *sync.Map, disconnectTime int) *Bridge {
 	return &Bridge{
-		TunnelPort:     tunnelPort,
-		tunnelType:     tunnelType,
+		TunnelPort: tunnelPort,
+		tunnelType: tunnelType,
 		// 有缓冲：避免 DealBridgeTask 忙时生产者（client 消息循环）阻塞（阶段三 G6）
 		OpenTask:       make(chan *file.Tunnel, 128),
 		CloseTask:      make(chan *file.Tunnel, 128),

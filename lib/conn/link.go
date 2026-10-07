@@ -10,8 +10,8 @@ type Link struct {
 	LocalProxy   bool
 	RemoteAddr   string
 	ProtoVersion string
-	Cols         int //shell pty 列数
-	Rows         int //shell pty 行数
+	Cols         int    //shell pty 列数
+	Rows         int    //shell pty 行数
 	ShellID      string //shell 会话标识（服务端生成，用于 resize 定位 pty）
 	Option       Options
 }
@@ -47,10 +47,4 @@ func newOptions(opts ...Option) Options {
 		o(&opt)
 	}
 	return opt
-}
-
-func LinkTimeout(t time.Duration) Option {
-	return func(opt *Options) {
-		opt.Timeout = t
-	}
 }

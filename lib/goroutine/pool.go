@@ -10,10 +10,20 @@ import (
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
-	"github.com/NekoBoxHQ/NatPunch/web"
 	"github.com/astaxie/beego/logs"
 	"github.com/panjf2000/ants/v2"
 )
+
+// AuthPageHTML 返回「IP 白名单授权页」的 HTML，由**服务端**在启动时注入
+// （见 server/proxy/authpage.go）。
+//
+// 为什么不直接 import web：这段逻辑只会在服务端的转发路径上走到 ——
+// 调用方 lib/conn.CopyWaitGroup 由 server/proxy/base.go 传入 task，
+// 而客户端 client/client.go 恒传 nil（下面的 task != nil 判断就把它挡掉了）。
+// 直接 import 会让**客户端二进制**把整个面板的 web/static + web/views（约 3.6MB
+// 的 jQuery / bootstrap / echarts / 字体）一起编进去，客户端一个字节都用不到。
+// 注入之后客户端不再依赖 web 包，二进制小一圈，升级传输也快。
+var AuthPageHTML func() string
 
 type connGroup struct {
 	src    io.ReadWriteCloser
@@ -79,8 +89,10 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 					ip := common.GetIpByAddr(remote)
 					var jsonBytes []byte
 
-					errorContent, _ := web.ReadStaticFile("page/auth.html")
-					authHtml := string(errorContent)
+					authHtml := ""
+					if AuthPageHTML != nil {
+						authHtml = AuthPageHTML()
+					}
 					authHtml = strings.ReplaceAll(authHtml, "${ip}", ip)
 
 					fullRequest := string(buf[0:nr])

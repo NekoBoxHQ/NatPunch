@@ -5,12 +5,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"github.com/NekoBoxHQ/NatPunch/lib/common"
-	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"io"
 	"log"
 	"net/http"
@@ -448,14 +448,6 @@ func replaceExecutable(srcBin, destBin string) error {
 		_ = os.Remove(srcBin)
 	}
 	return nil
-}
-
-func MkidrDirAll(path string, v ...string) {
-	for _, item := range v {
-		if err := os.MkdirAll(filepath.Join(path, item), 0755); err != nil {
-			log.Fatalf("Failed to create directory %s error:%s", path, err.Error())
-		}
-	}
 }
 
 func CopyDir(srcPath string, destPath string) error {
