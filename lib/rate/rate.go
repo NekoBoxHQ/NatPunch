@@ -3,19 +3,18 @@ package rate
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	xrate "golang.org/x/time/rate"
 )
 
 type Rate struct {
-	limiter  *xrate.Limiter
-	addSize  int64
-	mu       sync.Mutex
-	stopChan chan struct{}
-	consumed int64
-	NowRate  int64
+	limiter   *xrate.Limiter
+	addSize   int64
+	mu        sync.Mutex
+	stopChan  chan struct{}
+	readTotal func() int64 // 每个采样周期读一次累计字节（来自 Client.Flow，含 TCP+UDP）
+	NowRate   int64        // 字节/秒
 }
 
 func NewRate(addSize int64) *Rate {
@@ -25,29 +24,55 @@ func NewRate(addSize int64) *Rate {
 	}
 }
 
-// Start 启动"每秒把这一秒消耗的字节数记进 NowRate"的采样。
+// SetFlowSource 告诉限速器「速率从哪个累计计数读」（通常是 Client.Flow 的 Inlet+Export 之和）。
+// 用回调而不是直接引 file.Flow，是为了不让 lib/rate 依赖 lib/file 造成 import cycle。
+// 必须在 Start() 之前调用一次；Start 会把当时的回调抓进采样 goroutine。
+func (s *Rate) SetFlowSource(f func() int64) {
+	s.mu.Lock()
+	s.readTotal = f
+	s.mu.Unlock()
+}
+
+// Start 启动「每 2 秒从累计字节算出速率」的采样 —— 与服务端 tool.collectIORate 同一口径：
+// 读累计值 → 除时间间隔得字节/秒。速率从 Client.Flow 的增量来，所以 **TCP 和 UDP 都算**
+// （旧的实现只数 rateConn 的 consumed，那是 TCP-only，漏掉了 UDP 的代理流量）。
 //
-// **幂等**：已经在跑就直接返回。客户端每次上报配置都会走 NewClient → NewClient.Rate.Start()，
-// 原来这里无条件 `go func()`，于是每秒多一个永不退出的 ticker（goroutine 泄漏）。
+// **幂等**：已经在跑就直接返回。客户端每次上报配置都会走 NewClient → Rate.Start()，
+// 原来这里无条件 go func()，于是每秒多一个永不退出的 ticker（goroutine 泄漏）。
 // 需要重新开始就先 Stop（面板改限速那条路径就是这么用的）。
 func (s *Rate) Start() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.stopChan != nil {
+		s.mu.Unlock()
 		return
 	}
 	stop := make(chan struct{})
 	s.stopChan = stop
+	read := s.readTotal
+	s.mu.Unlock()
 	go func() {
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+		var lastTotal int64
+		var haveLast bool
 		for {
 			select {
 			case <-ticker.C:
-				// 一次采样只是"刚刚那一秒"的瞬时值，直接拿去显示会一直在 0 和满格之间跳。
-				// 按 5 秒窗口平滑（新值占 1/5），读数才像速度表。
-				cur := atomic.SwapInt64(&s.consumed, 0)
-				s.NowRate = s.NowRate*4/5 + cur/5
+				if read == nil {
+					continue
+				}
+				total := read()
+				if haveLast {
+					delta := total - lastTotal
+					if delta < 0 {
+						delta = 0 // 计数被重置过（如清零流量），别显示成负速率
+					}
+					instant := delta / 2 // 2 秒窗口 → 字节/秒
+					// 单客户端流量比整机更突发，做 50% 指数平滑，别在 0 和满格之间跳
+					s.NowRate = (s.NowRate + instant) / 2
+				}
+				lastTotal = total
+				haveLast = true
 			case <-stop:
 				return
 			}
@@ -83,7 +108,6 @@ func (s *Rate) Get(size int64) {
 			n = burst
 		}
 		_ = s.limiter.WaitN(ctx, int(n))
-		atomic.AddInt64(&s.consumed, n)
 		size -= n
 	}
 }

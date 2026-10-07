@@ -8,7 +8,6 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
-	"github.com/NekoBoxHQ/NatPunch/lib/rate"
 	"github.com/NekoBoxHQ/NatPunch/server"
 	"github.com/astaxie/beego"
 )
@@ -287,14 +286,8 @@ func (s *ClientController) Edit() {
 			if c.Rate != nil {
 				c.Rate.Stop()
 			}
-			if c.RateLimit > 0 {
-				// RateLimit 单位 Mbps（比特，1024 进制）：Mbps * 1024 * 1024 / 8 = 字节/秒
-				c.Rate = rate.NewRate(int64(c.RateLimit * 1024 * 1024 / 8))
-				c.Rate.Start()
-			} else {
-				c.Rate = rate.NewRate((2 << 23) * 1024)
-				c.Rate.Start()
-			}
+			c.Rate = file.NewClientRate(c)
+			c.Rate.Start()
 
 			c.BlackIpList = RemoveRepeatedElement(strings.Split(s.getEscapeString("blackiplist"), "\r\n"))
 			c.ExpireTime = normalizeExpireTime(s.getEscapeString("expire_time"))

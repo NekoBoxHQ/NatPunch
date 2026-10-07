@@ -241,6 +241,33 @@ func (s *DbUtils) GetTaskCountByClient(clientId int) int {
 	return cnt
 }
 
+// NewClientRate 创建一个客户端的限速器，并把「速率采样」接到客户端的累计流量上。
+//
+// 速率(NowRate)从 Client.Flow 的 Inlet+Export 增量算（TCP+UDP 都算），每 2 秒采一次；
+// 不再依赖 rateConn 的 consumed 计数 —— 那只有 TCP，漏掉了 UDP 的代理流量（QUIC/HTTP3）。
+func NewClientRate(c *Client) *rate.Rate {
+	r := rate.NewRate(rateLimitAddSize(c.RateLimit))
+	r.SetFlowSource(func() int64 {
+		f := c.Flow
+		if f == nil {
+			return 0
+		}
+		f.RLock()
+		defer f.RUnlock()
+		return f.InletFlow + f.ExportFlow
+	})
+	return r
+}
+
+// rateLimitAddSize 把面板的限速值（Mbps）换算成限速器的 addSize（字节/秒）。
+func rateLimitAddSize(limit int) int64 {
+	if limit == 0 {
+		return (2 << 23) * 1024 // 不限速：约 16 GiB/s，实际等于不限
+	}
+	// RateLimit 单位 Mbps（比特，1024 进制）：Mbps * 1024 * 1024 / 8 = 字节/秒
+	return int64(limit * 1024 * 1024 / 8)
+}
+
 // syncClientRate 给「客户端上报配置」这条路径选出该用的限速器。
 //
 // 限速是**服务端**（面板）设的，客户端自报的配置里没有这一项 —— 所以老对象还在就
@@ -257,12 +284,7 @@ func syncClientRate(existing *Client, c *Client) {
 		c.Rate = existing.Rate
 		return
 	}
-	if c.RateLimit == 0 {
-		c.Rate = rate.NewRate((2 << 23) * 1024)
-	} else {
-		// RateLimit 单位 Mbps（比特，1024 进制）：Mbps * 1024 * 1024 / 8 = 字节/秒
-		c.Rate = rate.NewRate(int64(c.RateLimit * 1024 * 1024 / 8))
-	}
+	c.Rate = NewClientRate(c)
 }
 
 func (s *DbUtils) NewClient(c *Client) error {
@@ -370,12 +392,7 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 			t.Rate.Stop()
 			t.Rate = nil
 		}
-		if t.RateLimit == 0 {
-			t.Rate = rate.NewRate(int64((2 << 23) * 1024))
-		} else {
-			// RateLimit 单位 Mbps（比特，1024 进制），与 NewClient 口径一致
-			t.Rate = rate.NewRate(int64(t.RateLimit * 1024 * 1024 / 8))
-		}
+		t.Rate = NewClientRate(t)
 		t.Rate.Start()
 	}
 	return nil

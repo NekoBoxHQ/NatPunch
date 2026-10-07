@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
-	"github.com/NekoBoxHQ/NatPunch/lib/rate"
 )
 
 func NewJsonDb(runPath string) *JsonDb {
@@ -77,12 +76,7 @@ func (s *JsonDb) LoadClientFromJsonFile() {
 		if json.Unmarshal([]byte(v), &post) != nil {
 			return
 		}
-		if post.RateLimit > 0 {
-			// RateLimit 单位 Mbps（比特，1024 进制）：Mbps * 1024 * 1024 / 8 = 字节/秒
-			post.Rate = rate.NewRate(int64(post.RateLimit * 1024 * 1024 / 8))
-		} else {
-			post.Rate = rate.NewRate((2 << 23) * 1024)
-		}
+		post.Rate = NewClientRate(post)
 		post.Rate.Start()
 		post.NowConn = 0
 		// 重启后清空内网地址缓存，待客户端重连后重新上报（避免残留旧公网出口值）

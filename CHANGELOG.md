@@ -2,6 +2,25 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.45（已发布）
+
+### 修复
+
+- **客户端的「网速」改成与服务端同一口径：每 2 秒从累计字节算出速率，TCP 和 UDP 都算。**
+
+  原来网速(`Rate.NowRate`)是数 rateConn 的 `consumed` 计数 —— 而那个计数**只在 TCP 的
+  流式拷贝时累加**，UDP 路径（`udp.go` / `shadowsocks.go` 的 UDP）根本不经过 rateConn，
+  只直接 `Flow.Add`。所以网速列漏掉了所有 UDP 流量（QUIC / HTTP3，以及一大票代理流量）。
+
+  现在改成跟服务端 `tool.collectIORate` 一样：`Rate` 里加一个 `SetFlowSource` 回调，
+  指向 `Client.Flow` 的 Inlet+Export 之和，采样 goroutine 每 2 秒读一次增量、除以时间
+  间隔得到字节/秒。`Client.Flow` 已经验证过逐字节准、且 TCP+UDP 都记，所以速率终于全了。
+  （限速器本身的 `limiter.WaitN` 限速逻辑不动；`consumed` 只服务于网速显示，删掉。）
+
+  统一收口：新增 `file.NewClientRate(c)`（含 `rateLimitAddSize` 换算），
+  四个创建限速器的地方（`syncClientRate` / `UpdateClient` / `LoadClientFromJsonFile` /
+  面板编辑）都改走它，不再各写一份 Mbps→字节/秒 的换算。
+
 ## v26.10.44（已发布）
 
 ### 修复
