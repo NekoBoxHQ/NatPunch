@@ -95,7 +95,9 @@
                 field: 'Id',//域值
                 title: '<span langtag="word-id"></span>',//标题
                 halign: 'center',
-                visible: true,//false表示不显示
+                // 默认不勾选：这一列显示的是**行号**（见下面的 formatter），不是真实 Id，
+                // 平时没什么用。勾选栏（showColumns）里随时能打开。
+                visible: false,//false表示不显示
                 sortable: true,//启用排序
                 formatter: function (value, row, index) {
                     var opt = $('#table').bootstrapTable('getOptions');
@@ -125,7 +127,9 @@
                 title: '<span langtag="word-verifykey"></span>',//标题
                 halign: 'center',
                 sortable: true, //启用排序
-                visible: true//false表示不显示
+                // 默认不勾选：密钥平时不用盯着看，敞开在列表里还容易被旁边的人扫到。
+                // 勾选栏（showColumns）里随时能打开。
+                visible: false//false表示不显示
             },
             {
                 field: 'Mode',//域值

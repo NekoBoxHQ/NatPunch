@@ -103,7 +103,8 @@
                 title: '<span langtag="word-id"></span>',//标题
                 halign: 'center',
                 sortable: true,
-                visible: true//false表示不显示
+                // 默认不勾选：平时用不上，勾选栏（showColumns）里随时能打开。
+                visible: false//false表示不显示
             },
             {
                 field: 'Remark',//域值
@@ -131,7 +132,9 @@
                 title: '<span langtag="word-verifykey"></span>',//标题
                 halign: 'center',
                 sortable: true,
-                visible: true,//false表示不显示
+                // 默认不勾选：密钥平时不用盯着看，敞开在列表里还容易被旁边的人扫到。
+                // 勾选栏（showColumns）里随时能打开；要用密钥时展开行里也有完整命令。
+                visible: false,//false表示不显示
                 formatter: function (value, row, index) {
                     if (!row.NoStore) {
                         return value
