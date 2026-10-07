@@ -16,13 +16,10 @@
                                 <span id="casehttpProxy" langtag="info-casehttpproxy"></span>
                                 <span id="casesocks5" langtag="info-casesocks5"></span>
                             </span>
-                            <select class="form-control" name="type" id="type">
-                                <option value="tcp" langtag="scheme-tcp"></option>
-                                <option value="udp" langtag="scheme-udp"></option>
-                                <option value="tcp+udp" langtag="scheme-tcpudp"></option>
-                                <option value="httpProxy" langtag="scheme-httpProxy"></option>
-                                <option value="socks5" langtag="scheme-socks5"></option>
-                            </select>
+                            <!-- 模式在这里是**固定**的：这条隧道是什么类型，上面那行「使用场景」已经写清楚了。
+                                 从哪个入口建的就在哪个入口用，编辑时不该再让人换类型。
+                                 （TCP隧道 / UDP隧道 两个模式已弃用 —— 双端隧道默认就是同一端口同时吃 TCP 和 UDP。） -->
+                            <input type="hidden" name="type" id="type" value="{{.t.Mode}}">
                         </div>
                     </div>
 
@@ -137,9 +134,6 @@
     $(function () {
         $("#type").val('{{.t.Mode}}');
         resetForm()
-        $("#type").on("change", function () {
-            resetForm()
-        })
         $("#use_client").on("change", function () {
             resetForm()
         })
