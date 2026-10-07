@@ -111,20 +111,23 @@
     arr["socks5"] = ["client_id", "port", "username", "password"]
     arr["httpProxy"] = ["client_id", "port", "username", "password"]
 
+    // 只在白名单里挑模式。这个值一头要拿去拼选择器、一头会随表单提交存成隧道的 Mode，
+    // 拿任意字符串去拼是危险的：里面带个 '#' / '&' 就能让 jQuery 的选择器直接抛错。
+    var KNOWN_MODES = {"tcp": 1, "udp": 1, "tcp+udp": 1, "httpProxy": 1, "socks5": 1};
+
     function resetForm() {
         $(".form-group[id]").css("display", "none");
         $("#usecase span").css("display", "none");
-        o = $("#type").val();
-        // 查询串里的 '+' 会被解码成**空格**：`?type=tcp+udp` 到手里是 "tcp udp"。
-        // 这个值不只是拿来显示的 —— 它随表单提交上去就存成这条隧道的模式，
-        // 带个空格进去等于把那条隧道弄坏。所以先归一化，认不出来再兜底成默认的双端隧道。
-        if (typeof o == "string" && o.indexOf("+") < 0 && o.indexOf(" ") >= 0) {
-            o = $.trim(o).replace(/\s+/g, "+");
-        }
-        if ($("#case" + o).length == 0) {
+        // **只从隐藏域的 value 属性读**（浏览器解析属性时会把 &#43; 这类实体还原成 '+'）。
+        // 不要去读模板渲染进 <script> 里的 '{{.type}}' —— 脚本里实体不还原，
+        // 拿到的是字面量 "tcp&#43;udp"，拼出来的选择器 #casetcp&#43;udp 会抛异常，
+        // 后面所有逻辑（包括兜底）全都执行不到。下面再做一次归一化兜底。
+        o = String($("#type").val() || "").replace(/&#43;/g, "+").replace(/\s+/g, "+");
+        o = $.trim(o);
+        if (!KNOWN_MODES[o]) {
             o = "tcp+udp";
         }
-        $("#type").val(o); // 归一化后的值写回表单，提交上去的才是干净的模式
+        $("#type").val(o); // 干净的写回表单，提交上去的才是有效的 Mode
         $('#case' + o).css("display", "inline")
         $("#port_tip").html("")
         if (o == "tcp+udp") {
@@ -136,7 +139,8 @@
     }
 
     $(function () {
-        $("#type").val(('{{.type}}' == '') ? 'tcp+udp' : '{{.type}}');
+        // 不再从模板往脚本里塞值：隐藏域的 value 属性已经带着它了（属性里的实体浏览器会还原）。
+        // 空值由 resetForm 里的白名单兜底成 tcp+udp。
         resetForm()
         $("#use_client").on("change", function () {
             resetForm()

@@ -121,19 +121,21 @@
     arr["socks5"] = ["client_id", "port", "username", "password"]
     arr["httpProxy"] = ["client_id", "port", "username", "password"]
 
+    // 同 add.html：只在白名单里挑模式，不拿任意字符串去拼选择器 / 存成 Mode。
+    var KNOWN_MODES = {"tcp": 1, "udp": 1, "tcp+udp": 1, "httpProxy": 1, "socks5": 1};
+
     function resetForm() {
         $(".form-group[id]").css("display", "none");
         $("#usecase span").css("display", "none");
-        o = $("#type").val();
-        // 同 add.html：模式值不能被查询串里的 '+' 被解码成空格这件事污染 ——
-        // 它随表单提交上去就存成这条隧道的模式。先归一化，认不出来兜底成双端隧道。
-        if (typeof o == "string" && o.indexOf("+") < 0 && o.indexOf(" ") >= 0) {
-            o = $.trim(o).replace(/\s+/g, "+");
-        }
-        if ($("#case" + o).length == 0) {
+        // 只从隐藏域的 value 属性读（浏览器会把 &#43; 这类实体还原成 '+'）。
+        // 模板渲染进 <script> 里的 '{{.t.Mode}}' 在脚本里不会还原实体，是字面量
+        // "tcp&#43;udp"，拼成选择器 #casetcp&#43;udp 会让 jQuery 抛错、后面全执行不到。
+        o = String($("#type").val() || "").replace(/&#43;/g, "+").replace(/\s+/g, "+");
+        o = $.trim(o);
+        if (!KNOWN_MODES[o]) {
             o = "tcp+udp";
         }
-        $("#type").val(o); // 写回表单，提交上去的才是干净的模式
+        $("#type").val(o); // 干净的写回表单，提交上去的才是有效的 Mode
         $('#case' + o).css("display", "inline")
         for (var i = 0; i < arr[o].length; i++) {
             $("#" + arr[o][i]).css("display", "block")
@@ -141,7 +143,7 @@
     }
 
     $(function () {
-        $("#type").val('{{.t.Mode}}');
+        // 不再从模板往脚本里塞值：隐藏域的 value 属性已经带着它了（属性里的实体浏览器会还原）。
         resetForm()
         $("#use_client").on("change", function () {
             resetForm()
