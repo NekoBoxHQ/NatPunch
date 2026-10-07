@@ -666,6 +666,16 @@
 			<zh-CN>Web登陆用户名重复，请重新设置</zh-CN>
 			<en-US>Web login username duplicate, please reset</en-US>
 		</lang>
+		<!-- 服务端确实会发的两条，此前没有对应词条：language.js 查不到就原样显示英文。
+		     键 = 消息去掉空格/逗号/句点/问号再转小写（language.js:148）。 -->
+		<lang id="clientidnotfound">
+			<zh-CN>找不到该客户端</zh-CN>
+			<en-US>Client ID not found</en-US>
+		</lang>
+		<lang id="taskidnotfound">
+			<zh-CN>找不到该隧道</zh-CN>
+			<en-US>Task ID not found</en-US>
+		</lang>
 	</reply>
 
 	<charts>
