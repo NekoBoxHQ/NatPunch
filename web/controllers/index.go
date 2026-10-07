@@ -21,16 +21,15 @@ type IndexController struct {
 // 某个 span"，而列表页传过来的 type 可能是**空串**、模板渲染进 <script> 的值还会被
 // html/template 把 '+' 转义成 &#43;（脚本里不还原）—— 两种都在真机上翻过车，
 // 表现都是「使用场景」那一行空白。
+//
+// 模式只有三种：tcp+udp（双端隧道，含列表页传空串的情况）/ httpProxy / socks5。
+// TCP隧道 / UDP隧道 已弃用，没有对着它们的词条了。
 func caseKeyForTunnelMode(mode string) string {
 	switch mode {
 	case "httpProxy":
 		return "info-casehttpproxy"
 	case "socks5":
 		return "info-casesocks5"
-	case "tcp":
-		return "info-casetcp"
-	case "udp":
-		return "info-caseudp"
 	default:
 		return "info-casetcpudp"
 	}

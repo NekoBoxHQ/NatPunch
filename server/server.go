@@ -193,16 +193,16 @@ func (m *multiService) Close() error {
 func NewMode(Bridge *bridge.Bridge, c *file.Tunnel) proxy.Service {
 	var service proxy.Service
 	switch c.Mode {
-	case "tcp":
-		service = proxy.NewTunnelModeServer(proxy.ProcessTunnel, Bridge, c)
 	case "socks5":
 		service = proxy.NewSock5ModeServer(Bridge, c)
 	case "httpProxy":
 		service = proxy.NewTunnelModeServer(proxy.ProcessHttp, Bridge, c)
 	case "tcpTrans":
 		service = proxy.NewTunnelModeServer(proxy.HandleTrans, Bridge, c)
-	case "udp":
-		service = proxy.NewUdpModeServer(Bridge, c)
+	// 双端隧道：同一端口同时监听 TCP 和 UDP。
+	// 下面两个副本的 Mode 是 "tcp" / "udp" —— 那只是给 proxy 层用的**内部子模式**，
+	// 不落盘（库里存的仍是 tcp+udp）。所以别再往上面的 switch 里加回 case "tcp" /
+	// case "udp"：面板没有创建单协议隧道的入口，存量也没有一条。
 	case "tcp+udp":
 		// 避免拷贝含 sync.RWMutex 的 Tunnel 结构（复制锁），逐字段构造两个独立副本
 		tcpT := &file.Tunnel{
@@ -353,7 +353,8 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*file.Tunnel)
 		if typeVal == "tcp+udp" {
-			if v.Mode != "tcp+udp" && v.Mode != "tcp" && v.Mode != "udp" {
+			// 隧道管理页：库里存的双端隧道 Mode 就是 "tcp+udp"，单协议 tcp / udp 已弃用
+			if v.Mode != "tcp+udp" {
 				return true
 			}
 			// 本分支原来完全不看 clientId：非管理员只要把 type 传成 "tcp+udp"
@@ -491,23 +492,20 @@ func GetDashboardData() map[string]interface{} {
 	data["clientOnlineCount"] = c
 	data["inletFlowCount"] = int(in)
 	data["exportFlowCount"] = int(out)
-	var tcp, udp, socks5, http int
+	var tcp, socks5, http int
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		switch value.(*file.Tunnel).Mode {
-		case "tcp", "tcp+udp":
+		case "tcp+udp": // 双端隧道（面板里唯一的 TCP/UDP 隧道形态）
 			tcp += 1
 		case "socks5":
 			socks5 += 1
 		case "httpProxy":
 			http += 1
-		case "udp":
-			udp += 1
 		}
 		return true
 	})
 
 	data["tcpC"] = tcp
-	data["udpCount"] = udp
 	data["socks5Count"] = socks5
 	data["httpProxyCount"] = http
 	data["bridgeType"] = beego.AppConfig.String("bridge_type")

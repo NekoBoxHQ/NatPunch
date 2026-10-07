@@ -23,18 +23,6 @@
 		<en-US>NatPunch Register</en-US>
 	</lang>
 
-	<lang id="scheme-host">
-		<zh-CN>域名解析</zh-CN>
-		<en-US>Host</en-US>
-	</lang>
-	<lang id="scheme-tcp">
-		<zh-CN>TCP 隧道</zh-CN>
-		<en-US>TCP</en-US>
-	</lang>
-	<lang id="scheme-udp">
-		<zh-CN>UDP 隧道</zh-CN>
-		<en-US>UDP</en-US>
-	</lang>
 	<lang id="scheme-tcpudp">
 		<zh-CN>双端隧道</zh-CN>
 		<en-US>Dual-end</en-US>
@@ -46,18 +34,6 @@
 	<lang id="scheme-socks5">
 		<zh-CN>SOCKS 代理</zh-CN>
 		<en-US>SOCKS 5</en-US>
-	</lang>
-	<lang id="scheme-secret">
-		<zh-CN>私密代理</zh-CN>
-		<en-US>Secret</en-US>
-	</lang>
-	<lang id="scheme-p2p">
-		<zh-CN>P2P 连接</zh-CN>
-		<en-US>P2P</en-US>
-	</lang>
-	<lang id="scheme-file">
-		<zh-CN>文件访问</zh-CN>
-		<en-US>File server</en-US>
 	</lang>
 
 	<lang id="page-clientlist">
@@ -76,17 +52,9 @@
 		<zh-CN>隧道列表 - 客户端 ID: </zh-CN>
 		<en-US>Tunnels list - Client ID: </en-US>
 	</lang>
-	<lang id="page-listtcp">
-		<zh-CN>TCP 隧道列表</zh-CN>
-		<en-US>TCP list</en-US>
-	</lang>
-	<lang id="page-listudp">
-		<zh-CN>UDP 隧道列表</zh-CN>
-		<en-US>UDP list</en-US>
-	</lang>
 	<lang id="page-listtcpudp">
 		<zh-CN>隧道管理</zh-CN>
-		<en-US>Reverse Tunnel</en-US>
+		<en-US>Tunnel management</en-US>
 	</lang>
 	<lang id="page-listhttpproxy">
 		<zh-CN>HTTP 代理列表</zh-CN>
@@ -95,18 +63,6 @@
 	<lang id="page-listsocks5">
 		<zh-CN>SOCKS 代理列表</zh-CN>
 		<en-US>SOCKS 5 list</en-US>
-	</lang>
-	<lang id="page-listsecret">
-		<zh-CN>私密代理列表</zh-CN>
-		<en-US>Secret list</en-US>
-	</lang>
-	<lang id="page-listp2p">
-		<zh-CN>P2P 连接列表</zh-CN>
-		<en-US>P2P list</en-US>
-	</lang>
-	<lang id="page-listfileserver">
-		<zh-CN>文件代理列表</zh-CN>
-		<en-US>File server list</en-US>
 	</lang>
 	<lang id="page-add">
 		<zh-CN>新增</zh-CN>
@@ -653,33 +609,13 @@
 		<en-US>IP White Password, access that is not in the IP white list will be redirected to the IP authorization page, enter the correct authorization password, and you can complete the addition of IP.</en-US>
 	</lang>
 
-	<lang id="info-casefile">
-		<zh-CN>通提供一个公网可访问的本地文件服务，此模式仅客户端使用配置文件模式方可启动。</zh-CN>
-		<en-US>Provide a local file service accessible to the public network, which can only be started by the client using the profile mode.</en-US>
-	</lang>
 	<lang id="info-casehttpproxy">
 		<zh-CN>将公网服务器1.1.1.1的8002端口作为HTTP代理，访问内网网站。</zh-CN>
 		<en-US>Use port 8002 of public server 1.1.1.1 as HTTP proxy to visit intranet site.</en-US>
 	</lang>
-	<lang id="info-casep2p">
-		<zh-CN>流量不经过公网服务器，受nat类型影响较大，不能保证100%成功，支持大部分nat类型。</zh-CN>
-		<en-US>The traffic does not pass through the public network server, which is greatly affected by the NAT type, and cannot guarantee 100% success. Most NAT types are supported. A client is also required to provide a port for access to the access side.</en-US>
-	</lang>
-	<lang id="info-casesecret">
-		<zh-CN>无需新增端口,实现访问内网服务器10.1.50.2的22端口,可防止其他人连接。还需要一个客户端作为访问端提供一个端口进行访问。</zh-CN>
-		<en-US>There is no need to add a new port to access port 22 of intranet server 10.1.50.2, which can prevent other people from connecting. A client is also required to provide a port for access to the access side.</en-US>
-	</lang>
 	<lang id="info-casesocks5">
 		<zh-CN>将公网服务器1.1.1.1的8003端口作为SOCKS5代理，访问内网任意设备或者资源。</zh-CN>
 		<en-US>Use port 8003 of public server 1.1.1.1 as Socks5 proxy to access any device or resource in the Intranet.</en-US>
-	</lang>
-	<lang id="info-casetcp">
-		<zh-CN>通过公网服务器1.1.1.1的8001端口，连接内网机器10.1.50.101的22端口，实现SSH连接。</zh-CN>
-		<en-US>Connect port 8001 of public server 1.1.1.1 to port 22 of Intranet machine 10.1.50.101 to realize SSH connection.</en-US>
-	</lang>
-	<lang id="info-caseudp">
-		<zh-CN>通过公网服务器1.1.1.1的53端口，访问内网机器10.1.50.101的53端口，使用DNS服务。</zh-CN>
-		<en-US>Through port 53 of public server 1.1.1.1, access port 53 of Intranet machine 10.1.50.101, and use DNS service.</en-US>
 	</lang>
 	<lang id="info-casetcpudp">
 		<zh-CN>将公网服务器1.1.1.1的8001端口作为双端隧道，和客户端交互。</zh-CN>

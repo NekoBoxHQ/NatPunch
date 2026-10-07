@@ -22,8 +22,7 @@
                     <div class="form-group" id="client_id">
                         <label class="control-label font-bold" langtag="word-client"></label>
                         <div class="col-sm-10">
-                            <select class="form-control" name="client_id" placeholder="" id="natpunch_client_id"
-                                    langtag="word-belongclient"></select>
+                            <select class="form-control" name="client_id" id="natpunch_client_id"></select>
                         </div>
                     </div>
 
@@ -113,10 +112,9 @@
 
     // 只在白名单里挑模式。这个值一头要拿去拼选择器、一头会随表单提交存成隧道的 Mode，
     // 拿任意字符串去拼是危险的：里面带个 '#' / '&' 就能让 jQuery 的选择器直接抛错。
-    // tcp / udp 是弃用模式：新增页只有「隧道管理 / HTTP代理 / SOCKS代理」三个入口，
+    // tcp / udp 是弃用模式：面板只有「隧道管理 / HTTP代理 / SOCKS代理」三个入口，
     // 没有任何一个会传它们，arr 里也没有对应字段 —— 留在白名单里只会让手敲
     // /index/add?type=tcp 这种深链在 arr[o].length 上抛错。认不出来就回落到 tcp+udp。
-    // （编辑页不一样：那里 arr 有 tcp / udp，存量隧道点「编辑」还要能正常显示字段。）
     var KNOWN_MODES = {"tcp+udp": 1, "httpProxy": 1, "socks5": 1};
 
     function resetForm() {
