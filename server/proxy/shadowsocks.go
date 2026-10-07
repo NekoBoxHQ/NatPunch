@@ -55,6 +55,13 @@ func NewShadowsocksModeServer(bridge NetBridge, task *file.Tunnel) *ShadowsocksM
 	return s
 }
 
+// ssMetadata 只是 M.Metadata 的别名，用来躲开 SA1019。
+//
+// sing 的 shadowsocks.Handler 接口签名用的就是 M.Metadata，而上游在 v0.7.6 里
+// 把它标成了 deprecated（注释原文就是 "wtf is this?"），却仍在自己的接口里用 ——
+// 我们要实现这个接口就绕不开。收口成别名 + 这一处 nolint，免得每个引用点都被报。
+type ssMetadata = M.Metadata //nolint:staticcheck // 上游接口签名就用它，绕不开
+
 type ShadowsocksModeServer struct {
 	BaseServer
 	listener   net.Listener
@@ -94,7 +101,7 @@ func (s *ShadowsocksModeServer) Start() error {
 		}
 		s.task.Client.AddConn()
 		go func() {
-			err := s.service.NewConnection(context.Background(), c, M.Metadata{Source: M.SocksaddrFromNet(c.RemoteAddr())})
+			err := s.service.NewConnection(context.Background(), c, ssMetadata{Source: M.SocksaddrFromNet(c.RemoteAddr())})
 			if err != nil {
 				// 握手失败最常见的原因是密钥不对 / 对面在扫端口，降级成 Warn
 				logs.Warn("shadowsocks task id %d: %v", s.task.Id, err)
@@ -146,7 +153,7 @@ func (s *ShadowsocksModeServer) serveUDP(pc net.PacketConn) {
 		}
 		// NewPacket 拿走 buffer 的所有权，成功与否都不要再 Release
 		if err := s.service.NewPacket(context.Background(),
-			&ssReplyConn{pc: pc, source: addr}, b, M.Metadata{Source: M.SocksaddrFromNet(addr)}); err != nil {
+			&ssReplyConn{pc: pc, source: addr}, b, ssMetadata{Source: M.SocksaddrFromNet(addr)}); err != nil {
 			logs.Warn("shadowsocks udp from %s: %v", addr, err)
 		}
 	}
@@ -167,7 +174,7 @@ func (h *ssHandler) NewError(ctx context.Context, err error) {
 }
 
 // NewConnection：conn 已经是**解密后**的流，metadata.Destination 就是客户端请求的目标。
-func (h *ssHandler) NewConnection(ctx context.Context, raw net.Conn, metadata M.Metadata) error {
+func (h *ssHandler) NewConnection(ctx context.Context, raw net.Conn, metadata ssMetadata) error {
 	s := h.server
 	target := metadata.Destination.String()
 	if target == "" || metadata.Destination.Port == 0 {
@@ -240,7 +247,7 @@ func (c *ssConnGuard) Close() error {
 //
 // 所以回程必须"先读长度再读那么多字节"，不能直接 ReadUDPDatagram ——
 // 标准 UDP 报文的 Rsv 是 0，那条分支会在 io.ReadAll 上一直等缓冲区读满。
-func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, metadata M.Metadata) error {
+func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, metadata ssMetadata) error {
 	s := h.server
 	defer pc.Close()
 

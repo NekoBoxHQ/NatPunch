@@ -22,3 +22,11 @@ issues:
     - linters:
         - staticcheck
       text: "SA6002"
+    # SA1019：sing 的 shadowsocks.Handler 接口签名本身用的就是已弃用的 M.Metadata
+    # （上游在 v0.7.6 里标了 "deprecated: wtf is this?"，却仍在自己的接口里用），
+    # 我们要实现这个接口就绕不开。文件里已经把它收口成 ssMetadata 一个别名，
+    # 所以这条豁免实际上只管那一行。
+    - path: server/proxy/shadowsocks.go
+      linters:
+        - staticcheck
+      text: "SA1019"
