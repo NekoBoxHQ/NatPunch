@@ -140,7 +140,7 @@
         $("#type").val(o); // 干净的写回表单，提交上去的才是有效的 Mode
         $("#password_tip").html("")
         if (o == "shadowsocks") {
-            $("#password_tip").html("留空 = 不改动原密钥。要换密钥就填新的 16 字节 base64（openssl rand -base64 16）；当前密钥可以从列表里的 ss:// 链接复制")
+            $("#password_tip").html("留空 = 不改动原密钥；要换就填新的（口令也行，会按它派生）。当前生效的那份看列表里的 ss:// 链接。")
         } else if (o == "socks5" || o == "httpProxy") {
             $("#password_tip").html("不填则代理无需认证")
         }

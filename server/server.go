@@ -15,6 +15,7 @@ import (
 
 	"github.com/NekoBoxHQ/NatPunch/bridge"
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
+	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/NekoBoxHQ/NatPunch/server/proxy"
 	"github.com/NekoBoxHQ/NatPunch/server/tool"
@@ -294,6 +295,18 @@ func StopServer(id int) error {
 
 // add task
 func AddTask(t *file.Tunnel) error {
+	if t.Mode == "shadowsocks" {
+		// 归一化密钥，顺手**治好存量**：t 就是库里那个对象，这里改完立刻落盘，
+		// 所以启动时那条"建出来了但 RunStatus=false"的记录会在下次重启自愈。
+		// 为什么要在这一层再兜一次（面板的新增/编辑已经做过）：AddTask 是启动隧道的
+		// **唯一漏斗** —— 开机自启动、面板、桥下发的 start 全走它。库里的值可能是
+		// 别的入口写进去的、也可能是这功能刚上线时面板还没做校验存下来的口令，
+		// 在这里收口，就再没有"密钥不合法导致隧道静默起不来"这条路了。
+		if fixed := crypt.NormalizeShadowsocksPSK(t.Password); fixed != t.Password {
+			t.Password = fixed
+			file.GetDb().UpdateTask(t)
+		}
+	}
 	if t.Mode != "httpHostServer" {
 		if t.Mode == "tcp+udp" || t.Mode == "shadowsocks" {
 			// 这两种都是同一个端口上同时开 TCP 和 UDP，两个都得能开

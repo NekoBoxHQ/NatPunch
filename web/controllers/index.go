@@ -185,9 +185,12 @@ func (s *IndexController) Add() {
 				t.MultiAccount = &file.MultiAccount{AccountMap: map[string]string{username: password}}
 			}
 			// Shadowsocks：密码框里装的就是 PSK（BaseServer 从 t.Password 取它）。
-			// 留空则生成一个新的 —— 面板上不填任何东西也能直接建出一条能用的隧道。
-			if m == "shadowsocks" && strings.TrimSpace(t.Password) == "" {
-				t.Password = crypt.NewShadowsocksPSK()
+			// 这里**一定要归一化**：填的可能是随手输的口令、也可能是从 ss:// 链接里
+			// 连着 %2B/%3D 一起粘过来的。原样存下去的话，Start() 才会在
+			// "decode psk: illegal base64" 上失败 —— 隧道建出来了但起不来，
+			// 面板上只看到一条 RunStatus=false 的记录，看不出是密钥的事。
+			if m == "shadowsocks" {
+				t.Password = crypt.NormalizeShadowsocksPSK(t.Password)
 			}
 			if err := file.GetDb().NewTask(t); err != nil {
 				return 0, err
@@ -273,11 +276,16 @@ func (s *IndexController) Edit() {
 			} else {
 				t.MultiAccount = nil
 			}
-			// Shadowsocks：密码框里是 PSK，留空表示"不动原密钥"。
-			// 编辑页不回填它（列表里的 ss:// 链接随时能取），所以留空是最常见的情况；
-			// 要是把它当成"清空"，用户改个备注就会把密钥抹掉、所有客户端一起失联。
-			if t.Mode == "shadowsocks" && strings.TrimSpace(t.Password) == "" {
-				t.Password = oldPassword
+			// Shadowsocks：密码框里是 PSK。
+			//   留空     → 不动原密钥（编辑页不回填它，列表里的 ss:// 链接随时能取；
+			//              当成"清空"的话，用户改个备注就会把密钥抹掉、客户端全失联）
+			//   填了东西 → 一律归一化成能用的 PSK（口令也行，见 NormalizeShadowsocksPSK）
+			if t.Mode == "shadowsocks" {
+				if strings.TrimSpace(t.Password) == "" {
+					t.Password = oldPassword
+				} else {
+					t.Password = crypt.NormalizeShadowsocksPSK(t.Password)
+				}
 			}
 			t.Id = id
 			t.LocalPath = s.getEscapeString("local_path")

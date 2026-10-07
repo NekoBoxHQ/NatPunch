@@ -139,7 +139,7 @@
         }
         $("#password_tip").html("")
         if (o == "shadowsocks") {
-            $("#password_tip").html("留空自动生成 16 字节密钥（2022-blake3-aes-128-gcm）；要自己指定就填 16 字节的 base64，例如 openssl rand -base64 16 的输出")
+            $("#password_tip").html("留空自动生成。也可以随便填一个口令（会按它派生出密钥），或者直接填 16 字节的 base64 —— 建成后以列表里 ss:// 链接中的那份为准。")
         } else if (o == "socks5" || o == "httpProxy") {
             $("#password_tip").html("不填则代理无需认证")
         }
