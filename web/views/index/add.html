@@ -13,16 +13,14 @@
                                 <span id="casehttpProxy" langtag="info-casehttpproxy"></span>
                                 <span id="casesocks5" langtag="info-casesocks5"></span>
                             </span>
-                            <select class="form-control" name="type" id="type">
-                                <option value="tcp+udp" langtag="scheme-tcpudp"></option>
-                                <option value="httpProxy" langtag="scheme-httpProxy"></option>
-                                <option value="socks5" langtag="scheme-socks5"></option>
-                            </select>
+                            <!-- 模式由进来的入口决定（新增隧道 / 新增HTTP代理 / 新增SOCKD代理），
+                                 再放一个下拉让人选是多余的。这里只把值带上，取值不变。 -->
+                            <input type="hidden" name="type" id="type" value="{{.type}}">
                         </div>
                     </div>
 
                     <div class="form-group" id="client_id">
-                        <label class="control-label font-bold" langtag="word-clientid"></label>
+                        <label class="control-label font-bold" langtag="word-client"></label>
                         <div class="col-sm-10">
                             <select class="form-control" name="client_id" placeholder="" id="natpunch_client_id"
                                     langtag="word-belongclient"></select>
@@ -130,9 +128,6 @@
     $(function () {
         $("#type").val(('{{.type}}' == '') ? 'tcp+udp' : '{{.type}}');
         resetForm()
-        $("#type").on("change", function () {
-            resetForm()
-        })
         $("#use_client").on("change", function () {
             resetForm()
         })
@@ -151,7 +146,7 @@
                 if (data && data.rows.length > 0) {
                     for (var i = 0; i < data.rows.length; i++) {
                         var option = "<option value=\"" + data.rows[i].Id + "\"";
-                        option += ">" + data.rows[i].Id + '-' + data.rows[i].Remark + "</option>"; //动态添加数据
+                        option += ">" + data.rows[i].Remark + "</option>"; //只显示备注名，取值仍是 Id
                         $("select[name='client_id']").append(option);
                         $("select[name='client_id']").find("option[value='{{.client_id}}']").attr("selected", true);
                     }
