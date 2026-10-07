@@ -44,7 +44,10 @@ func (s *Rate) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				s.NowRate = atomic.SwapInt64(&s.consumed, 0)
+				// 一次采样只是"刚刚那一秒"的瞬时值，直接拿去显示会一直在 0 和满格之间跳。
+				// 按 5 秒窗口平滑（新值占 1/5），读数才像速度表。
+				cur := atomic.SwapInt64(&s.consumed, 0)
+				s.NowRate = s.NowRate*4/5 + cur/5
 			case <-stop:
 				return
 			}

@@ -263,6 +263,11 @@
                     btn_group += '<a  href="{{.web_base_url}}/index/edit?id=' + row.Id
                     btn_group += '" class="btn btn-outline btn-info"><i class="fa fa-edit"></i></a>'
 
+                    // 导出链接的名称：取**隧道自己的备注**（导入后就是节点名），
+                    // 退而取客户端备注只是为了不出现空名称 —— 同一客户端下多条隧道时，
+                    // 客户端备注会把它们全导成同一个名字，分不出来。三种代理共用一份。
+                    var linkName = row.Remark || (row.Client && row.Client.Remark) || ''
+
                     if (row.Mode == 'socks5' || row.Mode == 'httpProxy') {
                         var un = ''; var pw = ''
                         if (row.MultiAccount && row.MultiAccount.AccountMap) {
@@ -270,6 +275,7 @@
                         }
                         var scheme = row.Mode == 'socks5' ? 'socks5' : 'http'
                         var link = scheme + '://' + un + ':' + pw + '@' + {{.ip}} + ':' + row.Port
+                        if (linkName) { link += '#' + encodeURIComponent(linkName) }
                         btn_group += '<button class="btn btn-outline btn-info copylink" data-clipboard-text="' + link + '"><i class="fa fa-link"></i></button>'
                     }
                     if (row.Mode == 'shadowsocks') {
@@ -284,11 +290,7 @@
                         var userinfo = btoa('2022-blake3-aes-128-gcm:' + (row.Password || ''))
                             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
                         var ss = 'ss://' + userinfo + '@' + {{.ip}} + ':' + row.Port
-                        // 名称取**隧道自己的备注**（导入到客户端后就是节点名）；
-                        // 退而取客户端备注只是为了不出现空名称 —— 同一客户端下多条隧道时，
-                        // 客户端备注会把它们全导成同一个名字，分不出来。
-                        var ssName = row.Remark || (row.Client && row.Client.Remark) || ''
-                        if (ssName) { ss += '#' + encodeURIComponent(ssName) }
+                        if (linkName) { ss += '#' + encodeURIComponent(linkName) }
                         btn_group += '<button class="btn btn-outline btn-info copylink" data-clipboard-text="' + ss + '"><i class="fa fa-link"></i></button>'
                     }
                     btn_group += '</div>'
@@ -310,4 +312,17 @@
     clipboard.on('error', function (e) {
         toastr.error('复制失败', '提示');
     });
+
+    // 定时刷新，让流量数字是活的（以前只在打开页面时取一次数，跑完流量再看还是老值）。
+    // 3 秒一次；页面在后台不刷。**如果展开了某一行就不刷** —— 那行的展开区里就是流量数字，
+    // 整表重绘会把它收起来，等于看着看着被合上。
+    setInterval(function () {
+        if (document.hidden) {
+            return;
+        }
+        if ($('#table').find('.detail-view').length > 0) {
+            return;
+        }
+        $('#table').bootstrapTable('refresh');
+    }, 3000);
 </script>
