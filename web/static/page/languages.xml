@@ -36,8 +36,8 @@
 		<en-US>UDP</en-US>
 	</lang>
 	<lang id="scheme-tcpudp">
-		<zh-CN>逆向隧道</zh-CN>
-		<en-US>Reverse</en-US>
+		<zh-CN>双端隧道</zh-CN>
+		<en-US>Dual-end</en-US>
 	</lang>
 	<lang id="scheme-httpproxy">
 		<zh-CN>HTTP 代理</zh-CN>
@@ -706,8 +706,8 @@
 		<en-US>When P2P or Secret</en-US>
 	</lang>
 	<lang id="info-feature1">
-		<zh-CN>逆向隧道：SSH / 远程桌面 / 任意端口，公网直达内网设备</zh-CN>
-		<en-US>Reverse tunnels: SSH, RDP, any port, reach intranet devices from public network</en-US>
+		<zh-CN>双端隧道：SSH / 远程桌面 / 任意端口，公网直达内网设备</zh-CN>
+		<en-US>Dual-end tunnels: SSH, RDP, any port, reach intranet devices from public network</en-US>
 	</lang>
 	<lang id="info-feature2">
 		<zh-CN>HTTP 代理 / SOCKS5 代理：带账号密码，安全出网</zh-CN>
@@ -1079,8 +1079,8 @@
 			<legend>
 				<data>
 					<array id="0">
-						<zh-CN>逆向隧道</zh-CN>
-						<en-US>Reverse</en-US>
+						<zh-CN>双端隧道</zh-CN>
+						<en-US>Dual-end</en-US>
 					</array>
 					<array id="1">
 						<zh-CN>HTTP 代理</zh-CN>
@@ -1101,8 +1101,8 @@
 					<data>
 						<array id="0">
 							<name>
-								<zh-CN>逆向隧道</zh-CN>
-								<en-US>Reverse</en-US>
+								<zh-CN>双端隧道</zh-CN>
+								<en-US>Dual-end</en-US>
 							</name>
 						</array>
 						<array id="1">
