@@ -58,28 +58,27 @@
 .cmd-edit:hover { color:#23c6c8 !important; }
 .cmd-del:hover { color:#e74c3c !important; }
 
-/* 窄屏（手机竖屏）：
-   - 终端盒子高度跟着视口走，别再固定 500px；
-   - 快捷命令面板改成**浮层**叠在终端右侧。它固定宽 192px，在 390px 的屏上
-     直接吃掉一半宽度 —— 终端只剩 45 列左右，什么都显示不下。
-     （内联样式要用 !important 才盖得住。） */
-@media (max-width: 768px) {
-    /* 顶到边框：这一页的主要工作区就是终端本身，外围那些留白（#page-wrapper 15px、
-       Bootstrap 的 col 15px、.ibox-content 20px、wrapper-content 15px…）加起来
-       在 390px 的屏上是六七十像素 —— 换算成终端列数就是十几列，白扔。
-       注意 .row 在 Bootstrap 里是负外边距，父容器 padding 归零后必须一起归零，
-       否则内容会溢出视口、横向能拖。
+/* 顶到边框 —— **所有宽度都生效，电脑上也一样**。
+   这一页的主要工作区就是终端本身，外围那些留白全是白占的宽度：
+   #page-wrapper 15px、Bootstrap 的 .col-lg-12 15px、.ibox-content 20px、
+   .wrapper-content 15px… 手机上加起来六七十像素（换算成终端列数十几列），
+   桌面上同样是白扔。左边贴着侧边栏、上边贴着顶栏。
+   注意 .row 在 Bootstrap 里是负外边距，父容器 padding 归零后必须跟着归零，
+   否则内容会溢出视口、页面能横向拖动。
+   （规则写在终端页自己的 <style> 里，只影响这一页，列表/表单页不受影响。） */
+#page-wrapper { padding: 0 !important; }
+.wrapper-content { padding: 0 !important; }
+.wrapper-content > .row { margin-left: 0 !important; margin-right: 0 !important; }
+.wrapper-content .col-lg-12 { padding-left: 0 !important; padding-right: 0 !important; }
+.wrapper-content .ibox { margin: 0 !important; border: none !important; }
+.wrapper-content .ibox-content { padding: 0 !important; }
+#term_wrap { padding: 0 !important; }
+#term_box { height: 66vh !important; min-height: 320px; border-radius: 0 !important; padding: 4px 0 4px 4px; }
 
-       （这些规则写在终端页自己的 <style> 里，只影响这一页，不动别的页面。） */
-    #page-wrapper { padding: 0 !important; }
-    .wrapper-content { padding: 0 !important; }
-    .wrapper-content > .row { margin-left: 0 !important; margin-right: 0 !important; }
-    .wrapper-content .col-lg-12 { padding-left: 0 !important; padding-right: 0 !important; }
-    .wrapper-content .ibox { margin: 0 !important; border: none !important; }
-    .wrapper-content .ibox-title { padding: 8px 10px 6px !important; }
-    .wrapper-content .ibox-content { padding: 0 !important; }
-    #term_wrap { padding: 0 !important; }
-    #term_box { height: 66vh !important; min-height: 300px; border-radius: 0 !important; padding: 4px 0 4px 4px; }
+/* 窄屏（手机竖屏）：快捷命令面板改成**浮层**叠在终端右侧 —— 它固定宽 192px，
+   在 390px 的屏上直接吃掉一半宽度。（内联样式要用 !important 才盖得住。） */
+@media (max-width: 768px) {
+    #term_box { height: 62vh !important; min-height: 300px; }
     #cmd_panel {
         position: absolute !important;
         top: 0;
