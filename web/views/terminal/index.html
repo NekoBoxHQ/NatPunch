@@ -10,7 +10,7 @@
                         <a class="close-link"><i class="fa fa-times"></i></a>
                     </div>
                 </div>
-                <div class="ibox-content" style="display:flex;align-items:flex-start;padding-left:15px;padding-right:0;">
+                <div id="term_wrap" class="ibox-content" style="display:flex;align-items:flex-start;padding-left:15px;padding-right:0;position:relative;">
                     <div style="flex:1;min-width:0;">
                         <div id="term_box" style="height:500px;background:#000000;border-radius:4px;padding:6px 0 6px 6px;"></div>
                         <div style="display:flex;margin-top:10px;">
@@ -57,6 +57,27 @@
 .cmd-run:hover { color:#23c6c8 !important; }
 .cmd-edit:hover { color:#23c6c8 !important; }
 .cmd-del:hover { color:#e74c3c !important; }
+
+/* 窄屏（手机竖屏）：
+   - 终端盒子高度跟着视口走，别再固定 500px；
+   - 快捷命令面板改成**浮层**叠在终端右侧。它固定宽 192px，在 390px 的屏上
+     直接吃掉一半宽度 —— 终端只剩 45 列左右，什么都显示不下。
+     （内联样式要用 !important 才盖得住。） */
+@media (max-width: 768px) {
+    #term_box { height: 58vh !important; min-height: 300px; }
+    #cmd_panel {
+        position: absolute !important;
+        top: 0;
+        right: 0;
+        width: 64vw !important;
+        max-height: 100%;
+        overflow-y: auto;
+        background: rgba(255,255,255,0.97) !important;
+        border-left: 1px solid rgba(51,51,51,0.2) !important;
+        box-shadow: -3px 0 12px rgba(0,0,0,0.18);
+        z-index: 60;
+    }
+}
 </style>
 <script src="{{.web_base_url}}/static/terminal/xterm.min.js"></script>
 <script src="{{.web_base_url}}/static/terminal/xterm-addon-fit.min.js"></script>
@@ -209,9 +230,11 @@
 
     function openTerm() {
         if (term) { return; }
+        // 窄屏用小一号字，能多挤几列出来
+        var narrow = !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
         term = new Terminal({
             cursorBlink: true,
-            fontSize: 14,
+            fontSize: narrow ? 12 : 14,
             fontFamily: 'Consolas, Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace',
             rendererType: 'dom',
             theme: {background: '#000000'}
@@ -220,8 +243,12 @@
         term.loadAddon(fitAddon);
         term.open(boxEl[0]);
         fitAddon.fit();
-        // 最小列数保障：窄容器（手机等）下 banner/长命令不折行错乱，保持与系统 SSH 一致的 80 列底线
-        if (term.cols < 80) { term.resize(80, term.rows); }
+        // 这里原来有一句 `if (term.cols < 80) { term.resize(80, term.rows); }`，
+        // 注释写的是"窄容器下 banner 不折行错乱"，实际效果**正好相反**：
+        // 手机竖屏时容器只放得下 ~45 列，强行按 80 列渲染 → 每行都溢出再折回来，
+        // 整屏变成一团彩色碎块（banner 尤其明显）。
+        // 删掉它，让 xterm 按容器真实宽度定列数；真实列数由 sendResize() 的
+        // resize 控制帧发给客户端 PTY，ls / top / vim 才会按手机的宽度排版。
         term.onData(function (data) {
             if (ws && ws.readyState === 1) {
                 try { ws.send(new TextEncoder().encode(data)); } catch (e) {}
@@ -343,5 +370,8 @@
     });
 
     $(window).on('resize', sendResize);
+    // 部分移动端浏览器旋屏只发 orientationchange，且视口尺寸是异步更新的，
+    // 直接量会拿到旧的宽度；延一小会儿再 fit。
+    $(window).on('orientationchange', function () { setTimeout(sendResize, 300); });
 })();
 </script>
