@@ -21,7 +21,13 @@
                     <div class="form-group" id="client_id">
                         <label class="col-sm-2 control-label font-bold" langtag="word-client"></label>
                         <div class="col-sm-10">
-                            <select class="form-control" name="client_id" id="natpunch_client_id"></select>
+                            <!-- 客户端在这里是**固定**的：这条隧道就是从某个客户端进来的，
+                                 编辑时放开选等于允许把它搬到别的客户端去 —— 那是另一回事，
+                                 而且只按备注名选，选错了也未必看得出来。
+                                 所以只显示、不可改；取值照旧提交（隐藏域），
+                                 服务端 Edit 的归属校验要它。 -->
+                            <input class="form-control" type="text" value="{{.t.Client.Remark}}" disabled>
+                            <input type="hidden" name="client_id" value="{{.t.Client.Id}}">
                         </div>
                     </div>
 
@@ -133,32 +139,9 @@
     }
 
     $(function () {
+        // 客户端不再是个下拉（见上面 client_id 那段）：不用再拉 /client/list，
+        // 也没有"换了客户端要重算表单"这回事了。
         // 不再从模板往脚本里塞值：隐藏域的 value 属性已经带着它了（属性里的实体浏览器会还原）。
         resetForm()
-        $("#use_client").on("change", function () {
-            resetForm()
-        })
-
-        getClientList()
     })
-
-    function getClientList() {
-        $("select[name='client_id']").empty();
-        $.ajax({
-            type: "POST",
-            url: "{{.web_base_url}}/client/list", // 服务器数据的加载地址
-            data: {order: "asc", offset: 0, limit: 999},
-            dataType: "json",
-            success: function (data) {
-                if (data && data.rows.length > 0) {
-                    for (var i = 0; i < data.rows.length; i++) {
-                        var option = "<option value=\"" + data.rows[i].Id + "\"";
-                        option += ">" + data.rows[i].Remark + "</option>"; //只显示备注名，取值仍是 Id
-                        $("select[name='client_id']").append(option);
-                        $("select[name='client_id']").find("option[value='{{.t.Client.Id}}']").attr("selected", true);
-                    }
-                }
-            }
-        });
-    }
 </script>
