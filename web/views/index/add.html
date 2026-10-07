@@ -8,11 +8,11 @@
                         <label class="control-label font-bold" langtag="word-scheme"></label>
                         <div class="col-sm-10">
                             <span class="help-block m-b-none font-bold" langtag="word-usecase"></span>:
-                            <span id="usecase">
-                                <span id="casetcpudp" langtag="info-casetcpudp"></span>
-                                <span id="casehttpProxy" langtag="info-casehttpproxy"></span>
-                                <span id="casesocks5" langtag="info-casesocks5"></span>
-                            </span>
+                            <!-- 显示哪一句由**服务端**决定（case_key），不再靠前端按模式 show/hide：
+                                 那条路依赖"模式值一定能在 #case 里匹配到"，而列表页传过来的 type
+                                 可能是空的、模板渲染进 <script> 的值还会被 &#43; 转义 —— 两处都翻过车。
+                                 这里只留一个 span，词条由 case_key 指过去。 -->
+                            <span id="usecase" langtag="{{.case_key}}"></span>
                             <!-- 模式由进来的入口决定（新增隧道 / 新增HTTP代理 / 新增SOCKD代理），
                                  再放一个下拉让人选是多余的。这里只把值带上，取值不变。 -->
                             <input type="hidden" name="type" id="type" value="{{.type}}">
@@ -117,18 +117,15 @@
 
     function resetForm() {
         $(".form-group[id]").css("display", "none");
-        $("#usecase span").css("display", "none");
-        // **只从隐藏域的 value 属性读**（浏览器解析属性时会把 &#43; 这类实体还原成 '+'）。
-        // 不要去读模板渲染进 <script> 里的 '{{.type}}' —— 脚本里实体不还原，
-        // 拿到的是字面量 "tcp&#43;udp"，拼出来的选择器 #casetcp&#43;udp 会抛异常，
-        // 后面所有逻辑（包括兜底）全都执行不到。下面再做一次归一化兜底。
+        // 模式值只从隐藏域的 value 属性读（浏览器会把 &#43; 这类实体还原成 '+'），
+        // 再归一化一遍、过白名单。它决定显示哪些字段、以及提交上去存成什么 Mode，
+        // 所以绝不能让一个认不出来的字符串穿过去（列表页传过来的 type 就可能是空的）。
         o = String($("#type").val() || "").replace(/&#43;/g, "+").replace(/\s+/g, "+");
         o = $.trim(o);
         if (!KNOWN_MODES[o]) {
             o = "tcp+udp";
         }
         $("#type").val(o); // 干净的写回表单，提交上去的才是有效的 Mode
-        $('#case' + o).css("display", "inline")
         $("#port_tip").html("")
         if (o == "tcp+udp") {
             $("#port_tip").html("同一端口同时监听 TCP 和 UDP")

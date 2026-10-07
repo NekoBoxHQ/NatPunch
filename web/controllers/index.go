@@ -15,6 +15,27 @@ type IndexController struct {
 	BaseController
 }
 
+// caseKeyForTunnelMode 把隧道模式映射到「使用场景」那句的词条 id。
+//
+// **这一段放在服务端算**，不让页面按模式去 show/hide：那条路要求"模式值一定能匹配到
+// 某个 span"，而列表页传过来的 type 可能是**空串**、模板渲染进 <script> 的值还会被
+// html/template 把 '+' 转义成 &#43;（脚本里不还原）—— 两种都在真机上翻过车，
+// 表现都是「使用场景」那一行空白。
+func caseKeyForTunnelMode(mode string) string {
+	switch mode {
+	case "httpProxy":
+		return "info-casehttpproxy"
+	case "socks5":
+		return "info-casesocks5"
+	case "tcp":
+		return "info-casetcp"
+	case "udp":
+		return "info-caseudp"
+	default:
+		return "info-casetcpudp"
+	}
+}
+
 // normalizeTunnelMode 归一化隧道模式。
 //
 // 查询串里的 '+' 会被解码成**空格**：`?type=tcp+udp` 送到这里已经是 "tcp udp"。
@@ -98,7 +119,9 @@ func normAccessPath(p string) string {
 
 func (s *IndexController) Add() {
 	if s.Ctx.Request.Method == "GET" {
-		s.Data["type"] = normalizeTunnelMode(s.getEscapeString("type"))
+		addMode := normalizeTunnelMode(s.getEscapeString("type"))
+		s.Data["type"] = addMode
+		s.Data["case_key"] = caseKeyForTunnelMode(addMode)
 		s.Data["client_id"] = s.getEscapeString("client_id")
 		s.SetInfo("add tunnel")
 		s.display()
@@ -181,6 +204,7 @@ func (s *IndexController) Edit() {
 			s.error()
 		} else {
 			s.Data["t"] = t
+			s.Data["case_key"] = caseKeyForTunnelMode(t.Mode)
 		}
 		s.SetInfo("edit tunnel")
 		s.display()

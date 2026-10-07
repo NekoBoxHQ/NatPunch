@@ -9,13 +9,8 @@
                         <label class="col-sm-2 control-label font-bold" langtag="word-scheme"></label>
                         <div class="col-sm-10">
                             <span class="help-block m-b-none font-bold" langtag="word-usecase"></span>:
-                            <span id="usecase">
-                                <span id="casetcp" langtag="info-casetcp"></span>
-                                <span id="caseudp" langtag="info-caseudp"></span>
-                                <span id="casetcpudp" langtag="info-casetcpudp"></span>
-                                <span id="casehttpProxy" langtag="info-casehttpproxy"></span>
-                                <span id="casesocks5" langtag="info-casesocks5"></span>
-                            </span>
+                            <!-- 同 add.html：显示哪一句由服务端（case_key）决定，不靠前端 show/hide -->
+                            <span id="usecase" langtag="{{.case_key}}"></span>
                             <!-- 模式在这里是**固定**的：这条隧道是什么类型，上面那行「使用场景」已经写清楚了。
                                  从哪个入口建的就在哪个入口用，编辑时不该再让人换类型。
                                  （TCP隧道 / UDP隧道 两个模式已弃用 —— 双端隧道默认就是同一端口同时吃 TCP 和 UDP。） -->
@@ -126,17 +121,14 @@
 
     function resetForm() {
         $(".form-group[id]").css("display", "none");
-        $("#usecase span").css("display", "none");
-        // 只从隐藏域的 value 属性读（浏览器会把 &#43; 这类实体还原成 '+'）。
-        // 模板渲染进 <script> 里的 '{{.t.Mode}}' 在脚本里不会还原实体，是字面量
-        // "tcp&#43;udp"，拼成选择器 #casetcp&#43;udp 会让 jQuery 抛错、后面全执行不到。
+        // 模式值只从隐藏域的 value 属性读（会把实体还原），再归一化 + 过白名单。
+        // 它决定显示哪些字段、以及提交上去存成什么 Mode，不能让认不出的字符串穿过去。
         o = String($("#type").val() || "").replace(/&#43;/g, "+").replace(/\s+/g, "+");
         o = $.trim(o);
         if (!KNOWN_MODES[o]) {
             o = "tcp+udp";
         }
         $("#type").val(o); // 干净的写回表单，提交上去的才是有效的 Mode
-        $('#case' + o).css("display", "inline")
         for (var i = 0; i < arr[o].length; i++) {
             $("#" + arr[o][i]).css("display", "block")
         }
