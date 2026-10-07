@@ -582,7 +582,9 @@
 				show: true,
 				interval: 'auto',
 				formatter: function (params){
-					return changeunitBit (params);
+					// 这里是**速率**（io_recv/io_send 都是字节/秒，changeunitBit 里 ×8），
+					// 单位必须是 Mb/s 那一挂；原来少了 "/s"，刻度看着像容量。
+					return changeunitBit(params) + "/s";
 				}
 			}
 		},
