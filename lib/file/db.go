@@ -241,6 +241,30 @@ func (s *DbUtils) GetTaskCountByClient(clientId int) int {
 	return cnt
 }
 
+// syncClientRate 给「客户端上报配置」这条路径选出该用的限速器。
+//
+// 限速是**服务端**（面板）设的，客户端自报的配置里没有这一项 —— 所以老对象还在就
+// 沿用它，连同它的限速器一起。（面板改限速走的是 UpdateClient，那条路径本来就是
+// 只在限速值真的变了才重建、并停掉旧的。）
+//
+// ⚠️ 为什么不能像原来那样无条件换一个新对象：
+//   - 连接是在 GetConn 那一刻把 *Rate 指针抓走的。换掉之后，**已经在跑**的连接继续
+//     往旧对象里记数，而面板读的是新对象 —— 表现是"网速一直是 0，可明明在跑"；
+//   - 旧对象的采样 ticker 永远不停，于是客户端每上报一次配置就泄漏一个 goroutine。
+func syncClientRate(existing *Client, c *Client) {
+	if existing != nil && existing.Rate != nil {
+		c.RateLimit = existing.RateLimit
+		c.Rate = existing.Rate
+		return
+	}
+	if c.RateLimit == 0 {
+		c.Rate = rate.NewRate((2 << 23) * 1024)
+	} else {
+		// RateLimit 单位 Mbps（比特，1024 进制）：Mbps * 1024 * 1024 / 8 = 字节/秒
+		c.Rate = rate.NewRate(int64(c.RateLimit * 1024 * 1024 / 8))
+	}
+}
+
 func (s *DbUtils) NewClient(c *Client) error {
 	// 客户端注册上限（数据层统一校验，所有入口生效；0=不限）
 	// 合成条目（NoStore：内置公共 vkey 客户端）不计入配额，也不受配额限制（复评🟠2）
@@ -266,12 +290,8 @@ reset:
 		isNotSet = true
 		c.VerifyKey = crypt.GetVkey()
 	}
-	if c.RateLimit == 0 {
-		c.Rate = rate.NewRate((2 << 23) * 1024)
-	} else if c.Rate == nil {
-		// RateLimit 单位 Mbps（比特，1024 进制）：Mbps * 1024 * 1024 / 8 = 字节/秒
-		c.Rate = rate.NewRate(int64(c.RateLimit * 1024 * 1024 / 8))
-	}
+	existing, _ := s.GetClient(c.Id)
+	syncClientRate(existing, c)
 	c.Rate.Start()
 	if !s.VerifyVkey(c.VerifyKey, c.Id) {
 		if isNotSet {
