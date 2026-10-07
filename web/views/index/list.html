@@ -323,6 +323,7 @@
         if ($('#table').find('.detail-view').length > 0) {
             return;
         }
-        $('#table').bootstrapTable('refresh');
+        // silent:true —— 不弹"正在加载数据中 请稍后"的遮罩
+        $('#table').bootstrapTable('refresh', {silent: true});
     }, 3000);
 </script>

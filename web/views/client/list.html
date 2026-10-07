@@ -308,7 +308,8 @@
     // 3 秒一次；页面在后台就不刷，省得白跑。展开的详情行会被收起来，属正常现象。
     setInterval(function () {
         if (!document.hidden) {
-            $('#table').bootstrapTable('refresh');
+            // silent:true —— 不让它弹"正在加载数据中 请稍后"的遮罩（每 3 秒弹一次没法用）
+            $('#table').bootstrapTable('refresh', {silent: true});
         }
     }, 3000);
 

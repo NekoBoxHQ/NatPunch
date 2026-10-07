@@ -227,7 +227,7 @@
 	<lang id="word-id">ID
 	</lang>
 	<lang id="word-inbandwidth">
-		<zh-CN>流入带宽</zh-CN>
+		<zh-CN>下载带宽</zh-CN>
 		<en-US>In</en-US>
 	</lang>
 	<lang id="word-inletflow">
@@ -287,7 +287,7 @@
 		<en-US>option</en-US>
 	</lang>
 	<lang id="word-outbandwidth">
-		<zh-CN>流出带宽</zh-CN>
+		<zh-CN>上传带宽</zh-CN>
 		<en-US>Out</en-US>
 	</lang>
 	<lang id="word-password">
@@ -749,32 +749,30 @@
 				</array>
 			</series>
 		</lang>
-		<lang id="bandwidth">
-			<series>
-				<array id="0">
-					<name>
-						<zh-CN>入口</zh-CN>
-						<en-US>In</en-US>
-					</name>
-				</array>
-				<array id="1">
-					<name>
-						<zh-CN>出口</zh-CN>
-						<en-US>Out</en-US>
-					</name>
-				</array>
-			</series>
-		</lang>
-		<lang id="flow">
+<lang id="bandwidth">
 			<legend>
 				<data>
 					<array id="0">
-						<zh-CN>出口</zh-CN>
-						<en-US>Out</en-US>
+						<zh-CN>下载</zh-CN>
+						<en-US>Download</en-US>
 					</array>
 					<array id="1">
-						<zh-CN>入口</zh-CN>
-						<en-US>In</en-US>
+						<zh-CN>上传</zh-CN>
+						<en-US>Upload</en-US>
+					</array>
+				</data>
+			</legend>
+		</lang>
+<lang id="flow">
+			<legend>
+				<data>
+					<array id="0">
+						<zh-CN>上传</zh-CN>
+						<en-US>Upload</en-US>
+					</array>
+					<array id="1">
+						<zh-CN>下载</zh-CN>
+						<en-US>Download</en-US>
 					</array>
 				</data>
 			</legend>
@@ -787,14 +785,14 @@
 					<data>
 						<array id="0">
 							<name>
-								<zh-CN>入口</zh-CN>
-								<en-US>In</en-US>
+								<zh-CN>上传</zh-CN>
+								<en-US>Upload</en-US>
 							</name>
 						</array>
 						<array id="1">
 							<name>
-								<zh-CN>出口</zh-CN>
-								<en-US>Out</en-US>
+								<zh-CN>下载</zh-CN>
+								<en-US>Download</en-US>
 							</name>
 						</array>
 					</data>

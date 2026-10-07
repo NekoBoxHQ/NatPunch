@@ -365,12 +365,18 @@
 </div>
 
 <script>
+    // 概览数字的首屏值：服务端渲染进来，之后由 refreshDashboard 每几秒覆盖成实时的。
+    //
+    // ⚠️ 这一行原来是 `JSON.parse({{.data.load}})` —— 而 load 是 "0.52 0.58 0.59"
+    // 这种**不是 JSON** 的字符串，会抛 SyntaxError，把同一个 <script> 里**后面全部**
+    // （包括下面 chartdatas 的定义）一起带走，仪表盘就全空白。改成直接按空格拆。
+    // 另外 {{.data.tcp}} 这个键根本不存在（后端给的是 tcpCount），一直渲染成空。
     $("#overview_cpu").text("{{.data.cpu}}%")
     $("#overview_cpu_bar").width("{{.data.cpu}}%")
     $("#overview_memory").text("{{.data.virtual_mem}}%")
     $("#overview_memory_bar").width("{{.data.virtual_mem}}%")
-    $.each( JSON.parse({{.data.load}}), function(i, value) { $("#overview_load").append('&emsp;' + value) });
-    $("#overview_tcp").text("{{.data.tcp}}")
+    $("#overview_load").html(String('{{.data.load}}').split(" ").map(function (v) { return "&emsp;" + v }).join(""))
+    $("#overview_tcp").text("{{.data.tcpCount}}")
     $("#overview_send").text(changeunitBit({{.data.io_send}}) + "/s")
     $("#overview_recv").text(changeunitBit({{.data.io_recv}}) + "/s")
 
@@ -695,4 +701,70 @@
             charts[key].resize();
         }
     });
+
+    // ---- 仪表盘实时刷新 ----
+    //
+    // 原来整页的数字和七张图都是"打开页面那一刻"的快照，页面开着就一直不动
+    // （带宽曲线、流量饼图看着像死的）。这里每几秒拉一次 JSON，**原地更新** ——
+    // 不整页重载，所以滚动位置和图表动画都不会跳。
+    //
+    // 只更新会变的东西：概览数字 + 各图表的 series 数据。图表对象本身（坐标轴、
+    // 配色、tooltip）沿用 chartdatas 里服务端渲染好的那份。
+    function refreshDashboard(d) {
+        $("#overview_cpu").text(d.cpu + "%");
+        $("#overview_cpu_bar").width(d.cpu + "%");
+        $("#overview_memory").text(d.virtual_mem + "%");
+        $("#overview_memory_bar").width(d.virtual_mem + "%");
+        $("#overview_load").html(String(d.load).split(" ").map(function (v) { return "&emsp;" + v }).join(""));
+        $("#overview_tcp").text(d.tcpCount);
+        $("#overview_send").text(changeunitBit(d.io_send) + "/s");
+        $("#overview_recv").text(changeunitBit(d.io_recv) + "/s");
+
+        var times = [], i;
+        var pick = function (field) {
+            var a = [];
+            for (var j = 1; j <= 10; j++) {
+                a.push(((d['sys' + j]) || {})[field] || 0);
+            }
+            return a;
+        };
+        for (i = 1; i <= 10; i++) { times.push(((d['sys' + i]) || {}).time || ''); }
+
+        // series 顺序与 chartdatas 里服务端渲染的一致（见上面各图的 series）
+        setLineChart('load', times, [pick('load1'), pick('load5'), pick('load15')]);
+        setLineChart('cpu', times, [pick('cpu')]);
+        setLineChart('memory', times, [pick('virtual_mem'), pick('swap_mem')]);
+        setLineChart('connections', times, [pick('tcp'), pick('udp')]);
+        setLineChart('bandwidth', times, [pick('io_recv'), pick('io_send')]);
+        // 饼图切片顺序：flow 是先 inlet 后 export；counts 是 双端/HTTP/SOCKS/Shadowsocks
+        setPieChart('flow', [d.inletFlowCount, d.exportFlowCount]);
+        setPieChart('counts', [d.tcpC, d.httpProxyCount, d.socks5Count, d.shadowsocksCount]);
+    }
+
+    // 图表对象在语言包加载完才创建（language.js 里那个通用循环），所以这里要判空：
+    // 还没建就跳过这一次，下一次轮询自然会补上。
+    function setLineChart(key, times, datas) {
+        if (!charts[key] || !chartdatas[key] || !chartdatas[key].series) { return; }
+        chartdatas[key].xAxis.data = times;
+        for (var i = 0; i < datas.length; i++) {
+            if (chartdatas[key].series[i]) { chartdatas[key].series[i].data = datas[i]; }
+        }
+        charts[key].setOption({xAxis: chartdatas[key].xAxis, series: chartdatas[key].series});
+    }
+
+    function setPieChart(key, values) {
+        if (!charts[key] || !chartdatas[key] || !chartdatas[key].series) { return; }
+        var data = chartdatas[key].series[0].data;
+        for (var i = 0; i < values.length && i < data.length; i++) {
+            data[i].value = values[i];
+        }
+        charts[key].setOption({series: chartdatas[key].series});
+    }
+
+    function pollDashboard() {
+        if (document.hidden) { return; }   // 页面在后台就不拉，省得白跑
+        $.getJSON('{{.web_base_url}}/index/dashboarddata', refreshDashboard);
+    }
+    pollDashboard();
+    setInterval(pollDashboard, 3000);
 </script>
