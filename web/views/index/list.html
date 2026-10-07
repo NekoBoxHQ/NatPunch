@@ -284,7 +284,11 @@
                         var userinfo = btoa('2022-blake3-aes-128-gcm:' + (row.Password || ''))
                             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
                         var ss = 'ss://' + userinfo + '@' + {{.ip}} + ':' + row.Port
-                        if (row.Client && row.Client.Remark) { ss += '#' + encodeURIComponent(row.Client.Remark) }
+                        // 名称取**隧道自己的备注**（导入到客户端后就是节点名）；
+                        // 退而取客户端备注只是为了不出现空名称 —— 同一客户端下多条隧道时，
+                        // 客户端备注会把它们全导成同一个名字，分不出来。
+                        var ssName = row.Remark || (row.Client && row.Client.Remark) || ''
+                        if (ssName) { ss += '#' + encodeURIComponent(ssName) }
                         btn_group += '<button class="btn btn-outline btn-info copylink" data-clipboard-text="' + ss + '"><i class="fa fa-link"></i></button>'
                     }
                     btn_group += '</div>'
