@@ -18,6 +18,7 @@ import (
 	"github.com/astaxie/beego/logs"
 
 	"github.com/sagernet/sing-shadowsocks"
+	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
@@ -42,10 +43,22 @@ const SSKeySize = 16
 // ssUDPTimeout 是 UDP 会话的空闲回收秒数（sing 那边的参数）。
 const ssUDPTimeout = 300
 
-// ssUDPReserve 是交给 sing 那侧写数据时要预留的空间（见 NewPacketConnection）：
-// 前面要给 SS 的头（Buffer.ExtendHeader 要求 start 足够大），后面要给 AEAD 的
-// 16 字节 tag 和可能的填充（Buffer.Extend 要求还有剩余容量）。
-const ssUDPReserve = 128
+// ssUDPFrontHeadroom 是回程数据报要预留的头部空间上限，见 NewPacketConnection 里的
+// 分配处。每一项都对着库里的导出常量，上游改了下限也跟着走 —— 少留一个字节就是
+// 进程级 panic，不能再凭感觉写个"够用"的数。
+//
+// 注意 MaxPaddingLength 那一项只在目的端口是 53 时才会真的用满，但**必须按最大算**：
+// 填多少是库自己随机的，我们提前问不出来。
+func ssUDPFrontHeadroom() int {
+	return shadowaead_2022.PacketNonceSize + // 24：UDP nonce
+		16 + // packet header（session id + packet id）
+		1 + // header type
+		8 + // timestamp
+		8 + // remote session id
+		2 + // padding length
+		shadowaead_2022.MaxPaddingLength + // 900：端口 53 时的随机填充上限
+		M.MaxSocksaddrLength // 259：目标地址（ATYP + 最长 255 域名 + 端口）
+}
 
 // NewShadowsocksModeServer 构造。字段赋值口径同 NewSock5ModeServer。
 func NewShadowsocksModeServer(bridge NetBridge, task *file.Tunnel) *ShadowsocksModeServer {
@@ -301,15 +314,18 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 		if d.Header == nil || d.Header.Addr == nil {
 			continue
 		}
-		// ⚠️ 交出去的 buffer 必须**两头预留**，否则 SS 层会 panic("buffer overflow")：
-		//   前面：WritePacket 往载荷前插它自己的头（ExtendHeader，要求 start >= 头长）
-		//   后面：AEAD 的 16 字节 tag（Extend，要求还有剩余容量）
-		// 用 NewSize(精确长度) 两头都不够。头部长度取决于目标地址——这里是回包的
-		// 源地址，客户端固定按 IPv4 编码（common.ToSocksAddr 只产出 ipV4），
-		// 128 字节两头都绰绰有余。
-		b := buf.NewSize(len(d.Data) + 2*ssUDPReserve)
-		b.Extend(ssUDPReserve)
-		b.Advance(ssUDPReserve)
+		// ⚠️ 交出去的 buffer 必须**两头预留**，而且前面要留够，否则 SS 层的
+		// ExtendHeader 直接 panic("buffer overflow: capacity …,start …, need …")。
+		//
+		// 这不是理论风险：v26.10.35 上线后一次 DNS 查询就把**整个服务端进程**打崩了
+		// （systemd 里连续 restart）——目的端口是 53 的报文，serverPacketWriter 会加
+		// 随机填充，头长最多能到 1218 字节，而当时只留了 128。
+		// 头部上限的出处（都是库里的导出常量，跟着上游走）：
+		//   PacketNonceSize 24 + packet header 16 + header type 1 + timestamp 8
+		//   + session id 8 + padding length 2 + MaxPaddingLength 900 + MaxSocksaddrLength 259
+		// 尾部：AEAD 的 16 字节 tag（Extend 要求还有剩余容量）。
+		b := buf.NewSize(len(d.Data) + ssUDPFrontHeadroom() + shadowaead.Overhead)
+		b.Resize(ssUDPFrontHeadroom(), 0)
 		if _, err := b.Write(d.Data); err != nil {
 			b.Release()
 			return err

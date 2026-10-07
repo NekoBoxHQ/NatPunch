@@ -113,7 +113,10 @@ func TestSocksaddrRoundTrip(t *testing.T) {
 //
 //	读（服务端→客户端）：一次 Read 一个 [SOCKS5 UDP 头][载荷] 报文
 //	写（客户端→服务端）：4 字节小端长度 + [SOCKS5 UDP 头][载荷]
-func fakeNatpunchUDPClient(tunnel net.Conn, target string) {
+//
+// replySrc 非 nil 时，回程报文头里报的**源地址**用它替代真实回声地址 ——
+// 用来伪造"回包来自 1.1.1.1:53"这种触发 SS2022 填充的形态，不必真去绑 53 端口。
+func fakeNatpunchUDPClient(tunnel net.Conn, target string, replySrc *common.Addr) {
 	defer tunnel.Close()
 	raddr, err := net.ResolveUDPAddr("udp", target)
 	if err != nil {
@@ -152,7 +155,11 @@ func fakeNatpunchUDPClient(tunnel net.Conn, target string) {
 			return
 		}
 		out.Reset()
-		_ = common.NewUDPDatagram(common.NewUDPHeader(0, 0, common.ToSocksAddr(src)), b[:n]).Write(&out)
+		addr := common.ToSocksAddr(src)
+		if replySrc != nil {
+			addr = replySrc
+		}
+		_ = common.NewUDPDatagram(common.NewUDPHeader(0, 0, addr), b[:n]).Write(&out)
 		head := make([]byte, 4)
 		binary.LittleEndian.PutUint32(head, uint32(out.Len()))
 		if _, err := tunnel.Write(append(head, out.Bytes()...)); err != nil {
@@ -166,6 +173,20 @@ func fakeNatpunchUDPClient(tunnel net.Conn, target string) {
 // 这条重点盯的是 **udp5 链路的非对称报文格式**：回程如果按对称写法直接
 // ReadUDPDatagram，会卡在 io.ReadAll 上永远等不到数据（Rsv=0 那条分支）。
 func TestShadowsocksEndToEndUDP(t *testing.T) {
+	runShadowsocksUDPRoundTrip(t, nil)
+}
+
+// 回包源地址是 **53 端口** 的那条路：SS2022 的 serverPacketWriter 对目的端口 53 的
+// 报文会加随机填充（最长 MaxPaddingLength=900），回程 buffer 的头部预留要按最大算。
+//
+// 这条是线上事故的回归钉：v26.10.35 上线后一次 DNS 查询就把服务端打崩了 ——
+// 当时只留了 128 字节，ExtendHeader(648) 直接 panic，进程退出、systemd 重启。
+// 上面那条用例的回声端口是随机高端口，**碰不到填充**，所以它当初没报出来。
+func TestShadowsocksEndToEndUDPPort53Padding(t *testing.T) {
+	runShadowsocksUDPRoundTrip(t, &common.Addr{Type: ipV4, Host: "1.1.1.1", Port: 53})
+}
+
+func runShadowsocksUDPRoundTrip(t *testing.T, replySrc *common.Addr) {
 	echoPC, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +232,7 @@ func TestShadowsocksEndToEndUDP(t *testing.T) {
 	}
 
 	serverSide, clientSide := net.Pipe()
-	go fakeNatpunchUDPClient(clientSide, echoPC.LocalAddr().String())
+	go fakeNatpunchUDPClient(clientSide, echoPC.LocalAddr().String(), replySrc)
 
 	srv := NewShadowsocksModeServer(&tunnelTestBridge{target: serverSide}, task)
 	if err := srv.Start(); err != nil {

@@ -2,6 +2,36 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.36（已发布）
+
+### 修复
+
+- **一次 Shadowsocks 的 UDP 查询就把整个服务端打崩（进程级 panic + systemd 重启）。**
+
+  `panic: buffer overflow: capacity …,start 128, need 648`，出在回程构造时调用
+  `serverPacketWriter.WritePacket` → `ExtendHeader`。
+
+  原因：SS2022 发回包时，**目的端口是 53 的报文会加随机填充**（上限
+  `MaxPaddingLength = 900`），回程头最长可达
+  `PacketNonceSize 24 + packet header 16 + header type 1 + timestamp 8 + session id 8
+  + padding length 2 + MaxPaddingLength 900 + MaxSocksaddrLength 259 = 1218` 字节，
+  而当时只预留了 128。
+
+  现在按库里的导出常量算出上限（`ssUDPFrontHeadroom`），上游改了上限也跟着走；
+  尾部按 `shadowaead.Overhead` 预留 AEAD tag。**新增回归用例**
+  `TestShadowsocksEndToEndUDPPort53Padding`：伪造"回包来自 1.1.1.1:53"的形态。
+  已验证它在旧预留下会精确复现同一个 panic、在新预留下通过。
+
+  复盘：原来那条 UDP 用例的回声端口是随机高端口，**碰不到填充**，所以它当初是绿的。
+  端口 53 这一条，只有真的拿 DNS 去打才会碰上 —— 而 DNS 恰恰是 mihomo 默认会走代理的东西。
+
+- **`ss://` 链接生成格式改成 SIP002 的标准形态**：整个 userinfo（`method:password`）
+  做 **websafe-base64（去填充）** 当用户名，即
+  `ss://<base64url(method:psk)>@host:port#<urlencode(备注)>`，和 s-ui / sing-box / mihomo
+  导出的那份完全一致。以前发的是 `encodeURIComponent('method:psk')`，链接里留着明文的
+  算法名和 `:`，别的面板一眼看出格式不对。
+  （面板里的密钥框本来就一直吃 `%2B` / `%3D` 这种转义形态，导入那侧不受影响。）
+
 ## v26.10.35（已发布）
 
 ### 修复
