@@ -2,7 +2,7 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
-## 未发布
+## v26.10.18（已发布）
 
 ### 变更
 - **面板里的「逆向隧道」改叫「双端隧道」**（同一个端口同时吃 TCP 和 UDP，两套协议一个口），
@@ -11,10 +11,12 @@
   改的是显示词条，共 4 处：`scheme-tcpudp`（隧道类型名）、`info-feature1`（登录页那句特性说明）、
   统计图例两处。**取值和逻辑一个字没动。**
 
-  改的文件是 `web/static/page/languages.xml` —— **静态资源磁盘优先**
-  （`StaticHTTPFS` 的 `diskFirstFS`：先找 `<工作目录>/web/static/`，找不到才用 embed 的），
-  所以**不用重新发版**：把这个文件放到安装目录的 `web/static/page/` 下就生效
-  （浏览器可能要强制刷新一下）。
+  文件是 `web/static/page/languages.xml`。它同时被 `//go:embed static` 编进二进制，
+  而 `StaticHTTPFS` 的 `diskFirstFS` 又是**磁盘优先**（先找 `<工作目录>/web/static/`，
+  找不到才用 embed 的）—— 也就是说：只往磁盘丢一个文件就能立刻生效、不用发版，
+  但那份**会被下一次 `install_server.sh upgrade` 用发布包里的 `web/` 覆盖掉**，
+  重装服务端更等于没改。所以还是得发一版把它焊进二进制。
+  （对照：`web/views/` 下的模板**没有** disk-first，改模板必须发版，热更无效。）
 
 ## v26.10.17（已发布）
 
