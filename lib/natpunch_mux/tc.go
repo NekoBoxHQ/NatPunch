@@ -183,6 +183,17 @@ func (tc *TrafficControl) clear() {
 	tc.params = tc.params[:0]
 }
 
+// 限带宽：给被测网卡挂一个 HTB qdisc 把速率压到 bw。
+//
+// ⚠️ 本函数和下面那组 docker 辅助只被 mux_test.go（//go:build integration）调用。
+// 默认构建里它们确实是"零引用"，staticcheck / U1000 会报 —— 那是误报：
+// 不带 integration 标签时 staticcheck 根本看不到 mux_test.go。
+// 别照 U1000 的提示删，删了 `make integration` 直接编译不过。
+func (tc *TrafficControl) bandwidth(bw string) error {
+	runCmd(exec.Command("tc", "qdisc", "add", "dev", tc.Eth.EthName, "root", "handle", "2:", "htb", "default", "30"))
+	return runCmd(exec.Command("tc", "qdisc", "add", "dev", tc.Eth.EthName, "parent", "2:", "classid", "2:30", "htb", "rate", bw))
+}
+
 func runCmd(cmd *exec.Cmd) error {
 	fmt.Println("run cmd:", cmd.Args)
 	var out bytes.Buffer
@@ -195,4 +206,21 @@ func runCmd(cmd *exec.Cmd) error {
 		return err
 	}
 	return nil
+}
+
+// 集成测试的容器组网辅助（同上：只被 //go:build integration 的 mux_test.go 用）。
+func createNetwork(name, networok string) error {
+	// docker network create --subnet=172.18.0.0/16 test
+	return runCmd(exec.Command("docker", "network", "create", "--subnet="+networok, name))
+}
+
+func deleteNetwork(name string) error {
+	return runCmd(exec.Command("docker", "network", "rm", name))
+}
+
+func runDocker(dockerName, networkName, ip, testFunName, nowDir string) error {
+	// docker run --env GOPROXY=https://goproxy.cn  --rm --name client --net test --cap-add=NET_ADMIN --ip 172.18.0.5 -v "$PWD":/usr/src/myapp -w /usr/src/myapp golang go test -v -run TestClient ./
+	return runCmd(exec.Command("docker", "run", "--env", "GOPROXY=https://goproxy.cn", "--rm", "--name", dockerName, "--net", networkName,
+		"--cap-add=NET_ADMIN", "--ip", ip, "-v", nowDir+`:/usr/src/myapp`, "-w", `/usr/src/myapp`, "golang", "go", "test",
+		"-v", "-run", testFunName, "./"))
 }
