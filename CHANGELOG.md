@@ -2,6 +2,80 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.27（已发布）
+
+### 变更
+
+- **客户端二进制瘦身 3.47MB（−21%）：不再把整个面板编进去。**
+
+  `lib/goroutine` 里那段「IP 白名单授权页」原来是直接 `import web` 读
+  `web/static/page/auth.html`；而 `web` 包用 `go:embed` 把 static + views
+  （jQuery / bootstrap / echarts / 字体 / 全部视图，约 3.6MB）编进二进制。
+  但那段代码**只可能在服务端走到** —— `lib/conn.CopyWaitGroup` 在服务端由
+  `server/proxy/base.go` 传 `task`，客户端 `client/client.go` 恒传 `nil`。
+
+  改成**服务端注入**（新增 `server/proxy/authpage.go`，在 `init()` 里给
+  `goroutine.AuthPageHTML` 赋值），客户端里那个钩子保持 `nil`。
+  linux/amd64 客户端 **16351392 → 12886176 字节**。升级是走隧道传的，这个直接省在升级上。
+  新增 `server/proxy/authpage_test.go` 钉住服务端这侧的接线。
+
+- **`web/static/page/languages.xml` 清掉 59 条零引用词条**（221 → 162），另补齐 2 条。
+
+### 修复
+
+- **`error()` 从不生效，`web/views/public/error.html` 一直是死模板。**
+
+  `error()` 只设 `TplName`、不中断请求，4 个调用点后面全都紧跟 `display()` 或
+  `AjaxOk` 把它盖掉 —— id 不存在时实际渲染的是 `index/edit.html` / `client/edit.html`，
+  一片空字段，看着像"隧道 / 客户端数据全丢了"。GET 分支补 `return`；
+  `index.go` 的 POST 分支改成 `AjaxErr`（原来 id 不存在反而回 `"modified success"`）；
+  `client.go` 的 POST 分支删掉那句被 `AjaxErr` 完全覆盖的空转。
+
+- **reply 词条大小写错配**：`Thenumberoftunnelsexceedsthelimit` 带大写 `T`，
+  而 `language.js` 查表前会 `toLowerCase()` —— 「隧道数量超过限制」一直显示英文原文。
+
+- **补上两条 reply 词条**（`client ID not found` / `task ID not found`）：此前没有对应
+  `<lang id>`，`language.js` 查不到就把英文原样丢进弹窗。
+
+### 清理
+
+面板与引擎里**确认没有任何调用路径**的部分：
+
+- 删除 `server/proxy/tcp_natpunchgui.go`、`transport_natpunchgui.go`：
+  `natpunchgui` 构建标签没有任何构建会设置（Makefile / CI / 脚本里都没有），
+  它们存在的理由是 `client/local.go` 要 `import server/proxy` —— 那个文件早已删除，
+  现在 `go list -deps ./client` 里也没有 `server/proxy`。
+  `tcp.go` / `transport.go` 上的 `//go:build !natpunchgui` 一并去掉。
+- TCP隧道 / UDP隧道 弃用后的残留：`NewMode` 的 `case "tcp"` / `case "udp"`
+  （双端隧道内部构造子模式副本时**不走** `NewMode`）、`GetTunnel` 的 tcp/udp 容错、
+  `GetDashboardData` 的 `udpCount`（算了但从没被任何页面读）、`caseKeyForTunnelMode`
+  的 tcp/udp 分支、编辑页的 `arr["tcp"] / ["udp"]` 与 KNOWN_MODES。
+- 其它零引用函数 / 字段：`NewBaseServer`、`FlowAdd`、`FlowAddHost`、
+  `SetReadDeadlineBySecond`、`WriteMain / WriteConfig / WriteChan`、
+  `BufPool / BufPoolSmall / PutBufPoolCopy / GetBufPoolCopy / PutBufPoolUdp`、
+  `NetPackager`、`GetPortByAddr`、`Base64Decoding` + `joinQuickCmd`、`LinkTimeout`、
+  `SaveGlobal`、`MkidrDirAll`、`ReturnBucket`、`stopDocker`、`JsonDb.HostsTmp`、
+  `connQueue.starving`。
+- 全仓 `gofmt`：13 个文件此前不合规（都是 import 分组顺序），现在 `gofmt -l` 输出为空。
+
+### 明确保留（不是死代码）
+
+`lib/natpunch_mux/tc.go` 与 `rate.go` 的 `Rate`（只被 `//go:build integration` 的测试用，
+删了等于砍测试）、`lib/config`（`status` 子命令可达）、`lib/install`（`update` 子命令可达）、
+`tcpTrans`（客户端配置文件 `mode=tcpTrans` 可为）、`cmd/natpunch-client/sdk.go`
+（`natpunchsdk` 构建）、`lib/cache`（HTTP 代理缓存只 `New` / `Get`、从不 `Add`，
+实际永远是空的 —— 转发路径早在改写成裸字节透传时就没有解析响应那一步了。
+`http_cache` 默认 `false`，不命中的分支不会被求值，运行期零成本。属功能问题不是死代码）。
+
+⚠️ 两个 `staticcheck U1000` 的误报源，改这块时注意：
+
+- **U1000 看不见被 build tag 排除的文件**。它会把 `lib/natpunch_mux/tc.go` 里只被
+  `mux_test.go`（`//go:build integration`）调用的 `bandwidth` / `createNetwork` /
+  `deleteNetwork` / `runDocker` 报成 unused —— 照删会让 `make integration` 编译不过。
+  判据要补一条 `go vet -tags integration ./...`。
+- `lib/common/logs.go` 的 `StoreMsg.Destroy` 是 beego `logs.Logger` 的接口方法，
+  删了 `*StoreMsg` 就不再实现该接口，编译直接失败。
+
 ## v26.10.26（已发布）
 
 ### 修复
