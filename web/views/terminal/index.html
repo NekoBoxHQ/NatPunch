@@ -137,66 +137,88 @@
             for (var i = 0; i < hidden.length; i++) { if (hidden[i] === cmd) return true; }
             return false;
         }
+        // ★ 每行带上它在 customs 里的**下标**。原来编辑/删除全靠 cmd 文本去比对，
+        //   有两个坑：
+        //   ① 用户完全可能存两条同样的命令（真就存了两条 cmd="1"），按文本比对只能命中第一条；
+        //   ② jQuery 的 .data() 会把纯数字的字符串转成 Number —— cmd="1" 取出来是 1，
+        //      `"1" === 1` 为 false，于是编辑和删除**整个失效**（既删不掉也改不了，
+        //      编辑还会因为"找不到"而新 push 一条，越点越多）。这就是"以前存的正常、
+        //      新加的（随手输个 1 试的）不正常"的原因。
+        //   改成按下标定位，两个问题一起没有。
         var cmds = [];
         var customs = getCustoms();
-        for (var j = 0; j < customs.length; j++) { if (!hiddenCmd(customs[j].cmd)) cmds.push(customs[j]); }
+        for (var j = 0; j < customs.length; j++) { if (!hiddenCmd(customs[j].cmd)) cmds.push({c: customs[j], idx: j}); }
 
         $('#cmd_count').text(cmds.length + ' 条命令');
 
         var html = '';
         for (var k = 0; k < cmds.length; k++) {
-            var c = cmds[k];
-            html += '<div class="cmd-row" data-cmd="' + esc(c.cmd) + '" data-label="' + esc(c.label) + '" style="display:flex;align-items:center;margin:0;border-bottom:1px solid rgba(51,51,51,0.08);">'
-                + '<button type="button" class="cmd-run" data-cmd="' + esc(c.cmd) + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:6px 3px;">' + esc(c.label) + '</button>'
-                + '<button type="button" class="cmd-edit" data-cmd="' + esc(c.cmd) + '" data-label="' + esc(c.label) + '" onclick="npCmdEdit(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:13px;cursor:pointer;padding:6px 4px;line-height:1;" title="编辑">✎</button>'
-                + '<button type="button" class="cmd-del" data-cmd="' + esc(c.cmd) + '" onclick="npCmdDel(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;padding:6px 6px;line-height:1;" title="删除">×</button>'
+            var c = cmds[k].c, idx = cmds[k].idx;
+            html += '<div class="cmd-row" data-idx="' + idx + '" style="display:flex;align-items:center;margin:0;border-bottom:1px solid rgba(51,51,51,0.08);">'
+                + '<button type="button" class="cmd-run" data-idx="' + idx + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:6px 3px;">' + esc(c.label) + '</button>'
+                + '<button type="button" class="cmd-edit" data-idx="' + idx + '" onclick="npCmdEdit(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:13px;cursor:pointer;padding:6px 4px;line-height:1;" title="编辑">✎</button>'
+                + '<button type="button" class="cmd-del" data-idx="' + idx + '" onclick="npCmdDel(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;padding:6px 6px;line-height:1;" title="删除">×</button>'
                 + '</div>';
         }
         $('#cmd_list').html(html);
     }
 
-    // 全局入口（内联 onclick 双保险）
-    window.npCmdDel = function (btn) {
-        var cmd = $(btn).data('cmd');
-        // 直接从自定义列表移除
+    // 按下标取用户真正点中的那一条。读属性一律用 .attr()：
+    // .data() 会把 "1" 这种纯数字字符串转成 Number（见上面 renderCmdPanel 的注释）。
+    function idxOf(btn) { return parseInt($(btn).attr('data-idx'), 10); }
+    function cmdAt(i) {
         var cs = getCustoms();
-        for (var i = 0; i < cs.length; i++) { if (cs[i].cmd === cmd) { cs.splice(i, 1); break; } }
-        // 内置命令：加入隐藏列表
-        var h = getHidden();
-        var inHidden = false;
-        for (var j = 0; j < h.length; j++) { if (h[j] === cmd) { inHidden = true; break; } }
-        if (!inHidden) { h.push(cmd); }
+        return (i >= 0 && i < cs.length) ? cs[i] : null;
+    }
+
+    window.npCmdDel = function (btn) {
+        var i = idxOf(btn);
+        if (cmdAt(i) === null) { return; }
+        getCustoms().splice(i, 1);
         saveCmds();
         renderCmdPanel();
     };
     window.npCmdEdit = function (btn) {
-        openModal($(btn).data('label'), $(btn).data('cmd'));
+        var i = idxOf(btn);
+        if (cmdAt(i) === null) { return; }
+        openModalEdit(i);
     };
 
-    // 事件委托：动态渲染后依然可靠响应
-    $(document).on('click', '.cmd-run', function () { sendLine($(this).data('cmd')); });
-
-    $(document).on('click', '.cmd-del', function () {
-        window.npCmdDel(this);
+    // 事件委托：动态渲染后依然可靠响应。
+    // 编辑/删除**只走**按钮上的内联 onclick，这里不要再挂一层委托 ——
+    // 两边都挂会各触发一次，而按下标操作时第二次作用的是"删掉一条之后的下标"，
+    // 会删错/改错别的行。
+    $(document).on('click', '.cmd-run', function () {
+        var c = cmdAt(idxOf(this));
+        if (c) { sendLine(c.cmd); }
     });
 
-    $(document).on('click', '.cmd-edit', function () {
-        openModal($(this).data('label'), $(this).data('cmd'));
-    });
-
-    // 弹窗添加/编辑
-    var editingCmd = '';
-    function openModal(label, cmd) {
-        editingCmd = cmd || '';
-        $('#cmd_modal_title').text(editingCmd ? '编辑命令' : '添加命令');
-        $('#cmd_modal_name').val(label || '');
-        $('#cmd_modal_cmd').val(cmd || '');
+    // 弹窗添加/编辑：用**下标**记「正在编辑哪一条」，不用 cmd 文本
+    // （文本可能重复；纯数字的还会被 .data() 变成 Number 而对不上）。
+    var editingIdx = -1;
+    function showModal() {
         $('#cmd_modal').css('display', 'flex');
         $('#cmd_modal_name').focus();
     }
+    function openModalAdd() {
+        editingIdx = -1;
+        $('#cmd_modal_title').text('添加命令');
+        $('#cmd_modal_name').val('');
+        $('#cmd_modal_cmd').val('');
+        showModal();
+    }
+    function openModalEdit(i) {
+        var c = cmdAt(i);
+        if (!c) { return; }
+        editingIdx = i;
+        $('#cmd_modal_title').text('编辑命令');
+        $('#cmd_modal_name').val(c.label || '');
+        $('#cmd_modal_cmd').val(c.cmd || '');
+        showModal();
+    }
     function closeModal() {
         $('#cmd_modal').hide();
-        editingCmd = '';
+        editingIdx = -1;
     }
     function saveModal() {
         var label = $('#cmd_modal_name').val().trim();
@@ -204,16 +226,12 @@
         if (!cmd) { return; }
         if (!label) { label = cmd.split(' ')[0]; }
         var customs = getCustoms();
-        if (editingCmd) {
-            var found = false;
-            for (var i = 0; i < customs.length; i++) {
-                if (customs[i].cmd === editingCmd) { customs[i].label = label; customs[i].cmd = cmd; found = true; break; }
-            }
-            if (!found) {
-                customs.push({label: label, cmd: cmd});
-            }
+        if (editingIdx >= 0 && editingIdx < customs.length) {
+            // 编辑：直接改用户点中的那一条（原来看的是"cmd 文本相同的第一条"）
+            customs[editingIdx].label = label;
+            customs[editingIdx].cmd = cmd;
         } else {
-            // 重名时更新（而不是静默丢弃）
+            // 新增：同一个命令已存在就更新（而不是静默丢弃），否则追加
             var found = false;
             for (var m = 0; m < customs.length; m++) {
                 if (customs[m].cmd === cmd) { customs[m].label = label; found = true; break; }
@@ -227,7 +245,7 @@
         renderCmdPanel();
     }
 
-    $('#cmd_add').on('click', function () { openModal('', ''); });
+    $('#cmd_add').on('click', function () { openModalAdd(); });
     $('#cmd_modal_close').on('click', closeModal);
     $('#cmd_modal_cancel').on('click', closeModal);
     $('#cmd_modal_save').on('click', saveModal);
