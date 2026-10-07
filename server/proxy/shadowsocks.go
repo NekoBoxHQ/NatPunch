@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
@@ -174,11 +175,57 @@ func (h *ssHandler) NewConnection(ctx context.Context, raw net.Conn, metadata M.
 		return nil
 	}
 	logs.Trace("New shadowsocks connection, client %d, target %s", s.task.Client.Id, target)
-	defer raw.Close()
+	guard := newSSConnGuard(raw)
+	defer guard.Close()
 	// 跟 socks5.doConnect 最后那一步完全一样：目标地址交给隧道，客户端去拨。
-	s.DealClient(conn.NewConn(raw), s.task.Client, target, nil, common.CONN_TCP, nil,
+	s.DealClient(conn.NewConn(guard), s.task.Client, target, nil, common.CONN_TCP, nil,
 		s.task.Flow, s.task.Target.LocalProxy, s.task, nil)
 	return nil
+}
+
+// ssConnGuard 绕开 sing-shadowsocks v0.2.9 的一处数据竞争。
+//
+// serverConn.Write 第一次被调用时会在自己的锁里给 c.writer 赋值，而
+// serverConn.Close **不加锁**地读它。我们这边两个方向各跑一个拷贝 goroutine
+// （DealClient → CopyWaitGroup），一边出错就 Close —— 正好可能撞上另一边在做首次
+// Write，`go test -race` 必炸。（实际危害不大：Close 无论如何都会关掉底层连接；
+// 但 CI 的 -race 门禁会红，而且这确实是竞争。）
+//
+// 补法：
+//   - Write 与 Close 用同一把锁串起来 —— 谁也不能和"正在给 c.writer 赋值"的那次
+//     Write 并行。Read 不加锁：它只碰 c.reader，构造之后再不改变。
+//   - Close 先**无锁**关掉底层 TCP，好让卡在写里的那次 Write 立刻返回，
+//     不会把 Close 拖死（不然就是典型的关闭死锁）。
+type ssConnGuard struct {
+	net.Conn          // sing 解密后的流（即 serverConn）
+	upstream net.Conn // 它下面的裸 TCP，只用来"先关一下"解开阻塞
+	mu       sync.Mutex
+}
+
+func newSSConnGuard(c net.Conn) *ssConnGuard {
+	g := &ssConnGuard{Conn: c}
+	// serverConn.Upstream() 返回它包着的那条连接；没有就算了（只是少了"先解开阻塞"这一步）
+	if up, ok := c.(interface{ Upstream() any }); ok {
+		if raw, ok := up.Upstream().(net.Conn); ok {
+			g.upstream = raw
+		}
+	}
+	return g
+}
+
+func (c *ssConnGuard) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.Write(p)
+}
+
+func (c *ssConnGuard) Close() error {
+	if c.upstream != nil {
+		_ = c.upstream.Close()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.Close()
 }
 
 // NewPacketConnection：一条 UDP 会话（同一个源地址的一串数据报）。

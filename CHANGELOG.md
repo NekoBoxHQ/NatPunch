@@ -37,6 +37,13 @@
   ③ 交给 SS 层的 buffer 必须**两头**预留空间，否则它 `ExtendHeader` / `Extend`
   直接 panic("buffer overflow")。
 
+  ④ 还有一处 `go test -race` 才炸的数据竞争：`sing-shadowsocks` v0.2.9 的
+  `serverConn.Write` 首次调用会在锁里给 `c.writer` 赋值，而 `serverConn.Close`
+  **不加锁**地读它 —— 我们两个方向各跑一个拷贝 goroutine，一边出错就 Close，
+  正好可能撞上另一边在做首次 Write。库已经是最新版（v0.2.9），所以用
+  `ssConnGuard` 在这边绕开：Write 与 Close 用同一把锁串起来，Close 先无锁关掉
+  底层 TCP 把可能卡住的 Write 解开，避免关闭死锁。
+
   新增 `server/proxy/shadowsocks_test.go`：PSK 生成 / 坏密钥拒绝 / 地址往返转换，
   外加两条**真的端到端**（真 SS 客户端 ↔ 真 SS 服务端 ↔ 假 NatPunch 客户端 ↔ 真 echo
   服务，TCP 与 UDP 各一条）。
