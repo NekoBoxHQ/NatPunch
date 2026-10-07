@@ -2,6 +2,36 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.38（已发布）
+
+### 修复
+
+- **Shadowsocks / SOCKS5 / transport 隧道的流量不计入客户端**（客户端列表里永远是 0，
+  客户端的流量上限也因此从不生效）。
+
+  根因：`BaseServer.DealClient` 的记账对象是**调用方传进来的** `flow` 参数 ——
+  `tcp+udp` 隧道传的是 `task.Client.Flow`（两边都记），而 `socks5` / `transport` /
+  `shadowsocks` 传的是 `task.Flow`（只记隧道自己）。于是这几种模式下客户端那份一直是 0。
+
+  改法不是逐个调用点补一个参数（下次照样会忘），而是把这个不变量收到一处：
+  记账对象**固定是这条连接所属客户端的 Flow**，`flow` 参数整个删掉；
+  隧道自己那一份由 `CopyBuffer` 用已有的 `task` 参数一并记（它内部判 `task.Flow != flow`
+  再记一次，两边都涨、不会重复）。六个调用点里 `tcp.go` / `https.go` 行为不变。
+
+- **Shadowsocks 的 UDP 半边原来完全没记账**（tcp 半边修完也只是记在隧道上）：
+  现在两个方向都按 `udp.go` 的口径记 —— 公网→隧道 = 入口、隧道→公网 = 出口，
+  并且补上了数据面复查流量上限（`flowExceeded`）。
+  顺带修掉一处 **use-after-release**：`common.NewUDPDatagram` 不拷贝载荷，
+  原来先 `b.Release()` 再把 `d.Write(target)`，等于把池里的缓冲区还回去之后接着读。
+
+- **SOCKS5 的 UDP ASSOCIATE 也没记账**（它不走 `DealClient`），两个方向一并补上。
+
+### 测试
+
+- `TestShadowsocksEndToEndTCP` / `...UDP` / `...UDPPort53Padding` 增加断言：
+  客户端那份流量两个方向都必须 > 0。**已验证这三条在改之前全部失败**（各耗时 3 秒，
+  就是断言里的重试窗口），不是摆设。
+
 ## v26.10.37（已发布）
 
 ### 变更

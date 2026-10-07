@@ -168,7 +168,7 @@ func (s *Sock5ModeServer) doConnect(c net.Conn, command uint8) {
 	}
 	s.DealClient(conn.NewConn(c), s.task.Client, addr, nil, ltype, func() {
 		s.sendReply(c, succeeded)
-	}, s.task.Flow, s.task.Target.LocalProxy, s.task, nil)
+	}, s.task.Target.LocalProxy, s.task, nil)
 	return
 }
 
@@ -295,6 +295,10 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 				logs.Error("write data to client error", err.Error())
 				return
 			}
+			// 公网 → 隧道 = 入口流量（口径与 udp.go 一致；这两条是 SOCKS5 的 UDP ASSOCIATE，
+			// 走的不是 DealClient，所以要自己记）
+			s.task.Client.Flow.Add(int64(n), 0)
+			s.task.Flow.Add(int64(n), 0)
 		}
 	}()
 
@@ -325,6 +329,9 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 				logs.Warn("write data to user ", err.Error())
 				return
 			}
+			// 隧道 → 公网 = 出口流量
+			s.task.Client.Flow.Add(0, int64(l))
+			s.task.Flow.Add(0, int64(l))
 		}
 	}()
 

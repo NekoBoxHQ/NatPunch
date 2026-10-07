@@ -199,7 +199,7 @@ func (h *ssHandler) NewConnection(ctx context.Context, raw net.Conn, metadata ss
 	defer guard.Close()
 	// 跟 socks5.doConnect 最后那一步完全一样：目标地址交给隧道，客户端去拨。
 	s.DealClient(conn.NewConn(guard), s.task.Client, target, nil, common.CONN_TCP, nil,
-		s.task.Flow, s.task.Target.LocalProxy, s.task, nil)
+		s.task.Target.LocalProxy, s.task, nil)
 	return nil
 }
 
@@ -282,10 +282,22 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 				b.Release()
 				return
 			}
+			// ⚠️ NewUDPDatagram **不拷贝**：d.Data 就是 b 的底层数组。
+			// 所以 Release 必须放到 Write 之后 —— 先 Release 再 Write 等于把池里的
+			// 缓冲区还给别人之后接着往里读，是实打实的 use-after-release。
 			d := common.NewUDPDatagram(common.NewUDPHeader(0, 0, socksAddrFromSocksaddr(dest)), b.Bytes())
-			b.Release()
 			if err := d.Write(target); err != nil {
 				logs.Warn("shadowsocks udp: write to client error %s", err.Error())
+				b.Release()
+				return
+			}
+			// 公网(SS 客户端) → 隧道 = 入口流量；口径与 udp.go（tcp+udp 隧道的 UDP 侧）一致
+			s.task.Client.Flow.Add(int64(len(d.Data)), 0)
+			s.task.Flow.Add(int64(len(d.Data)), 0)
+			b.Release()
+			// 数据面复查流量上限（同 udp.go）
+			if flowExceeded(s.task.Client) {
+				logs.Warn("shadowsocks udp client id %d flow exceeded", s.task.Client.Id)
 				return
 			}
 		}
@@ -332,6 +344,14 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 		}
 		// 所有权交给 SS 层，它负责 Release
 		if err := pc.WritePacket(b, socksaddrFromCommonAddr(d.Header.Addr)); err != nil {
+			return nil
+		}
+		// 隧道(客户端) → 公网(SS 客户端) = 出口流量；口径同 udp.go
+		s.task.Client.Flow.Add(0, int64(len(d.Data)))
+		s.task.Flow.Add(0, int64(len(d.Data)))
+		// 数据面复查流量上限（同 udp.go）
+		if flowExceeded(s.task.Client) {
+			logs.Warn("shadowsocks udp client id %d flow exceeded", s.task.Client.Id)
 			return nil
 		}
 	}

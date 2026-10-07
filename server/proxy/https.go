@@ -214,7 +214,7 @@ func (https *HttpsServer) handleHttps2(c net.Conn, hostName string, rb []byte, r
 		logs.Warn(err.Error())
 	}
 	logs.Info("new https connection,clientId %d,host %s,remote address %s", host.Client.Id, r.Host, c.RemoteAddr().String())
-	https.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, host.Client.Flow, host.Target.LocalProxy, nil, host)
+	https.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, host.Target.LocalProxy, nil, host)
 }
 
 // close

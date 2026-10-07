@@ -77,8 +77,18 @@ func in(target string, str_array []string) bool {
 }
 
 // create a new connection and start bytes copying
+//
+// 记账对象**固定是这条连接所属客户端的 Flow**，不由调用方传：
+//   - 客户端列表的流量列、以及客户端的流量上限（flowExceeded / CheckFlowAndConnNum）
+//     看的都是 client.Flow；
+//   - 隧道自己那一份由 CopyBuffer 用 task 参数一并记（它内部会判 task.Flow != flow
+//     再记一次，所以两边都涨，不会重复计）。
+//
+// 以前这里是调用方传一个 flow 进来，于是有人传 Client.Flow（tcp+udp 隧道）、
+// 有人传 task.Flow（socks5 / transport / shadowsocks）—— 后几类在客户端列表里
+// 流量**永远是 0**，客户端流量上限也永远不生效。收成一处就不会再漏。
 func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
-	rb []byte, tp string, f func(), flow *file.Flow, localProxy bool, task *file.Tunnel, host *file.Host) error {
+	rb []byte, tp string, f func(), localProxy bool, task *file.Tunnel, host *file.Host) error {
 
 	// 全局连接数上限（阶段三 #4，max_global_conn=0 不限）
 	if !TryAcquireGlobalConn() {
@@ -113,7 +123,7 @@ func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
 		if f != nil {
 			f()
 		}
-		conn.CopyWaitGroup(target, c.Conn, link.Crypt, link.Compress, client.Rate, flow, true, rb, task, host)
+		conn.CopyWaitGroup(target, c.Conn, link.Crypt, link.Compress, client.Rate, client.Flow, true, rb, task, host)
 	}
 	return nil
 }

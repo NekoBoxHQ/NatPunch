@@ -274,6 +274,9 @@ func runShadowsocksUDPRoundTrip(t *testing.T, replySrc *common.Addr) {
 	if got := string(recv.Bytes()); got != "udp-hello" {
 		t.Fatalf("UDP 回程数据不对: %q", got)
 	}
+
+	// UDP 这一半原来**完全没记账**，客户端列表自然也是 0（见 assertClientFlowCounted）
+	assertClientFlowCounted(t, client)
 }
 
 // 域名要落成 SOCKS5 的 domainName(3)，不能被当成 IP 硬塞进 4 字节。
@@ -385,5 +388,29 @@ func TestShadowsocksEndToEndTCP(t *testing.T) {
 	}
 	if string(got) != "hello-natpunch" {
 		t.Fatalf("回程数据不对: %q", got)
+	}
+
+	// 记账：客户端那份也必须有数（面板客户端列表的流量列 + 客户端流量上限都看它）。
+	// 这曾经是个真 bug：DealClient 的记账对象由调用方传，ss / socks5 / transport
+	// 传的是 task.Flow，于是这些模式在客户端列表里流量**永远显示 0**。
+	assertClientFlowCounted(t, client)
+}
+
+// assertClientFlowCounted 断言客户端那份流量真的被记上了（两个方向都要有）。
+// 收尾可能有几百毫秒的拷贝 goroutine 尾巴，所以给它一点时间再判。
+func assertClientFlowCounted(t *testing.T, client *file.Client) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		client.Flow.RLock()
+		in, out := client.Flow.InletFlow, client.Flow.ExportFlow
+		client.Flow.RUnlock()
+		if in > 0 && out > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("客户端流量没记上: inlet=%d export=%d（应都 > 0）", in, out)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
