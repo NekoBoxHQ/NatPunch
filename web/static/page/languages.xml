@@ -658,8 +658,8 @@
 		<en-US>Provide a local file service accessible to the public network, which can only be started by the client using the profile mode.</en-US>
 	</lang>
 	<lang id="info-casehttpproxy">
-		<zh-CN>将公网服务器1.1.1.1的8004端口作为HTTP代理，访问内网网站。</zh-CN>
-		<en-US>Use port 8004 of public server 1.1.1.1 as HTTP proxy to visit intranet site.</en-US>
+		<zh-CN>将公网服务器1.1.1.1的8002端口作为HTTP代理，访问内网网站。</zh-CN>
+		<en-US>Use port 8002 of public server 1.1.1.1 as HTTP proxy to visit intranet site.</en-US>
 	</lang>
 	<lang id="info-casep2p">
 		<zh-CN>流量不经过公网服务器，受nat类型影响较大，不能保证100%成功，支持大部分nat类型。</zh-CN>
