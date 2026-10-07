@@ -313,17 +313,4 @@
         toastr.error('复制失败', '提示');
     });
 
-    // 定时刷新，让流量数字是活的（以前只在打开页面时取一次数，跑完流量再看还是老值）。
-    // 3 秒一次；页面在后台不刷。**如果展开了某一行就不刷** —— 那行的展开区里就是流量数字，
-    // 整表重绘会把它收起来，等于看着看着被合上。
-    setInterval(function () {
-        if (document.hidden) {
-            return;
-        }
-        if ($('#table').find('.detail-view').length > 0) {
-            return;
-        }
-        // silent:true —— 不弹"正在加载数据中 请稍后"的遮罩
-        $('#table').bootstrapTable('refresh', {silent: true});
-    }, 3000);
 </script>

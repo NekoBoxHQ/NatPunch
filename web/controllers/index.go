@@ -60,18 +60,6 @@ func (s *IndexController) Index() {
 	s.display("index/index")
 }
 
-// DashboardData 是仪表盘数据的 JSON 版，给页面**原地刷新**用。
-//
-// 仪表盘原来只有服务端渲染的一份快照：页面开着，数字和七张图就一直停在打开那刻。
-// 让前端每几秒拉这个接口、原地更新，就不会为了刷新数字整页重载（滚动位置、
-// 图表动画都会跟着跳）。
-//
-// 路由不用注册：AutoRouter 把 URL 段小写后当动作名，/index/dashboarddata 就到了这里。
-func (s *IndexController) DashboardData() {
-	s.Data["json"] = server.GetDashboardData()
-	s.ServeJSON()
-}
-
 // Tcpudp 隧道管理：TCP / UDP 隧道统一列表
 func (s *IndexController) Tcpudp() {
 	s.SetInfo("tcpudp")
