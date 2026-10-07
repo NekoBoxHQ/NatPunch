@@ -414,3 +414,112 @@ func assertClientFlowCounted(t *testing.T, client *file.Client) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// 记账**方向**：上传进 InletFlow、下载进 ExportFlow。
+//
+// 这条盯的是 CopyBuffer 那条隧道路径上的两个方向常量 —— 它们以前是反的：
+// 同一个"下载"在隧道路径记进 InletFlow、在 host 路径记进 ExportFlow，
+// 于是面板上那个字段（旧的"入口流量"）其实一直是下载量。
+//
+// 收发的字节数**故意取得不一样**（上 5 下 21）：如果两边一样，方向写反了这条也照样绿。
+func TestShadowsocksFlowDirection(t *testing.T) {
+	const upload, download = 5, 21
+
+	// 目标：收满 5 字节，回 21 字节，然后留一会儿再关
+	// （回程拷贝要先写完那 21 字节，记账才发生，关早了会看不全）
+	targetLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetLn.Close()
+	go func() {
+		c, err := targetLn.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		head := make([]byte, upload)
+		if _, err := io.ReadFull(c, head); err != nil {
+			return
+		}
+		_, _ = c.Write([]byte("012345678901234567890")) // 21 字节
+		time.Sleep(time.Second)
+	}()
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	probe.Close()
+
+	confPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(confPath, "conf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"clients.json", "tasks.json", "hosts.json"} {
+		if err := os.WriteFile(filepath.Join(confPath, "conf", n), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldConfPath := common.ConfPath
+	common.ConfPath = confPath
+	t.Cleanup(func() { common.ConfPath = oldConfPath })
+
+	psk := crypt.NewShadowsocksPSK()
+	client := file.NewClient("test", true, true)
+	client.Id = 1
+	task := &file.Tunnel{
+		Id: 1, Port: port, ServerIp: "127.0.0.1", Mode: "shadowsocks",
+		Password: psk, Client: client, Target: &file.Target{}, Flow: &file.Flow{},
+	}
+
+	tunnelSide, err := net.Dial("tcp", targetLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewShadowsocksModeServer(&tunnelTestBridge{target: tunnelSide}, task)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("SS 服务端起不来: %v", err)
+	}
+	defer srv.Close()
+	waitPort(t, port)
+
+	method, err := shadowaead_2022.NewWithPassword(SSMethod, psk, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := method.DialConn(raw, M.ParseSocksaddr(targetLn.Addr().String()))
+	if err != nil {
+		t.Fatalf("SS 客户端握手失败: %v", err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+
+	if _, err := c.Write(make([]byte, upload)); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	got := make([]byte, download)
+	if _, err := io.ReadFull(c, got); err != nil {
+		t.Fatalf("读回失败: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		client.Flow.RLock()
+		in, out := client.Flow.InletFlow, client.Flow.ExportFlow
+		client.Flow.RUnlock()
+		if in == upload && out == download {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("记账方向不对: inlet=%d（应是上传 %d）export=%d（应是下载 %d）",
+				in, upload, out, download)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

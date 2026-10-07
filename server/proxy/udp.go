@@ -172,7 +172,7 @@ func (s *UdpModeServer) dispatch(key string, sess *udpSession, data []byte, n in
 		return
 	}
 	sess.touch()
-	// 公网 UDP 数据 -> 隧道(客户端) = 入口流量
+	// 公网 UDP 数据 -> 隧道(客户端) = 上传
 	s.task.Client.Flow.Add(int64(n), 0)
 	s.task.Flow.Add(int64(n), 0)
 	// 数据面复查流量上限（阶段三 #10）
@@ -226,7 +226,7 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 		return
 	}
 	common.BufPoolUdp.Put(buf)
-	// 公网 UDP 首包 -> 隧道(客户端) = 入口流量
+	// 公网 UDP 首包 -> 隧道(客户端) = 上传
 	s.task.Client.Flow.Add(int64(n), 0)
 	s.task.Flow.Add(int64(n), 0)
 	// 数据面复查流量上限（阶段三 #10）
@@ -253,7 +253,7 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 			logs.Warn(err)
 			return
 		}
-		// 隧道(客户端)数据 -> 公网 UDP 用户 = 出口流量
+		// 隧道(客户端)数据 -> 公网 UDP 用户 = 下载
 		s.task.Client.Flow.Add(0, int64(rn))
 		s.task.Flow.Add(0, int64(rn))
 		// 数据面复查流量上限（阶段三 #10）

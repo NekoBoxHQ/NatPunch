@@ -291,7 +291,7 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 				b.Release()
 				return
 			}
-			// 公网(SS 客户端) → 隧道 = 入口流量；口径与 udp.go（tcp+udp 隧道的 UDP 侧）一致
+			// 公网(SS 客户端) → 隧道 = 上传；口径与 udp.go 一致
 			s.task.Client.Flow.Add(int64(len(d.Data)), 0)
 			s.task.Flow.Add(int64(len(d.Data)), 0)
 			b.Release()
@@ -346,7 +346,7 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 		if err := pc.WritePacket(b, socksaddrFromCommonAddr(d.Header.Addr)); err != nil {
 			return nil
 		}
-		// 隧道(客户端) → 公网(SS 客户端) = 出口流量；口径同 udp.go
+		// 隧道(客户端) → 公网(SS 客户端) = 下载；口径同 udp.go
 		s.task.Client.Flow.Add(0, int64(len(d.Data)))
 		s.task.Flow.Add(0, int64(len(d.Data)))
 		// 数据面复查流量上限（同 udp.go）

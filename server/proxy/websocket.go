@@ -269,9 +269,9 @@ func Join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser, host *file.Host) (inCoun
 	wait.Add(2)
 
 	// c1=公网用户连接, c2=隧道连接：隧道->公网 = 出口流量
-	go pipe(c1, c2, &inCount, goroutine.DirMuxToOutside)
+	go pipe(c1, c2, &inCount, goroutine.DirToPublic)
 	// c2=隧道连接, c1=公网用户连接：公网->隧道 = 入口流量
-	go pipe(c2, c1, &outCount, goroutine.DirOutsideToMux)
+	go pipe(c2, c1, &outCount, goroutine.DirToTunnel)
 	wait.Wait()
 	return
 }

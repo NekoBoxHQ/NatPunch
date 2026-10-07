@@ -211,8 +211,8 @@
 		<en-US>Send</en-US>
 	</lang>
 	<lang id="word-exportflow">
-		<zh-CN>出口流量</zh-CN>
-		<en-US>Export Flow</en-US>
+		<zh-CN>下载流量</zh-CN>
+		<en-US>Download Flow</en-US>
 	</lang>
 	<lang id="word-false">
 		<zh-CN>否</zh-CN>
@@ -231,8 +231,8 @@
 		<en-US>In</en-US>
 	</lang>
 	<lang id="word-inletflow">
-		<zh-CN>入口流量</zh-CN>
-		<en-US>Inlet Flow</en-US>
+		<zh-CN>上传流量</zh-CN>
+		<en-US>Upload Flow</en-US>
 	</lang>
 	<lang id="word-load">
 		<zh-CN>负载</zh-CN>

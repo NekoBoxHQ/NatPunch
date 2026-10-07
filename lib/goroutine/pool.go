@@ -37,13 +37,22 @@ type connGroup struct {
 	dir    int
 }
 
-// 拷贝方向常量（流量记账方向语义）：
+// 流量记账方向常量。**名字说的是"这份数据交给谁"**，也就是 CopyBuffer 的 dst
+// 是哪一端 —— 这是它唯一能观察到的事实。
 //
-//	DirMuxToOutside：隧道(mux) -> 公网侧 —— 内网数据返回公网 = 出口流量(ExportFlow)
-//	DirOutsideToMux：公网侧 -> 隧道(mux) —— 公网请求进入内网 = 入口流量(InletFlow)
+// 原来的两个名字（MuxToOutside / OutsideToMux）描述的是"数据从哪来"，而各条路径的
+// dst/src 组合并不一样，于是同一个"下载"在隧道路径记进了 InletFlow、在 host 路径
+// 记进了 ExportFlow，两边的数字对不上。改成按 dst 命名之后，每个调用点只要看一眼
+// dst 是谁就知道该传哪个。
+//
+//	DirToPublic：dst 是公网侧（用户那一头）—— 数据交给用户 = **下载** = ExportFlow
+//	DirToTunnel：dst 是隧道侧（内网那一头）—— 数据送进隧道 = **上传** = InletFlow
+//
+// 口径与 udp.go / http.go 里那几处手工记账一致：公网用户发出的算上传，交给公网
+// 用户的算下载。
 const (
-	DirMuxToOutside = 1
-	DirOutsideToMux = 2
+	DirToPublic = 1
+	DirToTunnel = 2
 )
 
 //func newConnGroup(dst, src io.ReadWriteCloser, wg *sync.WaitGroup, n *int64) connGroup {
@@ -154,8 +163,8 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 			if nw > 0 {
 				//written += int64(nw)
 				if flow != nil {
-					// 按方向记账：隧道->公网=出口，公网->隧道=入口
-					if dir == DirMuxToOutside {
+					// 按方向记账：交给公网用户 = 下载 = ExportFlow；送进隧道 = 上传 = InletFlow
+					if dir == DirToPublic {
 						flow.Add(0, int64(nw))
 					} else {
 						flow.Add(int64(nw), 0)
@@ -172,14 +181,14 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 					}
 				}
 				if task != nil && task.Flow != nil && task.Flow != flow {
-					if dir == DirMuxToOutside {
+					if dir == DirToPublic {
 						task.Flow.Add(0, int64(nw))
 					} else {
 						task.Flow.Add(int64(nw), 0)
 					}
 				}
 				if host != nil && host.Flow != nil && host.Flow != flow {
-					if dir == DirMuxToOutside {
+					if dir == DirToPublic {
 						host.Flow.Add(0, int64(nw))
 					} else {
 						host.Flow.Add(int64(nw), 0)
@@ -251,10 +260,14 @@ func copyConns(group interface{}) {
 	wg.Add(2)
 	var in, out int64
 	remoteAddr := conns.conn2.RemoteAddr().String()
-	// mux to outside : outgoing —— 隧道->公网 = 出口流量
-	_ = connCopyPool.Invoke(newConnGroup(conns.conn1, conns.conn2, wg, &in, conns.flow, conns.task, conns.host, remoteAddr, DirMuxToOutside))
-	// outside to mux : incoming —— 公网->隧道 = 入口流量
-	_ = connCopyPool.Invoke(newConnGroup(conns.conn2, conns.conn1, wg, &out, conns.flow, conns.task, conns.host, remoteAddr, DirOutsideToMux))
+	// ⚠️ 这两个方向常量以前是反的（同一个"下载"在这条路径记进 InletFlow、在 host 路径
+	// 记进 ExportFlow），线上看到的"入口流量"其实一直是下载量。现在按 dst 定性：
+	// dst 是隧道侧(conn1) = 数据送进内网 = 上传；dst 是公网侧(conn2) = 数据交给用户 = 下载。
+	//
+	// 上行：公网 -> 隧道（上传）
+	_ = connCopyPool.Invoke(newConnGroup(conns.conn1, conns.conn2, wg, &in, conns.flow, conns.task, conns.host, remoteAddr, DirToTunnel))
+	// 下行：隧道 -> 公网（下载）
+	_ = connCopyPool.Invoke(newConnGroup(conns.conn2, conns.conn1, wg, &out, conns.flow, conns.task, conns.host, remoteAddr, DirToPublic))
 	wg.Wait()
 	//if conns.flow != nil {
 	//	conns.flow.Add(in, out)

@@ -292,7 +292,7 @@ reset:
 			}
 		}()
 
-		if err1 := goroutine.CopyBuffer(c, cc, h.Client.Flow, nil, h, "", goroutine.DirMuxToOutside); err1 != nil {
+		if err1 := goroutine.CopyBuffer(c, cc, h.Client.Flow, nil, h, "", goroutine.DirToPublic); err1 != nil {
 			return
 		}
 	}(cc, host, rf)
@@ -306,7 +306,7 @@ reset:
 					break
 				}
 				logs.Trace("%s request, method %s, host %s, url %s, remote address %s, return cache", r.URL.Scheme, r.Method, r.Host, r.URL.Path, c.RemoteAddr().String())
-				// 服务端 -> 公网用户 = 出口流量
+				// 服务端 -> 公网用户 = 下载
 				host.Client.Flow.Add(0, int64(n))
 				host.Flow.Add(0, int64(n))
 				//if return cache and does not create a new conn with client and Connection is not set or close, close the connection.
@@ -337,7 +337,7 @@ reset:
 			}
 		}
 		firstReq = false
-		// 公网请求 -> 隧道(客户端) = 入口流量
+		// 公网请求 -> 隧道(客户端) = 上传
 		host.Client.Flow.Add(int64(lenConn.Len), 0)
 		host.Flow.Add(int64(lenConn.Len), 0)
 
