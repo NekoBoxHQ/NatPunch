@@ -104,12 +104,13 @@
             },
             {
                 field: 'ClientId',//域值
-                title: '<span langtag="word-clientid"></span>',//标题
+                title: '<span langtag="word-client"></span>',//标题
                 halign: 'center',
                 visible: true,//false表示不显示
                 sortable: true, //启用排序
                 formatter: function (value, row, index) {
-                    return row.Client.Id + '-' + row.Client.Remark
+                    // 只改显示，不动取值：field 仍是 ClientId（排序/筛选照旧）
+                    return row.Client.Remark
                 }
             },
             {
