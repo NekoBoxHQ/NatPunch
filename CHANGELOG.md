@@ -2,6 +2,24 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.30（已发布）
+
+### 变更
+
+- **手机竖屏下 SSH 终端顶到边框：把外围留白全收掉。**
+
+  终端页原本继承了面板各层的默认留白 —— `#page-wrapper` 15px、Bootstrap 的
+  `.col-lg-12` 15px、`.ibox-content` 20px、`.wrapper-content` 15px…… 加起来在
+  390px 宽的屏上差不多六七十像素，换算成终端列数就是十几列。
+
+  现在这一页在 `max-width: 768px` 下把这些 padding / margin 全部归零，
+  终端盒子圆角也去掉，直接顶到边框；终端高度 58vh → 66vh。
+  注意 `.row` 在 Bootstrap 里是负外边距，父容器 padding 归零后必须一起归零，
+  否则内容会溢出视口、能横向拖动。
+
+  **这些规则写在 `web/views/terminal/index.html` 自己的 `<style>` 里**，
+  只影响这一页，列表 / 表单等页面不受影响。
+
 ## v26.10.29（已发布）
 
 ### 修复
