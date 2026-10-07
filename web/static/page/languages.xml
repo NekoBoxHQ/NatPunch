@@ -682,8 +682,8 @@
 		<en-US>Through port 53 of public server 1.1.1.1, access port 53 of Intranet machine 10.1.50.101, and use DNS service.</en-US>
 	</lang>
 	<lang id="info-casetcpudp">
-		<zh-CN>同一端口同时监听 TCP 和 UDP，一条隧道打通两种协议</zh-CN>
-		<en-US>Listen on the same port for both TCP and UDP</en-US>
+		<zh-CN>将公网服务器1.1.1.1的8001端口作为双端隧道，和客户端交互。</zh-CN>
+		<en-US>Use port 8001 of public server 1.1.1.1 as a dual-end tunnel to talk to the client.</en-US>
 	</lang>
 	<lang id="info-proxyaccount">
 		<zh-CN>访问代理需输入此账号密码，不填则无需认证</zh-CN>
