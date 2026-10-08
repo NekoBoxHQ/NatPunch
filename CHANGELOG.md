@@ -2,6 +2,40 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.46（已发布）
+
+### 新增
+
+- **面板新增「使用 GitHub 登录」（仅管理员，默认关闭）。**
+
+  配置全部走 `conf/natpunch.conf`：`github_oauth_enable` / `github_client_id` /
+  `github_client_secret` / `github_admin_login`。**四个键缺任意一个即视为未启用**
+  （fail-closed）：登录页不出现按钮，直接访问 `/login/github` 也会被弹回登录页 ——
+  宁可功能不生效，也不留「配置漏填就把陌生账号当管理员放进来」的降级路径。
+  原有两条登录路径（`web_username`/`web_password` 管理员账号、客户端账号）行为不变；
+  本功能关闭时没有任何外发请求、没有会话写入。配置步骤见 `docs/config-reference.md`。
+
+  实现上值得记一笔的地方：
+
+  - **state 用一次性 `SameSite=Lax` Cookie，不能存会话。** 面板会话 Cookie 被 F2-5a
+    加固成了 `SameSite=Strict`（`server/proxy/samesite.go` 的 `fixCookies`），而
+    GitHub 回调是从 github.com **跨站跳回来**的顶层导航 —— Strict 的 Cookie 在这类
+    请求里浏览器根本不会发送。要是把 state 存进会话，回调读出来永远是空串，登录会
+    100% 卡在「登录校验失败」，而且没有任何报错线索。Lax 恰好允许顶层 GET 导航带上
+    Cookie（回调收得到），又不像 None 那样对跨站子请求开口；state 是 128bit 随机数、
+    只写给发起登录的那个浏览器，攻击者构造的 URL 里只能放他自己那份 state，对不上，
+    CSRF / 授权码注入的防线依旧成立。
+  - 会话写入与账号密码登录**共用** `establishAdminSession` / `finishLogin`（含 F2-5a
+    会话重建），避免两条登录路径的权限判定将来各自漂移。
+  - 白名单精确匹配（大小写、首尾空白归一，**不做**前缀/包含匹配）；身份以 GitHub 的
+    `id` 为准，不读 `email`（可能为空或未验证）；只申请 `read:user`。
+  - 登录失败计入与账号密码登录同一套 IP 限流（10 次/分钟），不另开一条绕过限流的入口。
+  - `doLogin` 只做等价抽取：语句级核对，改前的 68 条语句逐条原样保留，仅 2 条等价
+    改写（提前 return），未增删任何逻辑，原有登录行为不变。
+
+  新增 `web/controllers/oauth_test.go`，钉住白名单匹配（前缀/后缀不得命中、空名单
+  不得放行）与 state 的随机性。
+
 ## v26.10.45（已发布）
 
 ### 修复
