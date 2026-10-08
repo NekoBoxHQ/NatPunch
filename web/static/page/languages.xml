@@ -222,6 +222,10 @@
 		<zh-CN>流量限制</zh-CN>
 		<en-US>Flow limit</en-US>
 	</lang>
+	<lang id="word-github-login">
+		<zh-CN>使用 GitHub 登录</zh-CN>
+		<en-US>Sign in with GitHub</en-US>
+	</lang>
 	<lang id="word-https">HTTPS
 	</lang>
 	<lang id="word-id">ID
@@ -285,6 +289,10 @@
 	<lang id="word-option">
 		<zh-CN>选项</zh-CN>
 		<en-US>option</en-US>
+	</lang>
+	<lang id="word-or">
+		<zh-CN>或</zh-CN>
+		<en-US>or</en-US>
 	</lang>
 	<lang id="word-outbandwidth">
 		<zh-CN>上传带宽</zh-CN>

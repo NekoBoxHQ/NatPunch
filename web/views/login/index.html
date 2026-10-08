@@ -99,6 +99,11 @@
                     {{end}}
                     <button onclick="login()" class="btn btn-primary block full-width m-b"
                             langtag="word-login" style="height:48px;font-size:17px;"></button>
+                    {{if eq true .github_oauth_enable}}
+                        <p class="text-muted text-center" style="margin:6px 0;"><small langtag="word-or"></small></p>
+                        <a class="btn btn-sm btn-white btn-block" href="{{.web_base_url}}/login/github"
+                           langtag="word-github-login"></a>
+                    {{end}}
                     {{if eq true .register_allow}}
                         <p class="text-muted text-center"><small langtag="info-noaccount"></small></p>
                         <a class="btn btn-sm btn-white btn-block" href="{{.web_base_url}}/login/register"
@@ -138,6 +143,13 @@
         })
         return false
     }
+
+    // GitHub OAuth 回调失败时服务端带回来的原因（服务器固定文案），仅作提示。
+    // 用 alert 展示纯文本，不写进 DOM —— 即使有人伪造这个参数也执行不了脚本。
+    (function () {
+        var m = window.location.search.match(/[?&]oauth_error=([^&]*)/)
+        if (m) { alert(decodeURIComponent(m[1])) }
+    })()
 </script>
 </body>
 </html>

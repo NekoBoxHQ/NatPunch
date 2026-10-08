@@ -237,6 +237,13 @@ disconnect_timeout=60
 
 open_captcha=false
 
+# GitHub OAuth 登录（仅管理员），默认关闭。四个键缺任意一个即视为未启用，见 docs/config-reference.md
+github_oauth_enable=false
+github_client_id=
+github_client_secret=
+github_callback_url=
+github_admin_login=
+
 tls_enable=true
 tls_bridge_port=8025
 `

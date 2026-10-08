@@ -12,6 +12,8 @@ func Init() {
 			beego.NSRouter("/", &controllers.IndexController{}, "*:Index"),
 			beego.NSAutoRouter(&controllers.IndexController{}),
 			beego.NSAutoRouter(&controllers.LoginController{}),
+			beego.NSRouter("/login/github", &controllers.LoginController{}, "get:GithubLogin"),
+			beego.NSRouter("/login/github/callback", &controllers.LoginController{}, "get:GithubCallback"),
 			beego.NSAutoRouter(&controllers.ClientController{}),
 			beego.NSAutoRouter(&controllers.AuthController{}),
 			beego.NSRouter("/auth/ipwhiteauth", &controllers.AuthController{}, "*:IpWhiteAuth"),
@@ -24,6 +26,8 @@ func Init() {
 		beego.Router("/", &controllers.IndexController{}, "*:Index")
 		beego.AutoRouter(&controllers.IndexController{})
 		beego.AutoRouter(&controllers.LoginController{})
+		beego.Router("/login/github", &controllers.LoginController{}, "get:GithubLogin")
+		beego.Router("/login/github/callback", &controllers.LoginController{}, "get:GithubCallback")
 		beego.AutoRouter(&controllers.ClientController{})
 		beego.AutoRouter(&controllers.AuthController{})
 		beego.Router("/auth/ipwhiteauth", &controllers.AuthController{}, "*:IpWhiteAuth")

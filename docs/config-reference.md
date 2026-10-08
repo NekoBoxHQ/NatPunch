@@ -73,6 +73,40 @@
 | `allow_user_register` | `false` | 允许自助注册 |
 | `allow_user_change_username` | `true` | 允许用户改名 |
 
+### GitHub OAuth 登录（仅管理员）
+
+面板的**第三条**登录入口，与原有两条（`web_username`/`web_password` 管理员账号、客户端账号）并存且互不影响。
+只有用户名命中 `github_admin_login` 白名单的 GitHub 账号能登录，且只能以**管理员**身份登录
+（不做客户端账号映射；客户端账号仍走本地口令）。
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| `github_oauth_enable` | `false` | 总开关 |
+| `github_client_id` | 空 | OAuth App 的 Client ID |
+| `github_client_secret` | 空 | OAuth App 的 Client Secret。**明文保存在 `conf/natpunch.conf` 里，注意文件权限与备份** |
+| `github_callback_url` | 空 | 回调地址，必须与 OAuth App 登记的 Authorization callback URL 完全一致；留空则按当前请求推导（跳转时日志会打印推导结果） |
+| `github_admin_login` | 空 | 允许登录的 GitHub 用户名，逗号分隔，不区分大小写 |
+
+**四个键缺任意一个都视为未启用**：登录页不出现按钮，直接访问 `/login/github` 也会被弹回登录页（fail-closed）。
+配置不全时宁可功能不生效，也不留"配置漏了就把陌生账号当管理员放进来"的降级路径。
+
+配置步骤：
+
+1. GitHub → Settings → Developer settings → OAuth Apps → New OAuth App。
+   Authorization callback URL 填 `github_callback_url` 的值（或先留空跑一次，从面板日志里抄推导结果）。
+   **必须逐字符一致** —— scheme / host / path 差一个字符，GitHub 都会在授权页直接报错。
+2. 把 Client ID / Client Secret 填进 `conf/natpunch.conf`，`github_admin_login` 填你自己的 GitHub 用户名，`github_oauth_enable=true`。
+3. 重启服务端，登录页出现「使用 GitHub 登录」。
+
+安全说明：
+
+- state 存**一次性 Lax Cookie**、回调时定长比对且单次有效（防 CSRF / 授权码注入）；失败计入与账号密码登录同一套 IP 限流（10 次/分钟）。
+  **注意不能把 state 存进会话**：面板会话 Cookie 是 `SameSite=Strict`（F2-5a 加固），而回调是从 github.com 跨站跳回来的顶层导航，Strict 的 Cookie 在这类请求里不会被发送 —— 存会话的话回调永远读不到 state，登录会 100% 卡在"登录校验失败"。
+- 身份以 GitHub 的 `id` 判定、以 `login` 匹配白名单；**不读 `email`**（可能为空或未验证）。
+- 只申请 `read:user` scope，不请求私有资料与邮箱。
+- **建议面板开启 HTTPS**（`web_open_ssl=true` 或反代终结 TLS）：明文 HTTP 下授权码是以明文回传的。
+- GitHub 登录成功同样走 `SessionRegenerateID()`（会话固定防护，与原登录路径一致）。
+
 ### 扩展限制
 
 | 配置项 | 默认 | 说明 |

@@ -45,6 +45,9 @@ func (self *LoginController) Index() {
 	self.Data["web_base_url"] = webBaseUrl
 	self.Data["register_allow"], _ = beego.AppConfig.Bool("allow_user_register")
 	self.Data["captcha_open"], _ = beego.AppConfig.Bool("open_captcha")
+	// GitHub 登录按钮只在配置齐备时才出现（配置不全时 githubOAuthConf 返回 false）
+	githubOAuthEnable, _, _, _, _ := githubOAuthConf()
+	self.Data["github_oauth_enable"] = githubOAuthEnable
 	self.Data["version"] = version.VERSION
 	self.TplName = "login/index.html"
 }
@@ -70,27 +73,68 @@ func (self *LoginController) Verify() {
 	self.ServeJSON()
 }
 
+// establishAdminSession 写入管理员会话：账号密码登录与 GitHub OAuth 登录共用同一份逻辑，
+// 免得两条路径将来各自演化出权限差异。
+func (self *LoginController) establishAdminSession() {
+	self.SetSession("isAdmin", true)
+	self.DelSession("clientId")
+	self.DelSession("username")
+	server.Bridge.Register.Store(common.GetIpByAddr(self.Ctx.Input.IP()), time.Now().Add(time.Hour*time.Duration(2)))
+}
+
+// finishLogin 登录成功收尾：重建会话 ID（会话固定防护 F2-5a）、置 auth 标记、清掉该 IP 的失败计数。
+func (self *LoginController) finishLogin(ip string) {
+	self.SessionRegenerateID()
+	self.SetSession("auth", true)
+	ipRecord.Delete(ip)
+}
+
+// loginIP 登录请求的来源 IP（失败限流以它为键）。
+func (self *LoginController) loginIP() string {
+	ip, _, _ := net.SplitHostPort(self.Ctx.Request.RemoteAddr)
+	return ip
+}
+
+// loginBlocked 该 IP 是否已达失败次数上限（10 次/分钟，F2-1）。
+func (self *LoginController) loginBlocked(ip string) bool {
+	v, ok := ipRecord.Load(ip)
+	if !ok {
+		return false
+	}
+	vv := v.(*record)
+	if (time.Now().Unix() - vv.lastLoginTime.Unix()) >= 60 {
+		vv.hasLoginFailTimes = 0
+	}
+	return vv.hasLoginFailTimes >= 10
+}
+
+// recordLoginFailure 记一次登录失败。explicit 表示用户主动提交：
+// 隐式尝试（登录页每次 GET 会试一次空口令）只在首次建档计数，不逐次累加。
+func (self *LoginController) recordLoginFailure(ip string, explicit bool) {
+	// 建档即保证清理 goroutine 在跑（sync.Once，重复调用无成本）。
+	// 不能只依赖 doLogin 开头那次调用：GitHub OAuth 回调也走这里记账，
+	// 若服务端只被 OAuth 失败访问过，ipRecord 就没人清理、无限增长。
+	startIprecordCleaner()
+	if v, load := ipRecord.LoadOrStore(ip, &record{hasLoginFailTimes: 1, lastLoginTime: time.Now()}); load && explicit {
+		vv := v.(*record)
+		vv.lastLoginTime = time.Now()
+		vv.hasLoginFailTimes += 1
+		ipRecord.Store(ip, vv)
+	}
+}
+
 func (self *LoginController) doLogin(username, password string, explicit bool) bool {
 	startIprecordCleaner()
-	ip, _, _ := net.SplitHostPort(self.Ctx.Request.RemoteAddr)
-	if v, ok := ipRecord.Load(ip); ok {
-		vv := v.(*record)
-		if (time.Now().Unix() - vv.lastLoginTime.Unix()) >= 60 {
-			vv.hasLoginFailTimes = 0
-		}
-		if vv.hasLoginFailTimes >= 10 {
-			return false
-		}
+	ip := self.loginIP()
+	if self.loginBlocked(ip) {
+		return false
 	}
 	var auth bool
 	if common.VerifyPassword(beego.AppConfig.String("web_password"), password) && username == beego.AppConfig.String("web_username") {
-		self.SetSession("isAdmin", true)
-		self.DelSession("clientId")
-		self.DelSession("username")
+		self.establishAdminSession()
 		auth = true
 		// 存量明文管理员密码：首次成功登录后原地迁移为 bcrypt（F2-3）
 		migrateAdminPasswordToBcrypt(password)
-		server.Bridge.Register.Store(common.GetIpByAddr(self.Ctx.Input.IP()), time.Now().Add(time.Hour*time.Duration(2)))
 	}
 	b, err := beego.AppConfig.Bool("allow_user_login")
 	if err == nil && b && !auth {
@@ -127,19 +171,10 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 		})
 	}
 	if auth {
-		// 会话固定防护：登录成功后重建会话 ID（F2-5a），数据由 beego 迁移保留
-		self.SessionRegenerateID()
-		self.SetSession("auth", true)
-		ipRecord.Delete(ip)
+		self.finishLogin(ip)
 		return true
-
 	}
-	if v, load := ipRecord.LoadOrStore(ip, &record{hasLoginFailTimes: 1, lastLoginTime: time.Now()}); load && explicit {
-		vv := v.(*record)
-		vv.lastLoginTime = time.Now()
-		vv.hasLoginFailTimes += 1
-		ipRecord.Store(ip, vv)
-	}
+	self.recordLoginFailure(ip, explicit)
 	return false
 }
 func (self *LoginController) Register() {
