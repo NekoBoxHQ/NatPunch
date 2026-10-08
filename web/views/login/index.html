@@ -60,6 +60,20 @@
         box-shadow: none !important;
         color: #333 !important;
     }
+    /* GitHub 登录按钮：图标 + 文字一行居中。
+       图标走内联 SVG —— 本项目只带了 Font Awesome 的 solid 字体（没有 brands），fa-github 用不了，
+       而加载新字体/图标库又是不必要的外部依赖。 */
+    .github-login-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 40px;
+        font-size: 15px;
+    }
+    .github-login-btn svg {
+        flex: 0 0 auto;
+    }
 </style>
 
 <body>
@@ -81,6 +95,9 @@
                 <div class="text-center" style="margin-bottom:14px;">
                     <img src="{{.web_base_url}}/static/img/nekobox.png" alt="NatPunch" style="width:64px;height:64px;">
                 </div>
+                {{if .oauth_error}}
+                    <div id="oauthError" data-msg="{{.oauth_error}}" style="display:none;"></div>
+                {{end}}
                 <form class="m-t" onsubmit="return false">
                     <div class="form-group">
                         <input name="username" class="form-control input-lg" placeholder="username" required=""
@@ -101,8 +118,12 @@
                             langtag="word-login" style="height:48px;font-size:17px;"></button>
                     {{if eq true .github_oauth_enable}}
                         <p class="text-muted text-center" style="margin:6px 0;"><small langtag="word-or"></small></p>
-                        <a class="btn btn-sm btn-white btn-block" href="{{.web_base_url}}/login/github"
-                           langtag="word-github-login"></a>
+                        <a class="btn btn-sm btn-white btn-block github-login-btn" href="{{.web_base_url}}/login/github">
+                            <!-- GitHub 图标：官方 octicon mark-github-16（16x16，取自 @primer/octicons），
+                                 内联在这里是为了不引入字体图标库或外部资源依赖。 -->
+                            <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"></path></svg>
+                            <span langtag="word-github-login"></span>
+                        </a>
                     {{end}}
                     {{if eq true .register_allow}}
                         <p class="text-muted text-center"><small langtag="info-noaccount"></small></p>
@@ -144,11 +165,13 @@
         return false
     }
 
-    // GitHub OAuth 回调失败时服务端带回来的原因（服务器固定文案），仅作提示。
-    // 用 alert 展示纯文本，不写进 DOM —— 即使有人伪造这个参数也执行不了脚本。
+    // GitHub 登录失败的原因：服务端按错误码查表得出文案，渲染在 #oauthError 的 data-msg 上。
+    // 刻意**不**在这里读 URL 上的 oauth_error —— 那等于让人能在真登录页上弹出任意文字
+    // （/login/index?oauth_error=账号已停用…），是个社会工程载荷。表里没有的码服务端给空串，
+    // 这个 div 就整个不会被渲染，也就不会弹任何东西。
     (function () {
-        var m = window.location.search.match(/[?&]oauth_error=([^&]*)/)
-        if (m) { alert(decodeURIComponent(m[1])) }
+        var el = document.getElementById('oauthError')
+        if (el && el.getAttribute('data-msg')) { alert(el.getAttribute('data-msg')) }
     })()
 </script>
 </body>

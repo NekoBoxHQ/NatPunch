@@ -114,13 +114,17 @@ func (self *LoginController) githubRedirectURI(configured string) string {
 	return self.githubRequestScheme() + "://" + self.Ctx.Request.Host + base + "/login/github/callback"
 }
 
-// githubRequestScheme 面板对外的协议：反代终结 TLS 时以反代声明的协议为准。
+// githubRequestScheme 面板对外的协议。
+//
+// 先看 web_open_ssl：面板自身就在跑 HTTPS 时协议已然确定，不该让请求头（客户端可控）
+// 把它降级成 http —— 那会让 state Cookie 丢掉 Secure 标记。
+// 再回退到 X-Forwarded-Proto：反代终结 TLS、面板自身不开 TLS 的场景靠它。
 func (self *LoginController) githubRequestScheme() string {
-	if proto := self.Ctx.Request.Header.Get("X-Forwarded-Proto"); proto != "" {
-		return proto
-	}
 	if beego.AppConfig.String("web_open_ssl") == "true" {
 		return "https"
+	}
+	if proto := self.Ctx.Request.Header.Get("X-Forwarded-Proto"); proto != "" {
+		return proto
 	}
 	return "http"
 }
@@ -173,7 +177,7 @@ func (self *LoginController) GithubLogin() {
 	state, err := githubRandomState()
 	if err != nil {
 		logs.Error("GitHub 登录：生成 state 失败 %v", err)
-		self.failGithubLogin("登录初始化失败，请重试")
+		self.failGithubLogin("init")
 		return
 	}
 	// state 存进一次性 Cookie，回调时比对（单次有效，回调里取完即清）
@@ -204,7 +208,7 @@ func (self *LoginController) GithubCallback() {
 	ip := self.loginIP()
 	if self.loginBlocked(ip) {
 		logs.Warn("GitHub 登录：该 IP 失败次数过多，拒绝，客户端 IP [%s]", ip)
-		self.failGithubLogin("尝试次数过多，请稍后再试")
+		self.failGithubLogin("rate")
 		return
 	}
 
@@ -215,21 +219,21 @@ func (self *LoginController) GithubCallback() {
 	if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(want), []byte(got)) != 1 {
 		self.recordLoginFailure(ip, true)
 		logs.Warn("GitHub 登录：state 校验失败，客户端 IP [%s]", ip)
-		self.failGithubLogin("登录校验失败，请重新发起登录")
+		self.failGithubLogin("state")
 		return
 	}
 
 	if e := self.GetString("error"); e != "" {
 		// 用户在授权页点了取消，算正常流程，不计失败次数
 		logs.Info("GitHub 登录：授权未完成（%s），客户端 IP [%s]", e, ip)
-		self.failGithubLogin("已取消 GitHub 授权")
+		self.failGithubLogin("denied")
 		return
 	}
 	code := self.GetString("code")
 	if code == "" {
 		self.recordLoginFailure(ip, true)
 		logs.Warn("GitHub 登录：回调缺少 code，客户端 IP [%s]", ip)
-		self.failGithubLogin("GitHub 未返回授权码")
+		self.failGithubLogin("nocode")
 		return
 	}
 
@@ -238,21 +242,21 @@ func (self *LoginController) GithubCallback() {
 		// 不打印 code / token / 响应体（可能含凭据）
 		self.recordLoginFailure(ip, true)
 		logs.Error("GitHub 登录：换取 access_token 失败 %v，客户端 IP [%s]", err, ip)
-		self.failGithubLogin("GitHub 授权校验失败，请重新登录")
+		self.failGithubLogin("token")
 		return
 	}
 	user, err := githubFetchUser(token)
 	if err != nil {
 		self.recordLoginFailure(ip, true)
 		logs.Error("GitHub 登录：读取用户信息失败 %v，客户端 IP [%s]", err, ip)
-		self.failGithubLogin("读取 GitHub 账号信息失败，请重新登录")
+		self.failGithubLogin("user")
 		return
 	}
 
 	if !githubIsAdmin(user.Login, adminLogins) {
 		self.recordLoginFailure(ip, true)
 		logs.Warn("GitHub 登录：账号 [%s] (id %d) 不在管理员白名单，拒绝，客户端 IP [%s]", user.Login, user.Id, ip)
-		self.failGithubLogin("该 GitHub 账号没有管理员权限")
+		self.failGithubLogin("notadmin")
 		return
 	}
 
@@ -264,10 +268,37 @@ func (self *LoginController) GithubCallback() {
 	self.Redirect(webBaseUrl+"/index/index", 302)
 }
 
-// failGithubLogin 带固定文案回登录页，由登录页 JS 用 alert 展示。
-// 文案全部由服务端常量给出，绝不回显回调里的任意文本（否则等于开了个反射口子）。
-func (self *LoginController) failGithubLogin(msg string) {
-	self.Redirect(beego.AppConfig.String("web_base_url")+"/login/index?oauth_error="+url.QueryEscape(msg), 302)
+// failGithubLogin 带**错误码**回登录页，文案由 Index 按码查表（githubOAuthErrorText）得出。
+//
+// 为什么不直接把文案塞进 URL：那样任何人都能构造
+// https://<面板>/login/index?oauth_error=<任意文本>，在**真登录页**上弹出他想要的文字
+// （比如"账号已停用，请联系管理员"）。纯文本、不进 DOM、无 XSS，但一个能在真域名登录页上
+// 弹自定义提示的入口就是社会工程载荷 —— 改成错误码后，表里没有的码一律丢弃。
+func (self *LoginController) failGithubLogin(code string) {
+	self.Redirect(beego.AppConfig.String("web_base_url")+"/login/index?oauth_error="+url.QueryEscape(code), 302)
+}
+
+// githubOAuthErrorText 错误码 → 固定文案。只认这张表，其余（含空串）一律返回空串。
+func githubOAuthErrorText(code string) string {
+	switch code {
+	case "rate":
+		return "尝试次数过多，请稍后再试"
+	case "init":
+		return "登录初始化失败，请重试"
+	case "state":
+		return "登录校验失败，请重新发起登录"
+	case "denied":
+		return "已取消 GitHub 授权"
+	case "nocode":
+		return "GitHub 未返回授权码"
+	case "token":
+		return "GitHub 授权校验失败，请重新登录"
+	case "user":
+		return "读取 GitHub 账号信息失败，请重新登录"
+	case "notadmin":
+		return "该 GitHub 账号没有管理员权限"
+	}
+	return ""
 }
 
 // githubAccessToken 用授权码换 access_token。

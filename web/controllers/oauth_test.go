@@ -38,6 +38,39 @@ func TestGithubIsAdminIsExactMatchOnly(t *testing.T) {
 	}
 }
 
+// 这条钉的是 v26.10.46 留给 v26.10.47 修的一个社会工程载荷：
+// 失败文案当时直接放在回跳 URL 上，于是任何人都能用
+// /login/index?oauth_error=<任意文本> 在**真登录页**上弹出他想要的文字。
+// 修法是文案只认一张表 —— 表外的输入必须得到空串，页面才不会显示任何东西。
+func TestGithubOAuthErrorTextOnlyKnowsItsTable(t *testing.T) {
+	for _, code := range []string{
+		"",             // 没带参数
+		"unknown",      // 不认识的码
+		"账号已停用，请联系管理员", // 想借 URL 回显的任意文本
+		"<img src=x onerror=alert(1)>",
+		"state ", // 多一个空格也算不认识（不做宽松匹配）
+		"STATE",
+	} {
+		if got := githubOAuthErrorText(code); got != "" {
+			t.Errorf("githubOAuthErrorText(%q) = %q, want 空串 —— 表外的输入不许产出任何文案", code, got)
+		}
+	}
+
+	// 每个码都要有文案，且两两不同（防复制粘贴写重）
+	seen := map[string]string{}
+	for _, code := range []string{"rate", "init", "state", "denied", "nocode", "token", "user", "notadmin"} {
+		msg := githubOAuthErrorText(code)
+		if msg == "" {
+			t.Errorf("错误码 %q 没有对应文案", code)
+			continue
+		}
+		if prev, dup := seen[msg]; dup {
+			t.Errorf("错误码 %q 与 %q 的文案重复：%q", code, prev, msg)
+		}
+		seen[msg] = code
+	}
+}
+
 // state 是 CSRF / 授权码注入的唯一防线，必须来自 crypto/rand 且足够长。
 func TestGithubRandomStateIsRandomHex(t *testing.T) {
 	seen := make(map[string]bool, 64)

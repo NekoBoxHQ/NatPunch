@@ -48,6 +48,9 @@ func (self *LoginController) Index() {
 	// GitHub 登录按钮只在配置齐备时才出现（配置不全时 githubOAuthConf 返回 false）
 	githubOAuthEnable, _, _, _, _ := githubOAuthConf()
 	self.Data["github_oauth_enable"] = githubOAuthEnable
+	// GitHub 登录失败回跳携带的是错误码，文案在这里按码查表得出。
+	// 表里没有的码（包括有人在 URL 上塞的任意文本）一律得到空串，页面就不会显示任何东西。
+	self.Data["oauth_error"] = githubOAuthErrorText(self.GetString("oauth_error"))
 	self.Data["version"] = version.VERSION
 	self.TplName = "login/index.html"
 }

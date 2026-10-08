@@ -2,6 +2,38 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.47（已发布）
+
+### 修复
+
+- **登录页的 GitHub 登录失败提示不再回显 URL 上的任意文本**（v26.10.46 引入的问题）。
+
+  v26.10.46 把失败原因直接放进回跳地址（`/login/index?oauth_error=<文案>`），再由登录页 JS
+  `alert` 出来。虽然只是纯文本（不进 DOM、无 XSS），但任何人构造
+  `https://<面板>/login/index?oauth_error=账号已停用，请联系管理员`，都能在**真登录页**上弹出
+  他想要的文字 —— 一个能在真域名登录页上弹自定义提示的入口，就是社会工程载荷。
+
+  现在跳转只带**错误码**（`state` / `denied` / `nocode` / `token` / `user` / `notadmin` /
+  `rate` / `init`），文案由服务端 `githubOAuthErrorText` 按码查表得出、渲染进 `#oauthError`
+  的 `data-msg`；表里没有的码一律得到空串，该元素整个不渲染，也就什么都弹不出来。
+  `web/controllers/oauth_test.go` 里钉住了「表外输入必须产出空串」。
+
+### 优化
+
+- **登录按钮加上 GitHub 图标**（官方 octicon `mark-github-16`，内联 SVG），对齐官方按钮样式。
+  走内联而不是字体图标：本项目只带了 Font Awesome 的 solid 字体（没有 brands），`fa-github`
+  用不了，而为此再引一套字体/图标库是不必要的外部依赖。
+  另外 `langtag` 必须留在内层 `<span>` 上 —— `language.js` 是用 `.text()` 覆盖 langtag 元素的
+  全部内容，挂在 `<a>` 上会把图标一起抹掉。
+- **`githubRequestScheme` 改为以 `web_open_ssl` 为准，再回退 `X-Forwarded-Proto`**。
+  请求头是客户端可控的，不该让它把已经确定的 https 降级成 http（那样 state Cookie 会丢掉
+  `Secure` 标记）。反代终结 TLS、面板自身不开 TLS 的场景行为不变。
+
+### 变更
+
+- 本版由 `feature/github-oauth-login` 合并进 master 后发布（v26.10.46 是从分支直接打的 tag），
+  GitHub 登录功能自本版起以 master 为基线。
+
 ## v26.10.46（已发布）
 
 ### 新增
