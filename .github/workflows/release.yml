@@ -32,6 +32,7 @@ jobs:
           sh -n install_server.sh
           sh -n uninstall_client.sh
           sh -n test/config_keys_test.sh
+          sh -n test/checker_anchors_test.sh
 
       - name: Shell logic self-test
         # uninstall_client.sh 是升级路径（会停掉客户端再拉起来），出错时是
@@ -45,6 +46,15 @@ jobs:
         # AppConfig 读取（tls_enable），导致服务端永远不开 TLS 桥接、面板也不再下发
         # 证书指纹 —— 编译得过、CI 全绿，功能静默失效。见 test/config_keys_test.sh。
         run: sh test/config_keys_test.sh
+
+      - name: Checker trust anchors reconciliation
+        # install.sh / install_server.sh / uninstall_client.sh 里内嵌的 MSC_SHA256_* 是
+        # 目标机上校验「下载到的静态签名校验器」的信任根。它们是对工具链敏感的常量：
+        # 换 Go 版本 → minisign-check 哈希变 → 锚点失效。release 阶段的守卫只在打完 tag、
+        # 8 组构建全部跑完之后才报这个错（v26.10.49 因此白烧一轮 CI，且错误出现在发布环节，
+        # 容易被误读成"包有问题"）。这里用同一套构建参数在普通推送的 check 里先对一遍账，
+        # 把这类失败拦在打 tag 之前。见 test/checker_anchors_test.sh。
+        run: sh test/checker_anchors_test.sh
 
       - name: Unit tests (exclude integration)
         run: go test ./...
