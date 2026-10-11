@@ -30,7 +30,7 @@ NatPunch 面向**合法运维场景**：仅允许用于部署方拥有或经明�
 
 Web 管理面板，实时查看设备状态、隧道、流量与系统资源：
 
-![NatPunch 管理面板](docs/panel.png)
+![NatPunch 管理面板](docs/panel-2026-10-11.png)
 
 ## 部署
 
