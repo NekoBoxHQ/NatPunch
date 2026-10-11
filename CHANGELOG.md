@@ -2,6 +2,24 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v26.10.48（已发布）
+
+### 变更
+
+- **面板 logo 换图并改名**：`web/static/img/nekobox.png` → `web/static/img/natpunch-logo.png`。
+
+  `nekobox` 是沿用上游时期的旧文件名，而面板现在叫 NatPunch。新图 1024×1024 RGBA、
+  四角透明、19.6KB（旧图 512×512 / 218KB），4 处引用同步更新（登录页的 `rel=icon` 与
+  页面中间 64×64 图标、注册页 `rel=icon`、面板 `rel=icon`）。`test/config_keys_test.sh`
+  的静态资源对账能兜住这类改漏（引用改名而文件没跟上会直接失败）。
+
+  改名顺带解决了另一个问题：**同名替换的图片会被浏览器/CDN 按 URL 缓存**，favicon 尤其
+  顽固（GitHub 的 camo 同理会缓存自述里的图）。换成新文件名后 URL 变了，缓存自然失效。
+
+  升级到本版后 `web/` 目录会被整体替换（`install_server.sh` 的升级分支是 `rm -rf` 后
+  重新拷贝），logo 随包更新、无需手工操作；反之，在服务器上手工放的同名文件在升级后
+  会被包内版本覆盖。
+
 ## v26.10.47（已发布）
 
 ### 修复
