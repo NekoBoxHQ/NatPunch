@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -533,97 +532,147 @@ func ipFromAddr(addr net.Addr) net.IP {
 }
 
 // GetLocalIPs returns IPv4 addresses useful for identifying the natpunch-client host.
-// Prefers the local IP of conn (path toward natpunch). Falls back to the outbound
-// interface and finally an interface scan.
-// The connection path and outbound interface IPs are trusted as-is (only
-// loopback/link-local/etc. excluded), so non-standard private ranges such as
-// 192.169.0.0/16 are kept; the interface scan keeps RFC1918-only filtering.
+// GetLocalIPs 返回最能代表这台设备"内网地址"的一个 IPv4（面板上「内网」那一栏显示的就是它）。
+//
+// 采集到的事实交给 selectLocalIP 做选择，规则见那里的注释。这里只负责取数据：
+//   - 通往 natpunch 服务端的本地地址（连接本端 + 出网本端）——即"WAN 腿"上的地址；
+//   - 本机 up 且非 loopback 接口上的全部 IPv4。
+//
+// 曾经的实现是"连接本端只要不是公网 IP 就直接上报"，在 PC 直连场景下对，
+// 但软路由 WAN 用 DHCP/上联光猫时 WAN 口本身就是私网（如 192.168.1.4），
+// 于是把 WAN 口当成了内网（v26.10.50 及更早）。现在改为先排除 WAN 腿再找 LAN。
 func GetLocalIPs(conn net.Conn) string {
-	seen := make(map[string]struct{})
-	ips := make([]string, 0, 4)
-
-	add := func(ip net.IP, privateOnly bool) {
-		if privateOnly {
-			if !isUsefulPrivateIPv4(ip) {
-				return
-			}
-		} else if !isUsefulLocalIPv4(ip) {
-			return
-		}
-		s := ip.To4().String()
-		if _, ok := seen[s]; ok {
-			return
-		}
-		seen[s] = struct{}{}
-		ips = append(ips, s)
-	}
-
-	// 1) Local endpoint of the bridge connection — usually the real LAN IP used to reach natpunch.
-	//    仅接受内网地址；有公网 IP 的设备连接源是公网出口，不属于内网地址，跳过继续找。
+	var pathIPs []net.IP
 	if conn != nil {
 		if ip := ipFromAddr(conn.LocalAddr()); ip != nil && isUsefulLocalIPv4(ip) && !IsPublicIP(ip) {
-			add(ip, false)
-			// One correct path IP is enough for most hosts (avoids docker/vm junk alongside).
-			if len(ips) > 0 {
-				return ips[0]
-			}
+			pathIPs = append(pathIPs, ip.To4())
 		}
 	}
-
-	// 2) Outbound interface toward the internet (same idea as GetLocalUdpAddr).
+	// 出网接口（向公网地址 UDP 拨号，不会真的发包）——与上面同一个思路
 	if tmp, err := net.Dial("udp", "114.114.114.114:53"); err == nil {
 		ip := ipFromAddr(tmp.LocalAddr())
 		_ = tmp.Close()
 		if ip != nil && isUsefulLocalIPv4(ip) && !IsPublicIP(ip) {
-			add(ip, false)
-			if len(ips) > 0 {
-				return ips[0]
-			}
+			pathIPs = append(pathIPs, ip.To4())
 		}
 	}
 
-	// 3) Fallback: first usable private IPv4 from up interfaces.
-	//    只上报一个主内网地址，优先 192.168.0.0/16（家用主 LAN 最常用），
-	//    避免 guest/docker 等多网段地址一并上报。
-	lanIP := ""
-	ifaces, err := net.Interfaces()
-	if err == nil {
+	var addrs []ifaceAddr
+	if ifaces, err := net.Interfaces(); err == nil {
 		for _, iface := range ifaces {
 			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 				continue
 			}
-			addrs, err := iface.Addrs()
+			list, err := iface.Addrs()
 			if err != nil {
 				continue
 			}
-			for _, address := range addrs {
+			for _, address := range list {
 				ipnet, ok := address.(*net.IPNet)
 				if !ok {
 					continue
 				}
-				v4 := ipnet.IP.To4()
-				if v4 == nil || !isUsefulPrivateIPv4(v4) {
-					continue
-				}
-				if lanIP == "" {
-					lanIP = v4.String()
-				}
-				if v4[0] == 192 && v4[1] == 168 {
-					lanIP = v4.String()
-					goto lanFound
+				if v4 := ipnet.IP.To4(); v4 != nil {
+					addrs = append(addrs, ifaceAddr{name: iface.Name, ip: v4})
 				}
 			}
 		}
 	}
-lanFound:
-	if lanIP != "" {
-		ips = append(ips, lanIP)
+
+	if ip := selectLocalIP(pathIPs, addrs); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+// ifaceAddr：某个接口上的一个 IPv4（只为把选择逻辑做成可单测的纯函数）
+type ifaceAddr struct {
+	name string
+	ip   net.IP
+}
+
+// selectLocalIP 从本机地址里挑出要上报的"内网地址"。
+//
+// 顺序（每一步都有对应单测）：
+//  1. 先把"承载 pathIPs 的接口"标成 WAN 腿，它的地址**不作为 LAN 候选** ——
+//     软路由 DHCP 模式（WAN 上联光猫/上级路由）下 WAN 自己就是私网，不排除就会把
+//     WAN 口当成内网（就是这次要修的现象）。
+//  2. 在剩下的接口里挑 RFC1918 地址，跳过 docker/veth/vEthernet 之类虚拟网卡，
+//     优先级 192.168.0.0/16 > 10.0.0.0/8 > 172.16.0.0/12（家用主 LAN 最常见 192.168.x）。
+//  3. 没有独立 LAN（PC 直连、单网卡）→ 回落到 path 地址本身，保住原有正确行为。
+//  4. 最后兜底：任何可用的 RFC1918 地址（含虚拟网卡），保证不至于什么都不报。
+func selectLocalIP(pathIPs []net.IP, addrs []ifaceAddr) net.IP {
+	wan := make(map[string]struct{})
+	for _, a := range addrs {
+		for _, p := range pathIPs {
+			if p != nil && p.Equal(a.ip) {
+				wan[a.name] = struct{}{}
+			}
+		}
 	}
 
-	if len(ips) > 1 {
-		sort.Strings(ips)
+	var best net.IP
+	bestRank := 0
+	for _, a := range addrs {
+		if _, isWan := wan[a.name]; isWan {
+			continue
+		}
+		if !isUsefulPrivateIPv4(a.ip) || isVirtualIface(a.name) {
+			continue
+		}
+		if r := lanRank(a.ip); r > bestRank {
+			best, bestRank = a.ip, r
+		}
 	}
-	return strings.Join(ips, ",")
+	if best != nil {
+		return best
+	}
+
+	for _, p := range pathIPs {
+		if p != nil {
+			return p
+		}
+	}
+	for _, a := range addrs {
+		if isUsefulPrivateIPv4(a.ip) {
+			return a.ip
+		}
+	}
+	return nil
+}
+
+// lanRank 越大越优先：192.168.x 最像家用主 LAN
+func lanRank(ip net.IP) int {
+	v4 := ip.To4()
+	if v4 == nil {
+		return 0
+	}
+	switch {
+	case v4[0] == 192 && v4[1] == 168:
+		return 3
+	case v4[0] == 10:
+		return 2
+	default: // 172.16.0.0/12
+		return 1
+	}
+}
+
+// isVirtualIface 判断是不是虚拟网卡：docker0 / veth* / vEthernet / vmnet* 这些上面的
+// 私网地址不是这台设备真正的局域网地址，挑 LAN 时要跳过。
+//
+// 注意**别误伤 OpenWrt 的 LAN 桥 `br-lan`**：这里只匹配具体前缀，不匹配裸 "br"。
+func isVirtualIface(name string) bool {
+	n := strings.ToLower(name)
+	for _, p := range []string{
+		"docker", "veth", "virbr", "vmnet", "vbox", "vethernet", "hyper-v",
+		"wsl", "virtual", "vnic", "tun", "tap", "wg", "zt", "tailscale",
+		"utun", "isatap", "teredo", "bluetooth", "hamachi", "radmin",
+	} {
+		if strings.HasPrefix(n, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func IsPublicIP(IP net.IP) bool {
