@@ -151,6 +151,17 @@
 
         $('#cmd_count').text(cmds.length + ' 条命令');
 
+        // hidden 是**按命令文本**匹配的旧机制，且当前版本没有任何地方写它 ——
+        // 老版本留下的残留（如 "ip a"）会让后来新增的同名命令一起隐身，
+        // 而界面上又没有恢复入口（有人就这么被吞掉两条命令）。
+        // 这里给一个显眼的恢复入口，hidden 非空才出现。
+        var hiddenTip = '';
+        if (hidden.length > 0) {
+            hiddenTip = '<div style="font-size:11px;color:#888;padding:6px 4px;">有 ' + hidden.length + ' 条命令被隐藏　'
+                + '<button type="button" id="cmd_unhide" style="border:none;background:transparent;color:#23c6c8;cursor:pointer;font-size:11px;padding:0;text-decoration:underline;">全部恢复</button>'
+                + '</div>';
+        }
+
         var html = '';
         for (var k = 0; k < cmds.length; k++) {
             var c = cmds[k].c, idx = cmds[k].idx;
@@ -160,7 +171,7 @@
                 + '<button type="button" class="cmd-del" data-idx="' + idx + '" onclick="npCmdDel(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;padding:6px 6px;line-height:1;" title="删除">×</button>'
                 + '</div>';
         }
-        $('#cmd_list').html(html);
+        $('#cmd_list').html(html + hiddenTip);
     }
 
     // 按下标取用户真正点中的那一条。读属性一律用 .attr()：
@@ -225,6 +236,12 @@
         var cmd = $('#cmd_modal_cmd').val().trim();
         if (!cmd) { return; }
         if (!label) { label = cmd.split(' ')[0]; }
+        // 显式保存 = 我要它出现在列表里：把同名命令从 hidden 里解除。
+        // （hidden 按命令文本匹配，不清掉的话"存了也白存"——旧残留就是这么吞命令的。）
+        var hiddenList = getHidden();
+        for (var h = hiddenList.length - 1; h >= 0; h--) {
+            if (hiddenList[h] === cmd) { hiddenList.splice(h, 1); }
+        }
         var customs = getCustoms();
         if (editingIdx >= 0 && editingIdx < customs.length) {
             // 编辑：直接改用户点中的那一条（原来看的是"cmd 文本相同的第一条"）
@@ -244,6 +261,15 @@
         closeModal();
         renderCmdPanel();
     }
+
+    // 恢复被隐藏的命令：hidden 是旧版面板留下的机制（当前版本没有任何地方写它，
+    // 只有读），残留会让同名命令永久隐身。给一个一键清空的出口。
+    // 走委托（#cmd_list 里的按钮是每次渲染重建的），且**不**在内联 onclick 里再挂一遍。
+    $('#cmd_list').on('click', '#cmd_unhide', function () {
+        SERVER_CMDS.hidden = [];
+        saveCmds();
+        renderCmdPanel();
+    });
 
     $('#cmd_add').on('click', function () { openModalAdd(); });
     $('#cmd_modal_close').on('click', closeModal);
