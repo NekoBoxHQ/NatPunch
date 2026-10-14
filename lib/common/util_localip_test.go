@@ -58,6 +58,23 @@ func TestSelectLocalIP(t *testing.T) {
 			want:  "192.168.100.1",
 		},
 		{
+			name: "真实软路由（iStoreOS）：客户端连接被代理走 TUN，路径地址不是任何网卡 → 靠 br-lan 判出 LAN",
+			path: nil,
+			addrs: []string{
+				"eth0", "192.168.1.4", // WAN（上联光猫）
+				"br-lan", "192.168.100.1", // LAN
+				"Meta", "198.18.0.1", // 代理 TUN（非 RFC1918）
+				"docker0", "172.17.0.1", // 虚拟网卡
+			},
+			want: "192.168.100.1",
+		},
+		{
+			name:  "WAN 也是桥（br-wan）时，靠排除路径接口选出 br-lan",
+			path:  []string{"192.168.2.1"},
+			addrs: []string{"br-wan", "192.168.2.1", "br-lan", "192.168.100.1"},
+			want:  "192.168.100.1",
+		},
+		{
 			name:  "PC 直连单网卡：没有独立 LAN → 回落路径地址",
 			path:  []string{"192.168.1.5"},
 			addrs: []string{"Ethernet", "192.168.1.5"},

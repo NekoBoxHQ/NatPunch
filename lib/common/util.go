@@ -620,7 +620,15 @@ func selectLocalIP(pathIPs []net.IP, addrs []ifaceAddr) net.IP {
 		if !isUsefulPrivateIPv4(a.ip) || isVirtualIface(a.name) {
 			continue
 		}
-		if r := lanRank(a.ip); r > bestRank {
+		r := lanRank(a.ip)
+		if r > 0 && isBridgeIface(a.name) {
+			// 软路由上"桥"比物理口更像 LAN（OpenWrt/iStoreOS 的 br-lan）。
+			// 这一条是给"排除 WAN 腿"失效时兜底的：例如客户端连接被代理走 TUN
+			// （路径地址是 198.18.x 这类非私网地址，被当作公网丢弃）时，
+			// eth0(WAN) 与 br-lan(LAN) 同为 192.168.x 会打成平局，靠它才能选中 LAN。
+			r += 10
+		}
+		if r > bestRank {
 			best, bestRank = a.ip, r
 		}
 	}
@@ -671,6 +679,21 @@ func isVirtualIface(name string) bool {
 		if strings.HasPrefix(n, p) {
 			return true
 		}
+	}
+	return false
+}
+
+// isBridgeIface 判断是不是 Linux 网桥（OpenWrt / iStoreOS 的 LAN 常是 `br-lan`）。
+//
+// 只认 `br-xxx` 与 `brN` 两种写法，避免把 Windows 上以 "br" 开头的物理网卡名
+// （如 "Broadcom ..."）误判成桥。
+func isBridgeIface(name string) bool {
+	n := strings.ToLower(name)
+	if strings.HasPrefix(n, "br-") {
+		return true
+	}
+	if len(n) >= 3 && n[0] == 'b' && n[1] == 'r' && n[2] >= '0' && n[2] <= '9' {
+		return true
 	}
 	return false
 }
