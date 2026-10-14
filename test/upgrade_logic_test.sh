@@ -66,6 +66,17 @@ else
         "" "没有可识别 tag 时输出空（调用方会回退 latest 并告警）"
     chk "$(printf '[{"tag_name":"v26.10.0"},{"tag_name":"v26.9.999"}]' | pick_highest_version)" \
         "v26.10.0" "次版本优先于补丁号"
+
+    # atom 备路：api.github.com 被匿名限流（路由器出口 IP 常被限流）时走这条 ——
+    # 从 releases.atom 的 <title> 提出版本号，再复用同一套比较。
+    tf="$(extract_fn tags_from_atom)"
+    if [ -z "$tf" ]; then
+        bad "没能从 $SRC 抠出 tags_from_atom"
+    else
+        eval "$tf"
+        chk "$(printf '<title>Release notes from NatPunch</title>\n<title>v26.10.53</title>\n<title>v26.10.9</title>\n<title>v26.10.50</title>\n' | tags_from_atom | pick_highest_version)" \
+            "v26.10.53" "atom 备路：从 <title> 提版本号并挑最高（非标题行要忽略）"
+    fi
 fi
 
 # 三份实现必须一致。三个脚本各自独立下发（raw 一行 wget|sh），没法共享文件，

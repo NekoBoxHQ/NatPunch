@@ -80,6 +80,13 @@ fetch_to() {
 #   2) 不用 `sort -V`：busybox 的 sort 直到 1.32 才支持 -V，更老的 OpenWrt 上
 #      会静默退化成字典序，于是 v26.9.9 排在 v26.9.111 后面。这里自己按点分段
 #      做数值比较，任何 awk 都能跑。
+# 把 GitHub 的 releases.atom 正文转成 pick_highest_version 认识的 tag_name 形式。
+# 用途见下面更新逻辑里的"atom 备路"：api.github.com 对匿名请求有每小时配额，
+# 路由器出口 IP（常常是共享/CGNAT）很容易被限流，那时就靠这个不走 API 的入口拿版本号。
+tags_from_atom() {
+    sed -n 's#.*<title>\(v[0-9][0-9.]*\)</title>.*#{"tag_name":"\1"}#p'
+}
+
 pick_highest_version() {
     # 逐段做数值比较，不拼成一个大数字串去比 —— awk 的双精度只有 15~17 位
     # 有效数字，40 位的补零串一比就退化成"只看前几位"，v26.9.111 与 v26.9.120
@@ -295,6 +302,21 @@ do_update() {
             "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
     fi
     VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
+    # 备路：api.github.com 对匿名请求有每小时配额（60 次/IP），路由器出口 IP 常常是
+    # 共享的、很容易被限流 —— 限流时上面的请求会拿到 403 的 JSON 错误体，pick 出空值。
+    # releases.atom 是普通 HTTPS 页面、不吃 API 配额，把 <title>vX.Y.Z</title> 转成
+    # tag_name 形式后可以复用同一套"版本号最高"比较（不是 /releases/latest 的"发布最新"）。
+    if [ -z "$VER" ]; then
+        if [ "$HAS_WGET" -eq 1 ]; then
+            VER_LIST="$(wget -qO- --timeout=10 \
+                "https://github.com/$REPO/releases.atom" 2>/dev/null)"
+        else
+            VER_LIST="$(curl -fsSL --max-time 10 \
+                "https://github.com/$REPO/releases.atom" 2>/dev/null)"
+        fi
+        VER="$(printf '%s\n' "$VER_LIST" | tags_from_atom | pick_highest_version)"
+        [ -n "$VER" ] && log "目标版本（atom 备路）: $VER"
+    fi
     if [ -n "$VER" ]; then
         BASE_URL="https://github.com/$REPO/releases/download/$VER"
         log "目标版本: $VER"
