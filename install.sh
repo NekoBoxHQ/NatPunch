@@ -222,6 +222,14 @@ if [ -n "$VER" ]; then
 else
     BASE_URL="https://github.com/$REPO/releases/latest/download"
 fi
+# 可选：用镜像/自建源替换 GitHub 的下载地址（同 uninstall_client.sh 里的说明）。
+# GitHub 的 release 资产会 302 到 release-assets.githubusercontent.com，部分网络到
+# 这一步不通；把同样的文件放到自己的面板 /static/ 下即可绕开：
+#   export NP_BASE_URL="https://<面板地址>/static/natpunch"
+if [ -n "${NP_BASE_URL:-}" ]; then
+    BASE_URL="${NP_BASE_URL%/}"
+    log "使用指定下载源: $BASE_URL"
+fi
 URL="$BASE_URL/$PKG"
 log "下载 $PKG ..."
 mkdir -p "$TMP_DIR" || die "无法创建临时目录 $TMP_DIR"

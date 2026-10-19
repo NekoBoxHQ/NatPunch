@@ -324,6 +324,20 @@ do_update() {
         BASE_URL="https://github.com/$REPO/releases/latest/download"
         warn "无法确定最高版本号，回退到 releases/latest（可能不是最新版）"
     fi
+    # 可选：用镜像/自建源替换 GitHub 的下载地址。
+    # GitHub 的 release 资产会 302 到 release-assets.githubusercontent.com，部分网络
+    # （国内宽带、代理规则没覆盖新域名等）到这一步不通 —— 表现为「获取 SHA256SUMS 失败」
+    # 或下载长时间卡住，而 api.github.com / raw.githubusercontent.com 是通的。
+    #
+    # 用法（在被升级的机器上）：
+    #   export NP_BASE_URL="https://<面板地址>/static/natpunch"
+    # 该目录需包含：linux_<arch>_client.tar.gz、SHA256SUMS、SHA256SUMS.minisig，
+    # 以及 minisign-check-linux-<arch>（目标机没有 minisign 时会用它验签；
+    # 它自身仍受脚本内嵌的 MSC_SHA256_* 信任锚校验，被替换会直接失败）。
+    if [ -n "${NP_BASE_URL:-}" ]; then
+        BASE_URL="${NP_BASE_URL%/}"
+        log "使用指定下载源: $BASE_URL"
+    fi
     # 已经是最新版本就别动。升级 = 停客户端 → 断隧道 → 再拉起来，
     # 版本没变还走一遍，等于白给自己制造一次失联窗口。
     if [ -n "$VER" ]; then
