@@ -39,7 +39,7 @@ Web 管理面板，实时查看设备状态、隧道、流量与系统资源：
 SSH 粘贴执行，进入管理菜单后**输入 `1` 安装**，按提示设置端口与账号密码，安装完成后自动启动：
 
 ```shell
-sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"
+sh -c "$(wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"
 ```
 
 > 该脚本是交互式管理菜单（`1` 安装 / `5` 状态 / `6` 修改面板连接配置 / `8` 卸载等），并非执行即自动安装。服务端与客户端命名隔离（`natpunch` / `natpunch-client`），同机部署互不影响。
@@ -61,25 +61,25 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/i
 **卸载（Linux）**
 
 ```shell
-wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
+wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
 ```
 
 **更新（Linux）**
 
 ```shell
-wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
+wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
 ```
 
 **卸载（OpenWrt）**
 
 ```shell
-uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
+uclient-fetch -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
 ```
 
 **更新（OpenWrt）**
 
 ```shell
-uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
+uclient-fetch -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh -s update
 ```
 
 ## License
