@@ -391,108 +391,6 @@ fetch() {
         curl) curl -fsSL --max-time 10 "$1" 2>/dev/null ;;
     esac
 }
-
-# 从面板配置推导设备端应使用的下载地址（NP_BASE_URL 的值）——不写死域名。
-# 顺序：web_base_url（配置了就原样用）→ web_open_ssl + web_host + web_port；
-# web_host 是 0.0.0.0 / 127.0.0.1 / localhost / 示例值 a.o.com 时，回退到服务器主 IP。
-panel_base_url() {
-    _conf="$DIR/conf/natpunch.conf"
-    [ -f "$_conf" ] || return 0
-    _cfgval() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$_conf" | head -n1 | tr -d '\r' | sed 's/[[:space:]]*$//'; }
-
-    _raw=$(_cfgval web_base_url)
-    if [ -n "$_raw" ]; then
-        printf '%s' "${_raw%/}"
-        return 0
-    fi
-
-    _host=$(_cfgval web_host); _host=$(printf '%s' "$_host" | tr -d '[:space:]')
-    _port=$(_cfgval web_port); _port=$(printf '%s' "$_port" | tr -d '[:space:]')
-    _ssl=$(_cfgval web_open_ssl); _ssl=$(printf '%s' "$_ssl" | tr -d '[:space:]')
-    case "$_host" in
-        ""|0.0.0.0|127.0.0.1|localhost|a.o.com) _host="$(get_ip 2>/dev/null)" ;;
-    esac
-    [ -n "$_host" ] || return 0
-
-    if [ "$_ssl" = "true" ]; then
-        if [ -z "$_port" ] || [ "$_port" = "443" ]; then
-            printf 'https://%s' "$_host"
-        else
-            printf 'https://%s:%s' "$_host" "$_port"
-        fi
-    else
-        if [ -z "$_port" ] || [ "$_port" = "80" ]; then
-            printf 'http://%s' "$_host"
-        else
-            printf 'http://%s:%s' "$_host" "$_port"
-        fi
-    fi
-}
-
-# ---------- 镜像「客户端升级所需文件」到面板静态目录 ----------
-# 为什么：GitHub 的 release 资产会 302 到 release-assets.githubusercontent.com，
-# 部分网络（国内宽带 / 代理规则没覆盖新域名）下时通时断 —— 设备端升级客户端时表现为
-# 「获取 SHA256SUMS 失败」或下载长时间卡住。面板本身对这些设备可达，所以把同一组文件
-# 镜像到 $DIR/web/static/natpunch/，设备端可以：
-#   export NP_BASE_URL="https://<面板>/static/natpunch"
-# 再从面板下载（install.sh / uninstall_client.sh 都支持这个变量；面板静态目录是
-# 磁盘优先，放进去立即生效，不需要重启）。
-#
-# 这一步是**纯附加**：
-#   · 任何失败只 warn、永远 return 0 —— 不影响服务端安装/升级；
-#   · 设备端仍强制 SHA256 + minisign 校验（minisign-check 还要与脚本内嵌的
-#     MSC_SHA256_* 锚点一致），所以镜像损坏只会让升级被拒绝，不会降低安全性。
-mirror_client_payload() {
-    _ver="${1:-}"
-    [ -n "$_ver" ] || return 0
-    _dest="$DIR/web/static/natpunch"
-    _base="https://github.com/$REPO/releases/download/$_ver"
-    _tmp="${_dest}.tmp.$$"
-    rm -rf "$_tmp"
-    mkdir -p "$_tmp" || { warn "镜像跳过：无法创建 $_tmp"; return 0; }
-
-    dl "$_base/SHA256SUMS" "$_tmp/SHA256SUMS" || { warn "镜像跳过：SHA256SUMS 下载失败"; rm -rf "$_tmp"; return 0; }
-    dl "$_base/SHA256SUMS.minisig" "$_tmp/SHA256SUMS.minisig" >/dev/null 2>&1 || true
-
-    _files="linux_amd64_client.tar.gz linux_arm64_client.tar.gz linux_arm_client.tar.gz linux_mipsle_client.tar.gz minisign-check-linux-amd64 minisign-check-linux-arm64 minisign-check-linux-arm minisign-check-linux-mipsle"
-    for _f in $_files; do
-        dl "$_base/$_f" "$_tmp/$_f" || { warn "镜像跳过：下载 $_f 失败"; rm -rf "$_tmp"; return 0; }
-    done
-    dl "https://raw.githubusercontent.com/$REPO/master/install.sh" "$_tmp/install.sh" >/dev/null 2>&1 || true
-    dl "https://raw.githubusercontent.com/$REPO/master/uninstall_client.sh" "$_tmp/uninstall_client.sh" >/dev/null 2>&1 || true
-
-    # 逐文件比对清单里的 SHA256（防截断/损坏；签名由设备端强制校验）
-    for _f in $_files; do
-        _want=$(awk -v n="$_f" '{ gsub(/^\*/, "", $2) } $2==n {print $1; exit}' "$_tmp/SHA256SUMS")
-        if command -v sha256sum >/dev/null 2>&1; then
-            _got=$(sha256sum "$_tmp/$_f" | awk '{print $1}')
-        else
-            _got=$(shasum -a 256 "$_tmp/$_f" | awk '{print $1}')
-        fi
-        if [ -z "$_want" ] || [ "$_want" != "$_got" ]; then
-            warn "镜像跳过：$_f 哈希与清单不符"
-            rm -rf "$_tmp"
-            return 0
-        fi
-    done
-
-    rm -rf "$_dest"
-    if mv "$_tmp" "$_dest" 2>/dev/null; then
-        log "客户端升级镜像已更新: $_dest"
-        _panel=$(panel_base_url)
-        if [ -n "$_panel" ]; then
-            info "设备端升级可直接用以下命令（地址按面板配置自动生成）:"
-            printf '         export NP_BASE_URL="%s/static/natpunch"\n' "$_panel"
-            printf '         uclient-fetch -qO /tmp/np-update.sh "$NP_BASE_URL/uninstall_client.sh" && sh /tmp/np-update.sh update\n'
-        else
-            warn "未能从 $DIR/conf/natpunch.conf 推出面板地址；设备端请用 https://<面板>/static/natpunch"
-        fi
-    else
-        warn "镜像写入失败: $_dest"
-        rm -rf "$_tmp"
-    fi
-    return 0
-}
 # pick_highest_version：从 GitHub releases 的 JSON 里挑版本号最高的 tag。
 # 不用 `sort -V`：busybox 的 sort 直到 1.32 才支持 -V，更老的 OpenWrt 上会静默退化成
 # 字典序，v26.9.9 排到 v26.9.111 后面 → 升级反而降级。
@@ -686,8 +584,6 @@ upgrade() {
     # 升级成功后才清理旧备份（失败/回滚路径不清理，保证可回滚）
     cleanup_old_backups
     log "升级完成，当前版本: ${TARGET_VER:-最新版}"
-    # 顺手把客户端升级文件镜像到面板静态目录（附加步骤：失败只告警，不影响升级结果）
-    mirror_client_payload "${TARGET_VER:-${VER:-}}"
 }
 # ================= 备份清理 =================
 # 升级/改密会累积三类备份，每次升级成功、改密成功后只保留最新一份：
@@ -963,8 +859,6 @@ do_install() {
         kv "用户名" "$NEW_USER"
         kv "密码"   "$NEW_PASS"
         echo ""
-        # 顺手把客户端升级文件镜像到面板静态目录（附加步骤：失败只告警，不影响安装结果）
-        mirror_client_payload "${VER:-}"
     fi
 }
 do_start() {

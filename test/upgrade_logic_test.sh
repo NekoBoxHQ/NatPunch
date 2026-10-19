@@ -523,31 +523,6 @@ else
     bad "回滚成功后备份还留着 —— /tmp 会被一份 15MB 撑爆"
 fi
 
-echo "== 12. 面板地址自动推导（设备端 NP_BASE_URL 不写死域名） =="
-pbf="$(extract_fn panel_base_url install_server.sh)"
-if [ -z "$pbf" ]; then
-    bad "没能从 install_server.sh 抠出 panel_base_url"
-else
-    eval "$pbf"
-    get_ip() { printf '203.0.113.9'; }   # 测试桩：模拟服务器主 IP
-    _d=$(mktemp -d); mkdir -p "$_d/conf"
-    DIR="$_d"
-
-    printf 'web_base_url=https://panel.example.com:8443/\n' > "$_d/conf/natpunch.conf"
-    chk "$(panel_base_url)" "https://panel.example.com:8443" "优先用 web_base_url（去尾部斜杠）"
-
-    printf 'web_host=0.0.0.0\nweb_port=8443\nweb_open_ssl=true\n' > "$_d/conf/natpunch.conf"
-    chk "$(panel_base_url)" "https://203.0.113.9:8443" "监听 0.0.0.0 → 回退服务器 IP（https + 端口）"
-
-    printf 'web_host=1.2.3.4\nweb_port=80\nweb_open_ssl=false\n' > "$_d/conf/natpunch.conf"
-    chk "$(panel_base_url)" "http://1.2.3.4" "80 端口不显式拼接"
-
-    printf 'web_host=1.2.3.4\nweb_port=443\nweb_open_ssl=true\n' > "$_d/conf/natpunch.conf"
-    chk "$(panel_base_url)" "https://1.2.3.4" "443 端口不显式拼接"
-
-    rm -rf "$_d"
-fi
-
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"
