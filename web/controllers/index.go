@@ -294,6 +294,12 @@ func (s *IndexController) Edit() {
 			t.AccessPath = normAccessPath(s.getEscapeString("access_path"))
 			t.Https = s.GetBoolNoErr("https")
 			t.Remark = s.getEscapeString("remark")
+			// 目标地址：这里原来漏了 —— 编辑页提交了 target，但后端只更新 LocalProxy，
+			// 于是"改目标"永远不生效（表现为隧道只能删了重建）。
+			t.Target.TargetStr = s.getEscapeString("target")
+			// GetRandomTarget 会把 TargetStr 拆进 TargetArr 并缓存；改了字符串必须让缓存失效，
+			// 否则会继续用旧目标（负载均衡列表尤其明显）。
+			t.Target.TargetArr = nil
 			t.Target.LocalProxy = s.GetBoolNoErr("local_proxy")
 			if s.GetString("flow_inlet") != "" {
 				t.Flow.InletFlow = int64(s.GetIntNoErr("flow_inlet"))
@@ -302,8 +308,16 @@ func (s *IndexController) Edit() {
 				t.Flow.ExportFlow = int64(s.GetIntNoErr("flow_export"))
 			}
 			file.GetDb().UpdateTask(t)
-			server.StopServer(t.Id)
-			server.StartTask(t.Id)
+			if err := server.StopServer(t.Id); err != nil {
+				s.AjaxErr("已保存，但停止旧隧道失败: " + err.Error())
+				return
+			}
+			if err := server.StartTask(t.Id); err != nil {
+				// 配置存下去了，但新配置起不来（端口被占/目标参数不合法等）——
+				// 必须让用户看到，否则界面显示"修改成功"而隧道其实是停的。
+				s.AjaxErr("已保存，但按新配置启动失败: " + err.Error())
+				return
+			}
 		}
 		s.AjaxOk("modified success")
 	}
