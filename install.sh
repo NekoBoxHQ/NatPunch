@@ -153,20 +153,12 @@ HAS_CURL=0
 command -v wget >/dev/null 2>&1 && HAS_WGET=1
 command -v curl >/dev/null 2>&1 && HAS_CURL=1
 [ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 wget 或 curl"
-# GitHub 的 IPv6 路径在部分网络（国内宽带等）下不通，表现为下载"时好时坏"。
-# 下载器支持时强制 IPv4；老 busybox wget 没有 -4 选项时自动退回原命令。
-IPV4_ONLY=""
-if [ "$HAS_WGET" -eq 1 ]; then
-    wget --help 2>&1 | grep -q -- ' -4' && IPV4_ONLY="-4"
-elif [ "$HAS_CURL" -eq 1 ]; then
-    IPV4_ONLY="-4"
-fi
 fetch() {
     # fetch <url> <out>（带超时与重试，避免网络挂起阻塞安装）
     if [ "$HAS_WGET" -eq 1 ]; then
-        wget ${IPV4_ONLY:-} -q --timeout=30 --tries=2 -O "$2" "$1"
+        wget -q --timeout=30 --tries=2 -O "$2" "$1"
     else
-        curl ${IPV4_ONLY:-} -fsSL --max-time 60 --retry 2 -o "$2" "$1"
+        curl -fsSL --max-time 60 --retry 2 -o "$2" "$1"
     fi
 }
 # pick_highest_version：从 GitHub releases 的 JSON 里挑版本号最高的 tag。

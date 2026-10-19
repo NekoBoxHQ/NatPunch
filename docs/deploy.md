@@ -5,7 +5,7 @@
 ### 服务端（公网主机）
 
 ```shell
-sh -c "$(wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"
+sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install_server.sh)"
 ```
 
 进入管理菜单后输入 `1` 安装，**按提示设置面板端口、管理员用户名与密码**（密码强制输入，不允许空回车取默认值）。安装完成自动注册为系统服务并启动。
@@ -51,7 +51,7 @@ systemctl status natpunch-client # 客户端状态
 ### 客户端
 
 ```shell
-sh -c "$(wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh)" -s update
+sh -c "$(wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh)" -s update
 ```
 
 升级保留 `/etc/natpunch.conf` 配置，仅替换二进制并重启。**升级断连安全**：SSH 通过客户端隧道连接时，升级会先下载校验，再转后台执行（日志 `/tmp/natpunch_update.log`），断开 SSH 不影响升级完成。
@@ -61,9 +61,9 @@ sh -c "$(wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/maste
 ```shell
 # 服务端（脚本菜单 8）
 # 客户端 Linux
-wget -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
+wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
 # 客户端 OpenWrt
-uclient-fetch -4 -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
+uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_client.sh | sh
 ```
 
 ## 7. 生产部署建议

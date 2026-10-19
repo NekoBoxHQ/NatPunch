@@ -61,20 +61,12 @@ HAS_WGET=0; HAS_CURL=0
 command -v wget >/dev/null 2>&1 && HAS_WGET=1
 command -v curl >/dev/null 2>&1 && HAS_CURL=1
 [ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 wget 或 curl"
-# GitHub 的 IPv6 路径在部分网络（国内宽带等）下不通，表现为下载"时好时坏"。
-# 下载器支持时强制 IPv4；老 busybox wget 没有 -4 选项时自动退回原命令。
-IPV4_ONLY=""
-if [ "$HAS_WGET" -eq 1 ]; then
-    wget --help 2>&1 | grep -q -- ' -4' && IPV4_ONLY="-4"
-elif [ "$HAS_CURL" -eq 1 ]; then
-    IPV4_ONLY="-4"
-fi
 fetch_to() {
     # fetch_to <url> <out>
     if [ "$HAS_WGET" -eq 1 ]; then
-        wget ${IPV4_ONLY:-} -q --timeout=15 --tries=2 -O "$2" "$1" 2>/dev/null || return 1
+        wget -q --timeout=15 --tries=2 -O "$2" "$1" 2>/dev/null || return 1
     else
-        curl ${IPV4_ONLY:-} -fsSL --max-time 30 --retry 2 -o "$2" "$1" || return 1
+        curl -fsSL --max-time 30 --retry 2 -o "$2" "$1" || return 1
     fi
     [ -s "$2" ] || return 1
     return 0
