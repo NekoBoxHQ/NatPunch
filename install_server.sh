@@ -284,12 +284,19 @@ choose_downloader() {
     if command -v wget >/dev/null 2>&1; then DL_TYPE="wget"
     elif command -v curl >/dev/null 2>&1; then DL_TYPE="curl"
     else die "缺少 wget/curl"; fi
+    # GitHub 的 IPv6 路径在部分网络（国内宽带等）下不通，表现为下载"时好时坏"。
+    # 下载器支持时强制 IPv4；老 busybox wget 没有 -4 选项时自动退回原命令。
+    DL_IPV4=""
+    case "$DL_TYPE" in
+        wget) wget --help 2>&1 | grep -q -- ' -4' && DL_IPV4="-4" ;;
+        curl) DL_IPV4="-4" ;;
+    esac
 }
 dl() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
-        wget) wget -q --timeout=30 --tries=2 -O "$2" "$1" ;;
-        curl) curl -fsSL --max-time 60 --retry 2 -o "$2" "$1" ;;
+        wget) wget ${DL_IPV4:-} -q --timeout=30 --tries=2 -O "$2" "$1" ;;
+        curl) curl ${DL_IPV4:-} -fsSL --max-time 60 --retry 2 -o "$2" "$1" ;;
     esac
 }
 verify_package() {
@@ -387,8 +394,8 @@ verify_package() {
 fetch() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
-        wget) wget -q --timeout=10 -O - "$1" 2>/dev/null ;;
-        curl) curl -fsSL --max-time 10 "$1" 2>/dev/null ;;
+        wget) wget ${DL_IPV4:-} -q --timeout=10 -O - "$1" 2>/dev/null ;;
+        curl) curl ${DL_IPV4:-} -fsSL --max-time 10 "$1" 2>/dev/null ;;
     esac
 }
 # pick_highest_version：从 GitHub releases 的 JSON 里挑版本号最高的 tag。
