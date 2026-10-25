@@ -401,7 +401,7 @@
         location.href = webBase + '/client/list';
     });
 
-    // 折叠/展开快捷命令面板（默认折叠，SSH 界面占满）
+    // 折叠/展开快捷命令面板（桌面默认展开；窄屏保持折叠 —— 见下方初始化）
     $('#cmd_panel_toggle').on('click', function (e) {
         e.preventDefault();
         var p = $('#cmd_panel');
@@ -414,6 +414,16 @@
         }
         sendResize();
     });
+
+    // 电脑浏览器默认展开快捷命令面板；窄屏保持折叠（窄屏下它是浮层，展开会盖住终端）
+    (function () {
+        if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+            return; // 窄屏：保持 HTML 里的默认折叠状态
+        }
+        $('#cmd_panel').show();
+        $('#cmd_panel_toggle_txt').text('≫');
+        sendResize();
+    })();
 
     $('#term_input').on('keydown', function (e) {
         if (e.key === 'Enter') {
