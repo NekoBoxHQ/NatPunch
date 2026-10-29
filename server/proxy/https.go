@@ -15,6 +15,7 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/astaxie/beego/logs"
 	"github.com/pkg/errors"
+	"time"
 )
 
 type HttpsServer struct {
@@ -289,6 +290,11 @@ func (httpsListener *HttpsListener) Addr() net.Addr {
 
 // get server name from connection by read full client hello bytes
 func GetServerNameFromClientHello(c net.Conn) (string, []byte) {
+	// 客户端一个字节都不发也能把这条连接挂住（直到内核超时）—— 而 https 侧
+	// 的连接数配额是在读完握手之后才检查的，等于慢连接完全免疫 MaxConn。
+	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+	defer c.SetReadDeadline(time.Time{})
+
 	header := make([]byte, 5)
 	headerN, err := io.ReadFull(c, header)
 	if err != nil {

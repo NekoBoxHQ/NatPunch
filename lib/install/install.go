@@ -410,6 +410,15 @@ func findBinInDir(root, name string) (string, error) {
 
 // replaceExecutable places srcBin at destBin. On Windows a running executable
 // cannot be overwritten, but it can be renamed aside first.
+//
+// 这里要保证的是「任何时刻 destBin 要么是旧的、要么是新的，不能没有」：
+//   - 旧二进制先 rename 成 .old（同一目录，原子）；
+//   - 新二进制**先写到同目录的 .new 并 fsync**，再 rename 覆盖（rename 是原子的，
+//     掉电最多留下一个 .new，主文件仍是旧的）；
+//   - 只有新文件已经就位后才允许删掉上一次的 .old。
+//
+// 原实现把 .old 先删掉、跨卷时直接 copy 到 destBin（无 fsync、非原子）：
+// 掉电/被 kill 在中间就会既没有新二进制、也没有备份，服务起不来。
 func replaceExecutable(srcBin, destBin string) error {
 	if _, err := os.Stat(srcBin); err != nil {
 		return fmt.Errorf("源文件不存在: %s: %w", srcBin, err)
@@ -425,28 +434,51 @@ func replaceExecutable(srcBin, destBin string) error {
 		return err
 	}
 
+	bak := destBin + ".old"
+	restore := func() {
+		if _, statErr := os.Stat(bak); statErr == nil {
+			_ = os.Rename(bak, destBin)
+		}
+	}
+
 	// Move the current binary out of the way when present (required on Windows
 	// while the process is still running).
+	havePrev := false
 	if _, err := os.Stat(destBin); err == nil {
-		bak := destBin + ".old"
+		// 上一次成功更新后留下的 .old 才是可以删的；这次还没动主文件。
 		_ = os.Remove(bak)
 		if err := os.Rename(destBin, bak); err != nil {
 			return fmt.Errorf("无法备份当前程序 %s: %w", destBin, err)
 		}
+		havePrev = true
 	}
 
-	// Same filesystem: rename is atomic. Fall back to copy across volumes.
-	if err := os.Rename(srcBin, destBin); err != nil {
-		if _, copyErr := copyFile(srcBin, destBin); copyErr != nil {
-			// Best-effort restore of previous binary
-			bak := destBin + ".old"
-			if _, statErr := os.Stat(bak); statErr == nil {
-				_ = os.Rename(bak, destBin)
-			}
-			return fmt.Errorf("替换可执行文件失败: %w", copyErr)
-		}
-		_ = os.Remove(srcBin)
+	// Same filesystem: rename is atomic.
+	if err := os.Rename(srcBin, destBin); err == nil {
+		return nil
 	}
+
+	// 跨卷 / 权限导致 rename 失败：先写 .new + fsync，再原子 rename 过去。
+	tmp := destBin + ".new"
+	if _, copyErr := copyFile(srcBin, tmp); copyErr != nil {
+		_ = os.Remove(tmp)
+		if havePrev {
+			restore()
+		}
+		return fmt.Errorf("替换可执行文件失败: %w", copyErr)
+	}
+	if f, openErr := os.Open(tmp); openErr == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+	if err := os.Rename(tmp, destBin); err != nil {
+		_ = os.Remove(tmp)
+		if havePrev {
+			restore()
+		}
+		return fmt.Errorf("替换可执行文件失败: %w", err)
+	}
+	_ = os.Remove(srcBin)
 	return nil
 }
 

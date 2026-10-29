@@ -12,6 +12,7 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/lib/conn"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
 	"github.com/astaxie/beego/logs"
+	"time"
 )
 
 const (
@@ -357,6 +358,12 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 
 // new conn
 func (s *Sock5ModeServer) handleConn(c net.Conn) {
+	// 握手阶段限时：只连不发（或一字节一字节发）的连接原来会永久占住
+	// goroutine + FD，还能绕过客户端 MaxConn（握手在配额检查之后才完成）。
+	// 握手结束立刻清掉 deadline，不影响后续转发。
+	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+	defer c.SetReadDeadline(time.Time{})
+
 	buf := make([]byte, 2)
 	if _, err := io.ReadFull(c, buf); err != nil {
 		logs.Warn("negotiation err", err)

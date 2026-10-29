@@ -18,6 +18,11 @@ import (
 )
 
 const (
+	// maxHTTPHeaderBytes：复用端口上 HTTP 头的总长上限。
+	// 这里是公网可达的，ReadLine 本身没有上限 —— 不回换行的长行、或者几万行
+	// 小 header，都能在 10 秒窗口里堆出数百 MB 内存。
+	maxHTTPHeaderBytes = 8 << 10
+
 	HTTP_GET        = 716984
 	HTTP_POST       = 807983
 	HTTP_HEAD       = 726965
@@ -126,6 +131,13 @@ func (pMux *PortMux) process(conn net.Conn) {
 			}
 			buffer.Write(b)
 			buffer.Write([]byte("\r\n"))
+			// 头部总长上限：公网口，ReadLine 无上限，一条长行（或几万行小头）
+			// 在 10 秒窗口里能堆出几百 MB → OOM。正常 HTTP 头远小于 8KB。
+			if buffer.Len() > maxHTTPHeaderBytes {
+				logs.Warn("pmux: http header too large from %s, drop", conn.RemoteAddr().String())
+				conn.Close()
+				break
+			}
 			if strings.Index(string(b), "Host:") == 0 || strings.Index(string(b), "host:") == 0 {
 				// Remove host and space effects
 				str := strings.Replace(string(b), "Host:", "", -1)

@@ -206,6 +206,27 @@ func (s *Bridge) GetHealthFromClient(id int, c *conn.Conn) {
 			})
 		}
 	}
+	s.delClientIfCurrent(id, c)
+}
+
+// delClientIfCurrent 只在「这条连接仍是该客户端当前的 signal」时才真正回收。
+//
+// 原来的 GetHealthFromClient 结尾无条件 s.DelClient(id)：客户端重连后，旧连接
+// 的 health 协程稍后才退出，于是它把**刚建立的新 signal** 关掉、删掉 map 条目，
+// 还向 CloseClient 发消息删掉该客户端的 NoStore 隧道 —— 表现为随机掉线、隧道
+// 短暂消失，然后客户端又被逼着重连一次。
+func (s *Bridge) delClientIfCurrent(id int, c *conn.Conn) {
+	v, ok := s.Client.Load(id)
+	if !ok {
+		return
+	}
+	cl := v.(*Client)
+	cl.mu.Lock()
+	cur := cl.signal
+	cl.mu.Unlock()
+	if cur != c {
+		return
+	}
 	s.DelClient(id)
 }
 
@@ -316,7 +337,11 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 			cl.mu.Unlock()
 			cl.retryTime.Store(0)
 			if oldSignal != nil {
+				// 先告诉对端"这条连接作废"，再**主动关掉**：只写 clse 的话，旧连接
+				// 会一直挂到内核 keepalive 才发现（手机切网/合盖很常见），期间
+				// 它的 health 协程醒来还会走到 delClientIfCurrent —— 见那里的注释。
 				oldSignal.WriteClose()
+				oldSignal.Close()
 			}
 		}
 		// Request private/LAN IPs from client. Old clients ignore the flag; short timeout keeps compatibility.
@@ -424,6 +449,14 @@ func (s *Bridge) ping() {
 				v.mu.Lock()
 				tunnel := v.tunnel
 				signal := v.signal
+				if tunnel == nil && signal == nil {
+					// 纯占位条目（NEW_CONF 注册后、MAIN 还没到）：不能按"半连接"
+					// 累计淘汰。原来这里会把它当死连接，15 秒后 DelClient →
+					// CloseClient 删掉刚注册的 NoStore 隧道；而客户端 Start 成功后
+					// 不再重发配置，于是面板显示在线、隧道却永久消失。
+					v.mu.Unlock()
+					return true
+				}
 				if tunnel == nil || signal == nil {
 					v.mu.Unlock()
 					if v.retryTime.Add(1) >= 3 {

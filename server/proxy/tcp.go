@@ -15,6 +15,7 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/web"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
+	"time"
 )
 
 type TunnelModeServer struct {
@@ -139,7 +140,13 @@ func ProcessTunnel(c *conn.Conn, s *TunnelModeServer) error {
 
 // http proxy
 func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
+	// 握手阶段（读 HTTP 请求头）必须限时：公网侧一个字节都不发的连接，
+	// 原来会一直占着 goroutine + 32KB 缓冲，还白占一个 MaxConn 名额。
+	// 放在调用点而不是 GetHost 里 —— GetHost 的调用方（含测试）可能自己设了
+	// 更短的 deadline，不能被覆盖；读完这里立刻清掉，不影响后续长连接/大上传。
+	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	_, addr, rb, err, r := c.GetHost()
+	_ = c.SetReadDeadline(time.Time{})
 	if err != nil {
 		c.Close()
 		logs.Info(err)

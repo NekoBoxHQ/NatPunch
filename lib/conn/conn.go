@@ -59,6 +59,7 @@ func (s *Conn) readRequest(buf []byte) (n int, err error) {
 
 // get host 、connection type、method...from connection
 func (s *Conn) GetHost() (method, address string, rb []byte, err error, r *http.Request) {
+
 	var b [32 * 1024]byte
 	var n int
 	if n, err = s.readRequest(b[:]); n > 0 {

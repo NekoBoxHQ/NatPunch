@@ -128,12 +128,25 @@ func (self *LoginController) recordLoginFailure(ip string, explicit bool) {
 
 func (self *LoginController) doLogin(username, password string, explicit bool) bool {
 	startIprecordCleaner()
+	cfgUser := beego.AppConfig.String("web_username")
+	cfgPass := beego.AppConfig.String("web_password")
+	// 无认证模式（管理员账号密码都留空）：登录页每次 GET 的隐式尝试要能直接放行。
+	// 其他情况下空凭据一律直接判失败 —— 否则一次 GET 就会对 admin + **每个客户端**
+	// 各做一次 bcrypt（DefaultCost≈60ms），100 个用户 ≈ 6 CPU 秒/请求，
+	// 而且隐式尝试不计数、不受 10 次/分限流：未认证就能把 CPU 打满。
+	noAuth := cfgUser == "" && cfgPass == ""
+	if !noAuth && (username == "" || password == "") {
+		return false
+	}
 	ip := self.loginIP()
 	if self.loginBlocked(ip) {
 		return false
 	}
 	var auth bool
-	if common.VerifyPassword(beego.AppConfig.String("web_password"), password) && username == beego.AppConfig.String("web_username") {
+	if noAuth {
+		self.establishAdminSession()
+		auth = true
+	} else if username == cfgUser && common.VerifyPassword(cfgPass, password) {
 		self.establishAdminSession()
 		auth = true
 		// 存量明文管理员密码：首次成功登录后原地迁移为 bcrypt（F2-3）
@@ -153,7 +166,8 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 					auth = true
 				}
 			}
-			if !auth && common.VerifyPassword(v.WebPassword, password) && v.WebUserName == username {
+			// 先比用户名再做 bcrypt：bcrypt 很贵，不能对每个客户端都算一遍。
+			if !auth && v.WebUserName == username && common.VerifyPassword(v.WebPassword, password) {
 				auth = true
 				// 存量明文客户端密码：首次成功登录后原地迁移为 bcrypt（F2-3）
 				if !strings.HasPrefix(v.WebPassword, "$2") {
