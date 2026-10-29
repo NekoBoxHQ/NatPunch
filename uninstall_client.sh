@@ -520,15 +520,25 @@ kill_client_pids() {
 }
 # ---------- 1. 替换二进制（先备份） ----------
 [ -f "$CLIENT_BIN_1" ] && cp -f "$CLIENT_BIN_1" "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
-if ! cp -f "$BIN_SRC" "$CLIENT_BIN_1"; then
-    warn "写入 $CLIENT_BIN_1 失败，尝试回滚"
+# 原子替换：先写同目录的 .new 再 rename，不要 cp -f 直接盖运行中的二进制。
+# cp -f 是「先删后建」，替换过程中掉电/被 kill 会留下缺失或半个二进制，开机自启直接失败。
+if ! cp -f "$BIN_SRC" "${CLIENT_BIN_1}.new"; then
+    warn "写入 ${CLIENT_BIN_1}.new 失败"
+    rm -f "${CLIENT_BIN_1}.new" 2>/dev/null || true
+    exit 1
+fi
+chmod 755 "${CLIENT_BIN_1}.new" 2>/dev/null || true
+if ! mv -f "${CLIENT_BIN_1}.new" "$CLIENT_BIN_1"; then
+    warn "替换 $CLIENT_BIN_1 失败，尝试回滚"
+    rm -f "${CLIENT_BIN_1}.new" 2>/dev/null || true
     [ -f "${CLIENT_BIN_1}.update_bak" ] && cp -f "${CLIENT_BIN_1}.update_bak" "$CLIENT_BIN_1"
     rm -f "${CLIENT_BIN_1}.update_bak" 2>/dev/null || true
     exit 1
 fi
 chmod 755 "$CLIENT_BIN_1"
 if [ -f "$CLIENT_BIN_2" ]; then
-    cp -f "$BIN_SRC" "$CLIENT_BIN_2" && chmod 755 "$CLIENT_BIN_2" || true
+    # 同上：次要路径也走 .new + rename（OpenWrt 上两份二进制同源）
+    cp -f "$BIN_SRC" "${CLIENT_BIN_2}.new" && chmod 755 "${CLIENT_BIN_2}.new" && mv -f "${CLIENT_BIN_2}.new" "$CLIENT_BIN_2" || true
 fi
 # ---------- 2. 修正 KillMode + daemon-reload（超时保护） ----------
 if command -v systemctl >/dev/null 2>&1; then

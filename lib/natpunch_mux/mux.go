@@ -166,10 +166,17 @@ func (s *Mux) sendInfo(flag uint8, id int32, data interface{}) {
 		return
 	}
 	if err = s.writeQueue.Push(pack); err != nil {
-		// 独立日志区分「队列限流」与「链路故障」：写端过载（如单连接突发大流量）触发
-		log.Printf("mux: write queue overflow (limit=%d), closing mux", s.writeQueue.maxLength)
+		// 写队列满 = 这条链路暂时发不出去（对端慢/拥塞），原来的处理是
+		// **关掉整个 mux** —— 一条突发大流量的隧道会让该客户端上所有隧道一起断。
+		// 现在只关掉造成拥塞的那条流（id 就是流号），其它流继续跑；
+		// 对端会收到 muxConnClose 并把这条流回收。
+		log.Printf("mux: write queue overflow (limit=%d), closing conn %d only", s.writeQueue.maxLength, id)
 		muxPack.Put(pack)
-		_ = s.Close()
+		if id > 0 {
+			if c, ok := s.connMap.Get(id); ok && c != nil {
+				_ = c.Close()
+			}
+		}
 		return
 	}
 	return
