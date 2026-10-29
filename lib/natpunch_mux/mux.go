@@ -313,7 +313,7 @@ func (s *Mux) readSession() {
 				}
 				continue
 			}
-			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose {
+			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose.Load() {
 				switch pack.flag {
 				case muxNewMsg, muxNewMsgPart: //New msg from remote connection
 					err = s.newMsg(connection, pack)
@@ -336,13 +336,13 @@ func (s *Mux) readSession() {
 					}
 					continue
 				case muxMsgSendOk:
-					if connection.isClose {
+					if connection.isClose.Load() {
 						continue
 					}
 					connection.sendWindow.SetSize(pack.window)
 					continue
 				case muxConnClose: //close the connection
-					connection.closingFlag = true
+					connection.closingFlag.Store(true)
 					connection.receiveWindow.Stop() // close signal to receive window
 					continue
 				}
@@ -355,7 +355,7 @@ func (s *Mux) readSession() {
 }
 
 func (s *Mux) newMsg(connection *conn, pack *muxPackager) (err error) {
-	if connection.isClose {
+	if connection.isClose.Load() {
 		err = io.ErrClosedPipe
 		return
 	}
@@ -396,23 +396,9 @@ func (s *Mux) Close() (err error) {
 }
 
 func (s *Mux) release() {
-	for {
-		pack := s.writeQueue.TryPop()
-		if pack == nil {
-			break
-		}
-		if pack.basePackager.content != nil {
-			windowBuff.Put(pack.basePackager.content)
-		}
-		muxPack.Put(pack)
-	}
-	for {
-		connection := s.newConnQueue.TryPop()
-		if connection == nil {
-			break
-		}
-		connection = nil
-	}
+	// 只置停止标志，**不在这里排空队列**：writeQueue 的消费端是 writeSession 那个
+	// goroutine，两处同时 TryPop 同一条 bufChain 就是数据竞争（-race 实测报出）。
+	// 关流时把引用留给 GC 即可。
 	s.writeQueue.Stop()
 	s.newConnQueue.Stop()
 }

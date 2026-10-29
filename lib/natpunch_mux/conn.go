@@ -17,11 +17,15 @@ type conn struct {
 	connStatusOkCh   chan struct{}
 	connStatusFailCh chan struct{}
 	connId           int32
-	isClose          bool
-	closingFlag      bool // closing conn flag
+	isClose          atomic.Bool
+	closingFlag      atomic.Bool // closing conn flag
 	receiveWindow    *receiveWindow
 	sendWindow       *sendWindow
 	once             sync.Once
+	// writeMu 串行化 Write：sendWindow 的发送缓冲是连接级的，
+	// 两个 goroutine 同时写同一条流会互相重置对方的缓冲（同一段重发/截断）。
+	// net.Conn 允许并发 Write，调用方没有义务自己串行。
+	writeMu sync.Mutex
 }
 
 func NewConn(connId int32, mux *Mux) *conn {
@@ -41,7 +45,7 @@ func NewConn(connId int32, mux *Mux) *conn {
 }
 
 func (s *conn) Read(buf []byte) (n int, err error) {
-	if s.isClose || buf == nil {
+	if s.isClose.Load() || buf == nil {
 		return 0, errors.New("the conn has closed")
 	}
 	if len(buf) == 0 {
@@ -53,14 +57,17 @@ func (s *conn) Read(buf []byte) (n int, err error) {
 }
 
 func (s *conn) Write(buf []byte) (n int, err error) {
-	if s.isClose {
-		return 0, errors.New("the conn has closed")
-	}
-	if s.closingFlag {
-		return 0, errors.New("io: write on closed conn")
-	}
 	if len(buf) == 0 {
 		return 0, nil
+	}
+	// 见 conn.writeMu 的注释：sendWindow 的发送缓冲是连接级的，必须串行。
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.isClose.Load() {
+		return 0, errors.New("the conn has closed")
+	}
+	if s.closingFlag.Load() {
+		return 0, errors.New("io: write on closed conn")
 	}
 	n, err = s.sendWindow.WriteFull(buf, s.connId)
 	return
@@ -72,7 +79,7 @@ func (s *conn) Close() (err error) {
 }
 
 func (s *conn) closeProcess() {
-	s.isClose = true
+	s.isClose.Store(true)
 	s.receiveWindow.mux.connMap.Delete(s.connId)
 	if !s.receiveWindow.mux.IsClose() {
 		// if server or user close the conn while reading, will Get a io.EOF
@@ -116,7 +123,7 @@ type window struct {
 	// wait   maxSize  useless  done
 	// wait zero means false, one means true
 	off       uint32
-	closeOp   bool
+	closeOp   atomic.Bool // CAS 收口：CloseWindow 会被多条路径并发调用
 	closeOpCh chan struct{}
 	mux       *Mux
 }
@@ -152,8 +159,9 @@ func (Self *window) New() {
 }
 
 func (Self *window) CloseWindow() {
-	if !Self.closeOp {
-		Self.closeOp = true
+	// CAS 只放行一次：closeOpCh 容量是 2，重复发第 3、4 个 token 会**永久阻塞**
+	// （调用方可能是 Close、对端 muxConnClose、release 多条路径并发）。
+	if Self.closeOp.CompareAndSwap(false, true) {
 		Self.closeOpCh <- struct{}{}
 		Self.closeOpCh <- struct{}{}
 	}
@@ -260,7 +268,7 @@ func (Self *receiveWindow) calcSize() {
 }
 
 func (Self *receiveWindow) Write(buf []byte, l uint16, part bool, id int32) (err error) {
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		return errors.New("conn.receiveWindow: write on closed window")
 	}
 	element, err := newListElement(buf, l, part)
@@ -300,9 +308,8 @@ start:
 }
 
 func (Self *receiveWindow) Read(p []byte, id int32) (n int, err error) {
-	if Self.closeOp {
-		return 0, io.EOF // receive close signal, returns eof
-	}
+	// 不再"看到 closeOp 就直接 EOF"：对端关流时队列里往往还剩最后一小段，
+	// 直接 EOF 会把尾巴丢掉。交给 readFromQueue：先排空已入队的数据，排空后才 EOF。
 	Self.bw.StartRead()
 	n, err = Self.readFromQueue(p, id)
 	Self.bw.SetCopySize(uint16(n))
@@ -317,17 +324,26 @@ copyData:
 		// on the first Read method invoked, Self.off and Self.element.l
 		// both zero value
 		listEle.Put(Self.element)
-		if Self.closeOp {
-			return 0, io.EOF
-		}
-		Self.element, err = Self.bufQueue.Pop()
-		// if the queue is empty, Pop method will wait until one element push
-		// into the queue successful, or timeout.
-		// timer start on timeout parameter is set up
-		Self.off = 0
-		if err != nil {
-			Self.CloseWindow() // also close the window, to avoid read twice
-			return             // queue receive stop or time out, break the loop and return
+		if Self.closeOp.Load() {
+			// 对端已关流，但队列里可能还压着最后一段没交出去（典型：HTTP 响应头的
+			// 结束空行、chunked 的 `0\r\n\r\n`）。先非阻塞取一次，排空之后才 EOF ——
+			// 直接 EOF 会把尾巴丢掉，浏览器报 ERR_RESPONSE_HEADERS_TRUNCATED。
+			if el := Self.bufQueue.TryPop(); el != nil {
+				Self.element = el
+				Self.off = 0
+			} else {
+				return 0, io.EOF
+			}
+		} else {
+			Self.element, err = Self.bufQueue.Pop()
+			// if the queue is empty, Pop method will wait until one element push
+			// into the queue successful, or timeout.
+			// timer start on timeout parameter is set up
+			Self.off = 0
+			if err != nil {
+				Self.CloseWindow() // also close the window, to avoid read twice
+				return             // queue receive stop or time out, break the loop and return
+			}
 		}
 	}
 	l = copy(p[pOff:], Self.element.Buf[Self.off:Self.element.L])
@@ -459,7 +475,7 @@ func (Self *sendWindow) SetSize(currentMaxSizeDone uint64) (closed bool) {
 			closed = true
 		}
 	}()
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		close(Self.setSizeCh)
 		return true
 	}
@@ -528,7 +544,7 @@ func (Self *sendWindow) sent(sentSize uint32) {
 func (Self *sendWindow) WriteTo() (p []byte, sendSize uint32, part bool, err error) {
 	// returns buf segments, return only one segments, need a loop outside
 	// until err = io.EOF
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		return nil, 0, false, errors.New("conn.writeWindow: window closed")
 	}
 	if Self.off >= uint32(len(Self.buf)) {

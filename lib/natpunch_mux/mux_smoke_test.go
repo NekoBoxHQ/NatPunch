@@ -88,3 +88,52 @@ func TestMuxSmokeEndToEnd(t *testing.T) {
 		t.Fatalf("反向数据不一致: %q", rbuf)
 	}
 }
+
+// 关流不能截断尾巴：对端"写完立刻关"是隧道里最常见的模式（HTTP 响应发完就关），
+// 如果 close 到达时把接收队列里剩下的数据直接丢掉，浏览器就会看到半截响应
+// （ERR_RESPONSE_HEADERS_TRUNCATED：连响应头的结束空行都被吃掉）。
+func TestMuxCloseDoesNotTruncateTail(t *testing.T) {
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	muxA := NewMux(c1, "tcp", 60)
+	defer muxA.Close()
+	muxB := NewMux(c2, "tcp", 60)
+	defer muxB.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if conn, err := muxB.Accept(); err == nil {
+			accepted <- conn
+		}
+	}()
+
+	client, err := muxA.NewConn()
+	if err != nil {
+		t.Fatalf("NewConn: %v", err)
+	}
+
+	var server net.Conn
+	select {
+	case server = <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Accept 超时")
+	}
+
+	// 一个"没有 body、立刻关连接"的 403：结尾的 \r\n0\r\n\r\n 必须原样到达
+	payload := []byte("HTTP/1.1 403 Forbidden\r\nConnection: Keep-Alive\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+	if _, err := client.Write(payload); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	_ = client.Close() // 关键：写完立刻关
+
+	_ = server.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got, rerr := io.ReadAll(server)
+	if rerr != nil {
+		t.Fatalf("读回失败（已读 %d 字节）: %v", len(got), rerr)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("关流截断了尾巴：收到 %d 字节 %q，期望 %d 字节 %q", len(got), got, len(payload), payload)
+	}
+}
