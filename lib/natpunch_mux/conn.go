@@ -17,8 +17,8 @@ type conn struct {
 	connStatusOkCh   chan struct{}
 	connStatusFailCh chan struct{}
 	connId           int32
-	isClose          bool
-	closingFlag      bool // closing conn flag
+	isClose          atomic.Bool
+	closingFlag      atomic.Bool // closing conn flag
 	receiveWindow    *receiveWindow
 	sendWindow       *sendWindow
 	once             sync.Once
@@ -48,7 +48,7 @@ func NewConn(connId int32, mux *Mux) *conn {
 }
 
 func (s *conn) Read(buf []byte) (n int, err error) {
-	if s.isClose || buf == nil {
+	if s.isClose.Load() || buf == nil {
 		return 0, errors.New("the conn has closed")
 	}
 	if len(buf) == 0 {
@@ -66,10 +66,10 @@ func (s *conn) Write(buf []byte) (n int, err error) {
 	// 见 conn.writeMu 的注释：sendWindow 的发送缓冲是连接级的，必须串行。
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.isClose {
+	if s.isClose.Load() {
 		return 0, errors.New("the conn has closed")
 	}
-	if s.closingFlag {
+	if s.closingFlag.Load() {
 		return 0, errors.New("io: write on closed conn")
 	}
 	n, err = s.sendWindow.WriteFull(buf, s.connId)
@@ -82,7 +82,7 @@ func (s *conn) Close() (err error) {
 }
 
 func (s *conn) closeProcess() {
-	s.isClose = true
+	s.isClose.Store(true)
 	s.receiveWindow.mux.connMap.Delete(s.connId)
 	if !s.receiveWindow.mux.IsClose() {
 		// if server or user close the conn while reading, will Get a io.EOF

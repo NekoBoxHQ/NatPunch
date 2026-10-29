@@ -326,7 +326,7 @@ func (s *Mux) readSession() {
 				}
 				continue
 			}
-			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose {
+			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose.Load() {
 				switch pack.flag {
 				case muxNewMsg, muxNewMsgPart: //New msg from remote connection
 					err = s.newMsg(connection, pack)
@@ -349,13 +349,13 @@ func (s *Mux) readSession() {
 					}
 					continue
 				case muxMsgSendOk:
-					if connection.isClose {
+					if connection.isClose.Load() {
 						continue
 					}
 					connection.sendWindow.SetSize(pack.window)
 					continue
 				case muxConnClose: //close the connection
-					connection.closingFlag = true
+					connection.closingFlag.Store(true)
 					connection.receiveWindow.Stop() // close signal to receive window
 					// 对端关流时，本端阻塞在 sendWindow 上的写协程必须被唤醒：
 					// 原来只 Stop 了 receiveWindow，sendWindow 还在等"窗口 + ack"，
@@ -374,7 +374,7 @@ func (s *Mux) readSession() {
 }
 
 func (s *Mux) newMsg(connection *conn, pack *muxPackager) (err error) {
-	if connection.isClose {
+	if connection.isClose.Load() {
 		err = io.ErrClosedPipe
 		return
 	}

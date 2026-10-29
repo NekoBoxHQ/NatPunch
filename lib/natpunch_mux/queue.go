@@ -16,7 +16,7 @@ type priorityQueue struct {
 	middleChain  *bufChain
 	lowestChain  *bufChain
 	starving     uint8
-	stop         bool
+	stop         atomic.Bool // Pop/Wait 与 Stop 并发：裸 bool 是 data race
 	cond         *sync.Cond
 	length       int64 // 当前排队元素数（原子）；0 表示未启用上限
 	maxLength    int64 // 排队上限，防止单客户端打爆服务端内存（阶段三 #2）
@@ -84,7 +84,7 @@ func (Self *priorityQueue) Pop() (packager *muxPackager) {
 		if packager != nil {
 			return
 		}
-		if Self.stop {
+		if Self.stop.Load() {
 			return
 		}
 		if iter {
@@ -97,7 +97,7 @@ func (Self *priorityQueue) Pop() (packager *muxPackager) {
 	Self.cond.L.Lock()
 	defer Self.cond.L.Unlock()
 	for packager = Self.TryPop(); packager == nil; {
-		if Self.stop {
+		if Self.stop.Load() {
 			return
 		}
 		Self.cond.Wait()
@@ -146,13 +146,15 @@ func (Self *priorityQueue) TryPop() (packager *muxPackager) {
 }
 
 func (Self *priorityQueue) Stop() {
-	Self.stop = true
+	Self.stop.Store(true)
+	Self.cond.L.Lock()
 	Self.cond.Broadcast()
+	Self.cond.L.Unlock()
 }
 
 type connQueue struct {
 	chain *bufChain
-	stop  bool
+	stop  atomic.Bool // 同上：Pop 的等待循环与 Stop 并发读写
 	cond  *sync.Cond
 }
 
@@ -176,7 +178,7 @@ func (Self *connQueue) Pop() (connection *conn) {
 		if connection != nil {
 			return
 		}
-		if Self.stop {
+		if Self.stop.Load() {
 			return
 		}
 		if iter {
@@ -189,7 +191,7 @@ func (Self *connQueue) Pop() (connection *conn) {
 	Self.cond.L.Lock()
 	defer Self.cond.L.Unlock()
 	for connection = Self.TryPop(); connection == nil; {
-		if Self.stop {
+		if Self.stop.Load() {
 			return
 		}
 		Self.cond.Wait()
@@ -209,8 +211,10 @@ func (Self *connQueue) TryPop() (connection *conn) {
 }
 
 func (Self *connQueue) Stop() {
-	Self.stop = true
+	Self.stop.Store(true)
+	Self.cond.L.Lock()
 	Self.cond.Broadcast()
+	Self.cond.L.Unlock()
 }
 
 type listElement struct {
@@ -242,6 +246,7 @@ type receiveWindowQueue struct {
 	chain      *bufChain
 	stopOp     chan struct{}
 	readOp     chan struct{}
+	stopOnce   sync.Once
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	// On non-Linux ARM, the 64-bit functions use instructions unavailable before the ARMv6k core.
 	// On ARM, x86-32, and 32-bit MIPS, it is the caller's responsibility
@@ -359,8 +364,12 @@ func (Self *receiveWindowQueue) Len() (n uint32) {
 }
 
 func (Self *receiveWindowQueue) Stop() {
-	Self.stopOp <- struct{}{}
-	Self.stopOp <- struct{}{}
+	// once：stopOp 容量是 2，重复 Stop 会往满的 channel 里再塞、**永久阻塞**
+	// （receiveWindow.CloseWindow / window.CloseWindow / 对端 muxConnClose 都可能调）。
+	Self.stopOnce.Do(func() {
+		Self.stopOp <- struct{}{}
+		Self.stopOp <- struct{}{}
+	})
 }
 
 func (Self *receiveWindowQueue) SetTimeOut(t time.Time) {
@@ -448,7 +457,11 @@ func (d *bufDequeue) pushHead(val unsafe.Pointer) bool {
 		}
 	}
 	// The head slot is free, so we own it.
-	*slot = val
+	//
+	// 必须用原子写：消费者是用 atomic.LoadPointer/CAS 读同一个 slot 的。
+	// 普通赋值 + 原子读在弱内存序（armv7 / mipsle，都在发布矩阵里）上可能让
+	// 消费者读到半写状态；-race 也会直接报 data race。
+	atomic.StorePointer(slot, val)
 	return true
 }
 
