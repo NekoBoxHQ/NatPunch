@@ -1,98 +1,393 @@
-<div class="wrapper wrapper-content animated fadeInRight">
-    <div class="row">
-        <div class="col-lg-12">
-            <div class="ibox float-e-margins">
-                <div class="ibox-title">
-                    <h5 langtag="word-terminal"></h5>
-                    <div class="ibox-tools">
-                        <a id="cmd_panel_toggle" title="折叠/展开快捷命令" style="color:#333;margin-right:10px;cursor:pointer;font-size:13px;"><span id="cmd_panel_toggle_txt">≪</span></a>
-                        <a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
-                        <a class="close-link"><i class="fa fa-times"></i></a>
-                    </div>
-                </div>
-                <div id="term_wrap" class="ibox-content" style="display:flex;align-items:flex-start;padding-left:15px;padding-right:0;position:relative;">
-                    <div style="flex:1;min-width:0;">
-                        <div id="term_box" style="height:500px;background:#000000;border-radius:4px;padding:6px 0 6px 6px;"></div>
-                        <div style="display:flex;margin-top:10px;">
-                            <input id="term_input" type="text" placeholder="预输入命令，按 Enter 整行发送" style="flex:1;min-width:0;height:32px;font-size:13px;border:1px solid rgba(51,51,51,0.4);background:transparent;color:#333;padding:0 10px;border-radius:2px;box-sizing:border-box;">
-                            <button id="term_send" class="btn btn-primary" style="margin-left:6px;height:32px;padding:0 14px;border-radius:0;border:none;"><span langtag="word-term-send"></span></button>
-                        </div>
-                    </div>
-                    <div id="cmd_panel" style="display:none;width:192px;margin-left:0;border-left:1px solid rgba(51,51,51,0.25);border-right:none;background:transparent;flex-shrink:0;">
-                        <div style="padding:6px 4px 4px;text-align:center;">
-                            <div style="font-size:12px;color:#333;font-weight:bold;" langtag="word-term-cmd"></div>
-                            <div id="cmd_count" style="font-size:10px;color:#888;margin-top:1px;"></div>
-                        </div>
-                        <div id="cmd_body" style="padding:3px;max-height:340px;overflow-y:auto;">
-                            <div id="cmd_list"></div>
-                            <button id="cmd_add" type="button" style="width:100%;border:none;background:transparent;color:#23c6c8;font-size:12px;padding:5px 0;cursor:pointer;">＋</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+<!--
+  SSH 终端页。
+
+  设计取向：整页是一块**深色的终端工作区**，从导航栏下沿一直铺到窗口底部，
+  不做四周留白（终端宽度＝列数，宽度就是生产力）。
+  顶栏 / 输入条 / 快捷命令栏都在这块深色面上，属于「终端自己的部件」，
+  而不是飘在壁纸背景上的几个孤立控件 —— 之前那版正是后者：
+  黑色方块 + 透明输入框 + 裸文字列表，三块互不相干，所以看着散。
+
+  所有 id 与交互保持不变：term_box / term_input / term_send / cmd_panel /
+  cmd_list / cmd_add / cmd_modal*。改的只有外观与顶栏那块信息区。
+-->
+<div class="tp" id="tp">
+    <!-- 顶栏：连接状态 · 目标客户端 · 终端动作 -->
+    <div class="tp-bar">
+        <div class="tp-bar-l">
+            <span class="tp-dot tp-dot-off" id="tp_dot"></span>
+            <span class="tp-title" langtag="word-terminal"></span>
+            <span class="tp-chip" id="tp_client">
+                <span class="tp-chip-id" id="tp_client_id"></span>
+                <span class="tp-chip-name" id="tp_client_name"></span>
+            </span>
+            <select id="tp_client_pick" class="tp-pick" style="display:none;"></select>
+            <span class="tp-status" id="tp_status"></span>
         </div>
+        <div class="tp-bar-r">
+            <button type="button" class="tp-btn" id="tp_font_dec" title="减小字号">A−</button>
+            <button type="button" class="tp-btn" id="tp_font_inc" title="增大字号">A+</button>
+            <span class="tp-sep"></span>
+            <button type="button" class="tp-btn" id="tp_clear" title="清屏"><i class="fa fa-eraser"></i></button>
+            <button type="button" class="tp-btn" id="tp_panel_btn" title="显示/隐藏快捷命令">
+                <i class="fa fa-list-ul"></i><span class="tp-btn-text" langtag="word-term-cmd"></span>
+            </button>
+            <button type="button" class="tp-btn tp-btn-close" id="tp_close" title="关闭终端，返回客户端列表"><i class="fa fa-times"></i></button>
+        </div>
+    </div>
+
+    <div class="tp-main">
+        <!-- xterm 挂载点。padding 在这里给，不要给 xterm 的 .xterm-viewport，
+             否则 FitAddon 算出来的列数会比可用宽度少。 -->
+        <div class="tp-term-wrap">
+            <div id="term_box"></div>
+        </div>
+
+        <!-- 快捷命令：桌面端是右侧栏，窄屏是浮层（见 CSS）；初始 display:none 由 JS 打开，避免闪一下 -->
+        <aside class="tp-cmds" id="cmd_panel" style="display:none;">
+            <div class="tp-cmds-head">
+                <span class="tp-cmds-title" langtag="word-term-cmd"></span>
+                <span class="tp-cmds-count" id="cmd_count"></span>
+            </div>
+            <div class="tp-cmds-body" id="cmd_body">
+                <div id="cmd_list"></div>
+            </div>
+            <button type="button" class="tp-cmds-add" id="cmd_add"><span class="tp-plus">+</span> 新建命令</button>
+        </aside>
+    </div>
+
+    <!-- 预输入条：手机上没有物理键盘、也不方便直接点 xterm 时用它整行发送 -->
+    <div class="tp-input">
+        <span class="tp-prompt">$</span>
+        <input id="term_input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               placeholder="输入命令，Enter 整行发送">
+        <span class="tp-hint">Enter 发送 · Ctrl+Shift+C 复制</span>
+        <button id="term_send" class="tp-send"><span langtag="word-term-send"></span></button>
     </div>
 </div>
 
-<div id="cmd_modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;">
-    <div style="width:340px;background:rgba(15,20,30,0.94);border-radius:6px;padding:16px 18px;color:#fff;box-sizing:border-box;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <span id="cmd_modal_title" style="font-size:15px;font-weight:bold;">添加命令</span>
-            <button id="cmd_modal_close" type="button" style="border:none;background:transparent;color:#aaa;font-size:16px;cursor:pointer;padding:0 4px;">×</button>
+<!-- 新建 / 编辑快捷命令 -->
+<div id="cmd_modal" class="tp-modal" style="display:none;">
+    <div class="tp-modal-box">
+        <div class="tp-modal-head">
+            <span id="cmd_modal_title">添加命令</span>
+            <button id="cmd_modal_close" type="button" class="tp-modal-x">✕</button>
         </div>
-        <div style="font-size:12px;color:#aaa;margin-bottom:4px;">名称</div>
-        <input id="cmd_modal_name" type="text" placeholder="例如：查看容器" style="width:100%;height:28px;font-size:13px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.06);color:#fff;padding:0 8px;border-radius:3px;box-sizing:border-box;outline:none;">
-        <div style="font-size:12px;color:#aaa;margin:10px 0 4px;">命令</div>
-        <textarea id="cmd_modal_cmd" placeholder="例如：docker ps" style="width:100%;height:60px;font-size:13px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.06);color:#fff;padding:6px 8px;border-radius:3px;box-sizing:border-box;resize:none;outline:none;"></textarea>
-        <div style="font-size:11px;color:#888;margin:8px 0;">收藏保存在本机浏览器，请勿保存密码、Token、私钥等敏感内容。</div>
-        <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-            <button id="cmd_modal_cancel" type="button" style="border:1px solid rgba(255,255,255,0.25);background:transparent;color:#ccc;font-size:13px;padding:4px 16px;border-radius:3px;cursor:pointer;">取消</button>
-            <button id="cmd_modal_save" type="button" style="border:none;background:#23c6c8;color:#fff;font-size:13px;padding:4px 16px;border-radius:3px;cursor:pointer;margin-left:8px;">保存</button>
+        <label class="tp-label" for="cmd_modal_name">名称</label>
+        <input id="cmd_modal_name" type="text" placeholder="例如：查看容器">
+        <label class="tp-label" for="cmd_modal_cmd">命令</label>
+        <textarea id="cmd_modal_cmd" placeholder="例如：docker ps" rows="3"></textarea>
+        <div class="tp-modal-tip">收藏保存在面板服务器，所有设备通用。请勿保存密码、Token、私钥等敏感内容。</div>
+        <div class="tp-modal-foot">
+            <button id="cmd_modal_cancel" type="button" class="tp-btn-ghost">取消</button>
+            <button id="cmd_modal_save" type="button" class="tp-btn-primary">保存</button>
         </div>
     </div>
 </div>
 
 <link href="{{.web_base_url}}/static/terminal/xterm.min.css" rel="stylesheet">
 <style>
-.cmd-run:hover { color:#23c6c8 !important; }
-.cmd-edit:hover { color:#23c6c8 !important; }
-.cmd-del:hover { color:#e74c3c !important; }
+/* ---------- 变量 ---------- */
+.tp {
+    --tp-bg: #0d1117;
+    --tp-bar: #151b23;
+    --tp-panel: #11171f;
+    --tp-line: rgba(255, 255, 255, 0.07);
+    --tp-fg: #c9d1d9;
+    --tp-dim: #7d8794;
+    --tp-accent: #23c6c8;
+    --tp-ok: #3fb950;
+    --tp-warn: #d29922;
+    --tp-err: #f85149;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;                 /* JS 会按实际可用高度改写成 px */
+    min-height: 260px;
+    background: var(--tp-bg);
+    color: var(--tp-fg);
+    overflow: hidden;
+    font-size: 13px;
+}
 
-/* 顶到边框 —— **所有宽度都生效，电脑上也一样**。
-   这一页的主要工作区就是终端本身，外围那些留白全是白占的宽度：
-   #page-wrapper 15px、Bootstrap 的 .col-lg-12 15px、.ibox-content 20px、
-   .wrapper-content 15px… 手机上加起来六七十像素（换算成终端列数十几列），
-   桌面上同样是白扔。左边贴着侧边栏、上边贴着顶栏。
-   注意 .row 在 Bootstrap 里是负外边距，父容器 padding 归零后必须跟着归零，
-   否则内容会溢出视口、页面能横向拖动。
-   （规则写在终端页自己的 <style> 里，只影响这一页，列表/表单页不受影响。） */
-#page-wrapper { padding: 0 !important; }
-.wrapper-content { padding: 0 !important; }
-.wrapper-content > .row { margin-left: 0 !important; margin-right: 0 !important; }
-.wrapper-content .col-lg-12 { padding-left: 0 !important; padding-right: 0 !important; }
-.wrapper-content .ibox { margin: 0 !important; border: none !important; }
-.wrapper-content .ibox-content { padding: 0 !important; }
-#term_wrap { padding: 0 !important; }
-#term_box { height: 66vh !important; min-height: 320px; border-radius: 0 !important; padding: 4px 0 4px 4px; }
+/* 整页当终端用：不出现页面滚动条，滚动只发生在 xterm 内部 */
+html, body { overflow: hidden !important; }
+#page-wrapper, .wrapper-content { padding: 0 !important; background: transparent !important; }
+.wrapper-content > .row { margin: 0 !important; }
+.wrapper-content .col-lg-12 { padding: 0 !important; }
+.footer { display: none !important; }   /* 终端页不需要页脚，白占一条 */
+#page-wrapper .gray-bg { background: transparent !important; }
 
-/* 窄屏（手机竖屏）：快捷命令面板改成**浮层**叠在终端右侧 —— 它固定宽 192px，
-   在 390px 的屏上直接吃掉一半宽度。（内联样式要用 !important 才盖得住。） */
+/* ---------- 顶栏 ---------- */
+.tp-bar {
+    flex: 0 0 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px 0 12px;
+    background: var(--tp-bar);
+    border-bottom: 1px solid var(--tp-line);
+    user-select: none;
+}
+.tp-bar-l, .tp-bar-r { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.tp-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.tp-dot-off { background: #3a424d; }
+.tp-dot-wait { background: var(--tp-warn); }
+.tp-dot-on { background: var(--tp-ok); }
+.tp-dot-err { background: var(--tp-err); }
+
+.tp-title { font-weight: 600; color: #e6edf3; white-space: nowrap; }
+.tp-title:empty { display: none; }
+
+.tp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--tp-line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 12px;
+    color: var(--tp-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40vw;
+}
+.tp-chip-id { color: #9aa4b0; font-variant-numeric: tabular-nums; }
+.tp-chip-name { color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; }
+.tp-chip-name:empty { display: none; }
+
+.tp-status { font-size: 12px; color: var(--tp-dim); white-space: nowrap; }
+.tp-status-err { color: var(--tp-err); cursor: pointer; }
+.tp-status-err:hover { text-decoration: underline; }
+
+.tp-pick {
+    height: 24px;
+    font-size: 12px;
+    color: var(--tp-fg);
+    background: #1b2430;
+    border: 1px solid var(--tp-line);
+    border-radius: 4px;
+    padding: 0 6px;
+    outline: none;
+}
+
+.tp-btn {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--tp-dim);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, color .12s;
+}
+.tp-btn:hover { background: rgba(255, 255, 255, 0.07); color: #e6edf3; }
+.tp-btn:active { background: rgba(255, 255, 255, 0.12); }
+.tp-btn-text { margin-left: 5px; }
+.tp-btn.tp-panel-on { color: var(--tp-accent); }
+.tp-sep { width: 1px; height: 16px; background: var(--tp-line); }
+.tp-btn-close { font-size: 13px; padding: 0 7px; }
+.tp-btn-close:hover { background: rgba(248, 81, 73, 0.16); color: #ff9d97; }
+
+/* ---------- 终端 + 快捷命令 ---------- */
+.tp-main { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+.tp-term-wrap { flex: 1 1 auto; min-width: 0; padding: 8px 4px 8px 10px; overflow: hidden; }
+#term_box { width: 100%; height: 100%; }
+
+.tp-cmds {
+    flex: 0 0 216px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--tp-panel);
+    border-left: 1px solid var(--tp-line);
+}
+.tp-cmds-head {
+    flex: 0 0 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px 0 12px;
+    border-bottom: 1px solid var(--tp-line);
+    font-size: 12px;
+    color: #9aa4b0;
+    letter-spacing: .3px;
+}
+.tp-cmds-count { color: #5b6673; font-size: 11px; font-variant-numeric: tabular-nums; }
+.tp-cmds-body { flex: 1 1 auto; overflow-y: auto; padding: 4px; }
+.tp-cmds-body::-webkit-scrollbar { width: 8px; }
+.tp-cmds-body::-webkit-scrollbar-thumb { background: #2a333f; border-radius: 4px; }
+
+.cmd-row {
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    margin-bottom: 1px;
+}
+.cmd-row:hover { background: rgba(255, 255, 255, 0.05); }
+.cmd-row .cmd-run {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border: none;
+    background: transparent;
+    color: #c9d1d9;
+    font-size: 12px;
+    line-height: 1;
+    padding: 8px 8px;
+    cursor: pointer;
+}
+.cmd-row .cmd-edit, .cmd-row .cmd-del {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    color: transparent;
+    font-size: 12px;
+    line-height: 1;
+    padding: 6px 4px;
+    cursor: pointer;
+}
+.cmd-row:hover .cmd-edit, .cmd-row:hover .cmd-del { color: #6b7683; }
+.cmd-row .cmd-edit:hover { color: var(--tp-accent) !important; }
+.cmd-row .cmd-del:hover { color: var(--tp-err) !important; }
+.cmd-row .cmd-del { padding-right: 6px; }
+
+.tp-cmds-add {
+    flex: 0 0 auto;
+    margin: 4px;
+    padding: 7px 8px;
+    border: 1px dashed rgba(255, 255, 255, 0.14);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--tp-dim);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+.tp-cmds-add:hover { color: var(--tp-accent); border-color: rgba(35, 198, 200, 0.45); background: rgba(35, 198, 200, 0.06); }
+.tp-plus { font-size: 14px; margin-right: 3px; }
+
+.tp-cmds-empty { padding: 14px 10px; color: #5b6673; font-size: 12px; line-height: 1.7; }
+.tp-unhide { padding: 6px 10px; color: #5b6673; font-size: 11px; line-height: 1.8; }
+.tp-unhide button { border: none; background: transparent; color: var(--tp-accent); cursor: pointer; font-size: 11px; padding: 0; }
+
+/* ---------- 输入条 ---------- */
+.tp-input {
+    flex: 0 0 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 12px;
+    background: var(--tp-bar);
+    border-top: 1px solid var(--tp-line);
+}
+.tp-prompt { color: var(--tp-accent); font-family: Consolas, Menlo, monospace; font-weight: 700; }
+#term_input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 26px;
+    border: 1px solid var(--tp-line);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--tp-fg);
+    font-size: 12.5px;
+    padding: 0 10px;
+    outline: none;
+}
+#term_input:focus { border-color: rgba(35, 198, 200, 0.5); background: rgba(255, 255, 255, 0.06); }
+#term_input::placeholder { color: #5b6673; }
+.tp-hint { font-size: 11px; color: #4f5a66; white-space: nowrap; }
+.tp-send {
+    flex: 0 0 auto;
+    height: 26px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 4px;
+    background: #1f6f72;
+    color: #eafcfc;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tp-send:hover { background: #268a8e; }
+.tp-send:active { background: #1a5d5f; }
+
+/* ---------- 新建 / 编辑弹窗 ---------- */
+.tp-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(3, 6, 10, 0.62);
+}
+.tp-modal-box {
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    padding: 16px 18px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: #161d26;
+    color: var(--tp-fg);
+    box-sizing: border-box;
+}
+.tp-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 14px; font-weight: 600; color: #e6edf3; }
+.tp-modal-x { border: none; background: transparent; color: #6b7683; font-size: 13px; cursor: pointer; padding: 2px 4px; }
+.tp-modal-x:hover { color: #e6edf3; }
+.tp-label { display: block; font-size: 11px; color: #7d8794; margin: 10px 0 5px; }
+.tp-modal-box input, .tp-modal-box textarea {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #e6edf3;
+    font-size: 13px;
+    padding: 6px 9px;
+    box-sizing: border-box;
+    outline: none;
+    resize: none;
+}
+.tp-modal-box input { height: 30px; }
+.tp-modal-box input:focus, .tp-modal-box textarea:focus { border-color: rgba(35, 198, 200, 0.55); }
+.tp-modal-tip { margin-top: 10px; font-size: 11px; line-height: 1.6; color: #5b6673; }
+.tp-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.tp-btn-ghost { border: 1px solid rgba(255, 255, 255, 0.16); background: transparent; color: #c9d1d9; font-size: 12px; padding: 5px 14px; border-radius: 4px; cursor: pointer; }
+.tp-btn-ghost:hover { background: rgba(255, 255, 255, 0.06); }
+.tp-btn-primary { border: none; background: #1f6f72; color: #eafcfc; font-size: 12px; padding: 6px 16px; border-radius: 4px; cursor: pointer; }
+.tp-btn-primary:hover { background: #268a8e; }
+
+/* ---------- 窄屏 ---------- */
 @media (max-width: 768px) {
-    #term_box { height: 62vh !important; min-height: 300px; }
-    #cmd_panel {
-        position: absolute !important;
+    .tp { font-size: 12px; }
+    .tp-bar { flex-basis: 36px; padding: 0 6px; gap: 4px; }
+    .tp-btn { padding: 0 6px; }
+    .tp-btn-text { display: none; }            /* 顶栏只留图标，别把宽度挤没 */
+    .tp-hint { display: none; }
+    .tp-chip { max-width: 34vw; }
+    .tp-term-wrap { padding: 6px 2px 6px 6px; }
+    /* 快捷命令在手机上变成浮层：固定 216px 会吃掉一多半屏宽 */
+    .tp-cmds {
+        position: absolute;
         top: 0;
         right: 0;
-        width: 64vw !important;
-        max-height: 100%;
-        overflow-y: auto;
-        background: rgba(255,255,255,0.97) !important;
-        border-left: 1px solid rgba(51,51,51,0.2) !important;
-        box-shadow: -3px 0 12px rgba(0,0,0,0.18);
-        z-index: 60;
+        bottom: 0;
+        width: 72vw;
+        max-width: 260px;
+        z-index: 40;
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: -6px 0 18px rgba(0, 0, 0, 0.5);
     }
 }
 </style>
+
 <script src="{{.web_base_url}}/static/terminal/xterm.min.js"></script>
 <script src="{{.web_base_url}}/static/terminal/xterm-addon-fit.min.js"></script>
 <script>
@@ -103,6 +398,7 @@
     var boxEl = $('#term_box');
     // 快捷命令持久化在面板服务器（conf/quick_cmds.json），所有入口通用
     var SERVER_CMDS = {customs: [], hidden: []};
+    var FONT_KEY = 'np_term_font';
 
     function loadCmds() {
         $.get(webBase + '/terminal/getcmds', function (d) {
@@ -122,13 +418,70 @@
     function getHidden() { return SERVER_CMDS.hidden; }
 
     function sendLine(cmd) {
-        if (ws && ws.readyState === 1) {
+        if (ws && ws.readyState === 1 && cmd) {
             try { ws.send(new TextEncoder().encode(cmd + '\r')); } catch (e) {}
         }
     }
 
     function esc(s) {
         return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+    }
+
+    // ---------- 顶栏状态 ----------
+    // 之前的页面没有任何连接状态：WebSocket 断了、客户端掉线了，界面上还是一片黑，
+    // 只能靠「敲一下没反应」去猜。这里把三种状态显式画出来。
+    function setStatus(kind, text) {
+        var dot = $('#tp_dot'), st = $('#tp_status');
+        dot.removeClass('tp-dot-off tp-dot-wait tp-dot-on tp-dot-err');
+        st.removeClass('tp-status-err');
+        if (kind === 'on') {
+            dot.addClass('tp-dot-on');
+            st.text(text || '已连接');
+        } else if (kind === 'wait') {
+            dot.addClass('tp-dot-wait');
+            st.text(text || '连接中…');
+        } else if (kind === 'err') {
+            dot.addClass('tp-dot-err');
+            st.addClass('tp-status-err').text(text || '连接已断开 · 点击重连');
+        } else {
+            dot.addClass('tp-dot-off');
+            st.text(text || '未连接');
+        }
+    }
+
+    // 客户端名：控制器只给了 client_id，名字从 /terminal/getclients 里补。
+    // 拿不到就只显示编号（接口失败不该影响终端本身）。
+    function loadClientLabel(cid) {
+        if (!cid) {
+            $('#tp_client').hide();
+            var sel = $('#tp_client_pick');
+            sel.show().empty().append('<option value="0">选择客户端…</option>');
+            $.get(webBase + '/terminal/getclients', function (d) {
+                var list = (d && d.data) || [];
+                for (var i = 0; i < list.length; i++) {
+                    var it = list[i];
+                    var name = it.remark || ('客户端 ' + it.id);
+                    sel.append('<option value="' + it.id + '">' + esc(name) + (it.local_addr ? ' · ' + esc(it.local_addr) : '') + '</option>');
+                }
+            });
+            sel.on('change', function () {
+                var v = parseInt($(this).val(), 10);
+                if (v > 0) { doConnect(v); }
+            });
+            setStatus('off', '请选择客户端');
+            return;
+        }
+        $('#tp_client_id').text('#' + cid);
+        $.get(webBase + '/terminal/getclients', function (d) {
+            var list = (d && d.data) || [];
+            for (var i = 0; i < list.length; i++) {
+                if (list[i].id === cid) {
+                    $('#tp_client_name').text(list[i].remark || '');
+                    document.title = (list[i].remark ? list[i].remark + ' - ' : '') + 'SSH 终端 - NatPunch';
+                    break;
+                }
+            }
+        });
     }
 
     function renderCmdPanel() {
@@ -149,7 +502,7 @@
         var customs = getCustoms();
         for (var j = 0; j < customs.length; j++) { if (!hiddenCmd(customs[j].cmd)) cmds.push({c: customs[j], idx: j}); }
 
-        $('#cmd_count').text(cmds.length + ' 条命令');
+        $('#cmd_count').text(cmds.length ? cmds.length + ' 条' : '');
 
         // hidden 是**按命令文本**匹配的旧机制，且当前版本没有任何地方写它 ——
         // 老版本留下的残留（如 "ip a"）会让后来新增的同名命令一起隐身，
@@ -157,19 +510,22 @@
         // 这里给一个显眼的恢复入口，hidden 非空才出现。
         var hiddenTip = '';
         if (hidden.length > 0) {
-            hiddenTip = '<div style="font-size:11px;color:#888;padding:6px 4px;">有 ' + hidden.length + ' 条命令被隐藏　'
-                + '<button type="button" id="cmd_unhide" style="border:none;background:transparent;color:#23c6c8;cursor:pointer;font-size:11px;padding:0;text-decoration:underline;">全部恢复</button>'
+            hiddenTip = '<div class="tp-unhide">有 ' + hidden.length + ' 条命令被隐藏　'
+                + '<button type="button" id="cmd_unhide">全部恢复</button>'
                 + '</div>';
         }
 
         var html = '';
         for (var k = 0; k < cmds.length; k++) {
             var c = cmds[k].c, idx = cmds[k].idx;
-            html += '<div class="cmd-row" data-idx="' + idx + '" style="display:flex;align-items:center;margin:0;border-bottom:1px solid rgba(51,51,51,0.08);">'
-                + '<button type="button" class="cmd-run" data-idx="' + idx + '" style="flex:1;min-width:0;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;background:transparent;color:#333;font-size:12px;cursor:pointer;padding:6px 3px;">' + esc(c.label) + '</button>'
-                + '<button type="button" class="cmd-edit" data-idx="' + idx + '" onclick="npCmdEdit(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:13px;cursor:pointer;padding:6px 4px;line-height:1;" title="编辑">✎</button>'
-                + '<button type="button" class="cmd-del" data-idx="' + idx + '" onclick="npCmdDel(this)" style="flex-shrink:0;border:none;background:transparent;color:#888;font-size:14px;cursor:pointer;padding:6px 6px;line-height:1;" title="删除">×</button>'
+            html += '<div class="cmd-row" data-idx="' + idx + '">'
+                + '<button type="button" class="cmd-run" data-idx="' + idx + '" title="' + esc(c.cmd) + '">' + esc(c.label) + '</button>'
+                + '<button type="button" class="cmd-edit" data-idx="' + idx + '" onclick="npCmdEdit(this)" title="编辑">✎</button>'
+                + '<button type="button" class="cmd-del" data-idx="' + idx + '" onclick="npCmdDel(this)" title="删除">✕</button>'
                 + '</div>';
+        }
+        if (!cmds.length && !hidden.length) {
+            html = '<div class="tp-cmds-empty">还没有快捷命令。<br>点下面的「新建命令」把常敲的命令存起来，之后一键发送。</div>';
         }
         $('#cmd_list').html(html + hiddenTip);
     }
@@ -202,6 +558,7 @@
     $(document).on('click', '.cmd-run', function () {
         var c = cmdAt(idxOf(this));
         if (c) { sendLine(c.cmd); }
+        if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) { togglePanel(false); }
     });
 
     // 弹窗添加/编辑：用**下标**记「正在编辑哪一条」，不用 cmd 文本
@@ -278,24 +635,79 @@
     $('#cmd_modal_cmd').on('keydown', function (e) {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { saveModal(); }
     });
+    $('#cmd_modal').on('click', function (e) {
+        if (e.target === this) { closeModal(); }   // 点遮罩关闭
+    });
 
-    // 自动连接（从客户端列表进入）
-    if (initClientId > 0) {
-        doConnect(initClientId);
+    // ---------- 面板开合 ----------
+    // 桌面：右侧栏（挤终端宽度）；窄屏：浮层（盖住终端）。两者语义不同，
+    // 但都走同一个按钮；按钮在展开时点亮主题色，看得出来当前是开着的。
+    function narrow() {
+        return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+    }
+    function panelOpen() { return $('#cmd_panel').is(':visible'); }
+    function togglePanel(force) {
+        var want = (typeof force === 'boolean') ? force : !panelOpen();
+        $('#cmd_panel').toggle(want);
+        $('#tp_panel_btn').toggleClass('tp-panel-on', want);
+        sendResize();
     }
 
-    loadCmds();
+    // 终端高度 = 视口高度 - 本页顶栏/输入条占位，随窗口与旋屏重算。
+    // 不用 100vh 硬顶着：面板里的导航栏在窄屏会变高，硬算会露一截背景。
+    function layout() {
+        var top = $('#tp').offset().top;
+        var h = window.innerHeight - top;
+        if (h < 260) { h = 260; }
+        $('#tp').css('height', h + 'px');
+        sendResize();
+    }
+
+    function fontSize() {
+        var v = parseInt(window.localStorage.getItem(FONT_KEY) || '0', 10);
+        return (v >= 10 && v <= 22) ? v : (narrow() ? 12 : 14);
+    }
+    function setFontSize(v) {
+        if (v < 10) { v = 10; }
+        if (v > 22) { v = 22; }
+        window.localStorage.setItem(FONT_KEY, String(v));
+        if (term) { term.options.fontSize = v; sendResize(); }
+    }
 
     function openTerm() {
         if (term) { return; }
-        // 窄屏用小一号字，能多挤几列出来
-        var narrow = !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
         term = new Terminal({
             cursorBlink: true,
-            fontSize: narrow ? 12 : 14,
-            fontFamily: 'Consolas, Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace',
-            rendererType: 'dom',
-            theme: {background: '#000000'}
+            cursorStyle: 'bar',
+            fontSize: fontSize(),
+            fontFamily: 'Consolas, "Cascadia Mono", Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace',
+            lineHeight: 1.25,
+            scrollback: 5000,
+            // 原来写死 rendererType:'dom' 且主题只有 background —— 黑底配默认的
+            // 高饱和 ANSI 色，在白底玻璃面板里格外刺眼。这里换一套低饱和的深色配色。
+            theme: {
+                background: '#0d1117',
+                foreground: '#c9d1d9',
+                cursor: '#23c6c8',
+                cursorAccent: '#0d1117',
+                selectionBackground: 'rgba(35,198,200,0.28)',
+                black: '#484f58',
+                red: '#ff7b72',
+                green: '#3fb950',
+                yellow: '#d29922',
+                blue: '#58a6ff',
+                magenta: '#bc8cff',
+                cyan: '#39c5cf',
+                white: '#b1bac4',
+                brightBlack: '#6e7681',
+                brightRed: '#ffa198',
+                brightGreen: '#56d364',
+                brightYellow: '#e3b341',
+                brightBlue: '#79c0ff',
+                brightMagenta: '#d2a8ff',
+                brightCyan: '#56d4dd',
+                brightWhite: '#f0f6fc'
+            }
         });
         fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
@@ -363,12 +775,14 @@
         openTerm();
         closeWs();
         term.reset();
+        setStatus('wait', '连接中…');
         var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
         var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
         var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
-        try { ws = new WebSocket(url); } catch (e) { return; }
+        try { ws = new WebSocket(url); } catch (e) { setStatus('err', '无法建立连接 · 点击重连'); return; }
         ws.binaryType = 'arraybuffer';
         ws.onopen = function () {
+            setStatus('on', '已连接');
             $('#term_input').focus();
         };
         ws.onmessage = function (ev) {
@@ -379,7 +793,7 @@
             }
         };
         ws.onerror = function () {};
-        ws.onclose = function () {};
+        ws.onclose = function () { setStatus('err', '连接已断开 · 点击重连'); };
     }
 
     function closeWs() {
@@ -394,36 +808,28 @@
         }
     }
 
-    // 右上角 × 关闭终端，返回客户端列表
-    $('.close-link').on('click', function (e) {
+    // ---------- 顶栏按钮 ----------
+    $('#tp_close').on('click', function (e) {
         e.preventDefault();
         closeWs();
         location.href = webBase + '/client/list';
     });
-
-    // 折叠/展开快捷命令面板（桌面默认展开；窄屏保持折叠 —— 见下方初始化）
-    $('#cmd_panel_toggle').on('click', function (e) {
+    $('#tp_clear').on('click', function (e) {
         e.preventDefault();
-        var p = $('#cmd_panel');
-        if (p.is(':visible')) {
-            p.hide();
-            $('#cmd_panel_toggle_txt').text('≪');
-        } else {
-            p.show();
-            $('#cmd_panel_toggle_txt').text('≫');
-        }
-        sendResize();
+        if (term) { term.clear(); }
+    });
+    $('#tp_font_inc').on('click', function () { setFontSize(fontSize() + 1); });
+    $('#tp_font_dec').on('click', function () { setFontSize(fontSize() - 1); });
+    $('#tp_panel_btn').on('click', function (e) { e.preventDefault(); togglePanel(); });
+    // 断开状态下点状态文字 = 重连（重连到当前客户端）
+    $('#tp_status').on('click', function () {
+        if (initClientId > 0 && (!ws || ws.readyState > 1)) { doConnect(initClientId); }
     });
 
-    // 电脑浏览器默认展开快捷命令面板；窄屏保持折叠（窄屏下它是浮层，展开会盖住终端）
-    (function () {
-        if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
-            return; // 窄屏：保持 HTML 里的默认折叠状态
-        }
-        $('#cmd_panel').show();
-        $('#cmd_panel_toggle_txt').text('≫');
-        sendResize();
-    })();
+    // 电脑浏览器默认展开快捷命令面板；窄屏默认收起（窄屏下它是浮层，展开会盖住终端）
+    function initPanel() {
+        togglePanel(!narrow());
+    }
 
     $('#term_input').on('keydown', function (e) {
         if (e.key === 'Enter') {
@@ -431,15 +837,27 @@
             $(this).val('');
         }
     });
-
     $('#term_send').click(function () {
         sendLine($('#term_input').val());
         $('#term_input').val('');
     });
 
-    $(window).on('resize', sendResize);
+    $(window).on('resize', layout);
     // 部分移动端浏览器旋屏只发 orientationchange，且视口尺寸是异步更新的，
     // 直接量会拿到旧的宽度；延一小会儿再 fit。
-    $(window).on('orientationchange', function () { setTimeout(sendResize, 300); });
+    $(window).on('orientationchange', function () { setTimeout(layout, 300); });
+    // 面板导航栏折叠/展开会改变内容区宽度，跟着重算
+    $('.navbar-minimalize').on('click', function () { setTimeout(layout, 400); });
+
+    // 自动连接（从客户端列表进入）
+    layout();
+    initPanel();
+    loadClientLabel(initClientId);
+    if (initClientId > 0) {
+        doConnect(initClientId);
+    } else {
+        openTerm();
+    }
+    loadCmds();
 })();
 </script>
