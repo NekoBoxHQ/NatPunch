@@ -40,6 +40,15 @@
 </div>
 
 <script>
+    // npEsc：拼 HTML 字符串前必须用。这些字段（Remark/WebUserName/Basic 账号密码）
+    // **可能由客户端自报**（bridge 的 NEW_CONF 路径），原样拼进 detailFormatter 就是
+    // 存储型 XSS：任意持 vkey 的客户端写 remark=<img onerror=...>，管理员展开行即执行。
+    // html/template 只保护 {{.x}}，保护不到 JS 里拼出来的字符串。
+    function npEsc(s) {
+        return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+    }
     /*bootstrap table*/
     $('#table').bootstrapTable({
         toolbar: "#toolbar",
@@ -74,22 +83,22 @@
                 + '<b langtag="word-flowlimit"></b>: ' + row.Flow.FlowLimit + 'MB&emsp;'
                 + '<b langtag="word-ratelimit"></b>: ' + row.RateLimit + 'Mbps&emsp;'
                 + '<b langtag="word-maxtunnels"></b>: ' + row.MaxTunnelNum + '&emsp;<br/><br/>'
-                + '<b langtag="word-webusername"></b>: ' + row.WebUserName + '&emsp;'
-                + '<b langtag="word-webpassword"></b>: ' + row.WebPassword + '&emsp;'
-                + '<b langtag="word-basicusername"></b>: ' + row.Cnf.U + '&emsp;'
-                + '<b langtag="word-basicpassword"></b>: ' + row.Cnf.P + '&emsp;<br/><br/>'
+                + '<b langtag="word-webusername"></b>: ' + npEsc(row.WebUserName) + '&emsp;'
+                + '<b langtag="word-webpassword"></b>: ' + npEsc(row.WebPassword) + '&emsp;'
+                + '<b langtag="word-basicusername"></b>: ' + npEsc(row.Cnf.U) + '&emsp;'
+                + '<b langtag="word-basicpassword"></b>: ' + npEsc(row.Cnf.P) + '&emsp;<br/><br/>'
                 + '<b langtag="word-connectbyconfig"></b>: <span langtag="word-' + row.ConfigConnAllow + '"></span>&emsp;<br/><br/>'
                 + '<b langtag="word-ipwhite"></b>: ' + row.IpWhite + '&emsp;'
-                + '<b langtag="word-ipwhitepass"></b>: ' + row.IpWhitePass + '&emsp;<br/>'
-                + '<b langtag="word-ipwhitelist"></b>: ' + row.IpWhiteList + '&emsp;<br/>'
-                + '<b langtag="word-blackip"></b>: ' + row.BlackIpList + '&emsp;<br/><br/>'
+                + '<b langtag="word-ipwhitepass"></b>: ' + npEsc(row.IpWhitePass) + '&emsp;<br/>'
+                + '<b langtag="word-ipwhitelist"></b>: ' + npEsc(row.IpWhiteList) + '&emsp;<br/>'
+                + '<b langtag="word-blackip"></b>: ' + npEsc(row.BlackIpList) + '&emsp;<br/><br/>'
                 + '<b langtag="word-createtime"></b>: ' + row.CreateTime + '&emsp;<br/>'
                 + '<b langtag="word-lastonlinetime"></b>: ' + row.LastOnlineTime + '&emsp;<br/>'
                 + '<b langtag="word-expiretime"></b>: ' + (row.ExpireTime || '<span langtag="info-unrestricted"></span>') + '&emsp;<br/><br/>'
-                + '<b langtag="word-quicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.p}}|' + row.VerifyKey + '|false')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
-                + '<b langtag="word-tlsquicklycommand"></b>: <span>' + encodeToBase64(row.Remark +'|'+'{{.ip}}:{{.tls_p}}|' + row.VerifyKey + '|true{{if .bridge_fingerprint}}|{{.bridge_fingerprint}}{{end}}')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
-                + '<b langtag="word-commandclient"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + row.VerifyKey + " -type=" +{{.bridgeType}} +"</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button><br/>"
-                + '<b langtag="word-commandclient-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + row.VerifyKey + " -tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button>"
+                + '<b langtag="word-quicklycommand"></b>: <span>' + encodeToBase64(npEsc(row.Remark) +'|'+'{{.ip}}:{{.p}}|' + row.VerifyKey + '|false')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
+                + '<b langtag="word-tlsquicklycommand"></b>: <span>' + encodeToBase64(npEsc(row.Remark) +'|'+'{{.ip}}:{{.tls_p}}|' + row.VerifyKey + '|true{{if .bridge_fingerprint}}|{{.bridge_fingerprint}}{{end}}')   + '</span>&emsp;<button class="copy btn btn-info btn-xs" onclick="copyCommand(this)" data-clipboard-text="">复制</button><br/>'
+                + '<b langtag="word-commandclient"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.p}} -vkey=" + npEsc(row.VerifyKey) + " -type=" +{{.bridgeType}} +"</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button><br/>"
+                + '<b langtag="word-commandclient-tls"></b>: ' + "<code>{{.clientCmd}} -server={{.ip}}:{{.tls_p}} -vkey=" + npEsc(row.VerifyKey) + " -tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}</code><button class=\"copy btn btn-info btn-xs\" onclick=\"copyCommand(this)\" data-clipboard-text=\"\">复制</button>"
         },
         //表格的列
         columns: [
@@ -111,7 +120,12 @@
                 title: '<span langtag="word-remark"></span>',//标题
                 halign: 'center',
                 sortable: true,
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) {
+                    // remark 可以由客户端自报（bridge 的 NEW_CONF 路径），
+                    // bootstrap-table 默认按 HTML 渲染 → 不转义就是存储型 XSS。
+                    return npEsc(value);
+                }
             },
             {
                 field: 'Version',//域值
