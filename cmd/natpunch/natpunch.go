@@ -97,6 +97,28 @@ func main() {
 	// （web/controllers/base.go 的 useTls），漏掉这行会让 TLS 桥接静默失效。
 	bridge.ServerTlsEnable = beego.AppConfig.DefaultBool("tls_enable", false)
 
+	// 是否只提供 TLS 桥接（不再监听明文端口）。
+	//   auto（默认）：面板装了证书 + tls_enable=1 → 只留 TLS 口
+	//   on / off：强制 / 禁用
+	// 理由：面板都用上 HTTPS 了，桥接还开着明文口，MD5(vkey) 就能被嗅探重放。
+	switch strings.ToLower(strings.TrimSpace(beego.AppConfig.DefaultString("bridge_require_tls", "auto"))) {
+	case "on", "true", "1", "yes":
+		bridge.RequireTLS = true
+	case "off", "false", "0", "no":
+		bridge.RequireTLS = false
+	default: // auto
+		if bridge.ServerTlsEnable && beego.AppConfig.DefaultBool("web_open_ssl", false) {
+			_, certErr := os.Stat(beego.AppConfig.String("web_cert_file"))
+			_, keyErr := os.Stat(beego.AppConfig.String("web_key_file"))
+			bridge.RequireTLS = certErr == nil && keyErr == nil
+		}
+	}
+	if bridge.RequireTLS && !bridge.ServerTlsEnable {
+		// 没有 TLS 端口可服务，硬性要求只会让所有客户端连不上 —— 回退并明确告警。
+		logs.Warn("bridge_require_tls 已开启但 tls_enable=0，没有 TLS 端口可服务：本次回退为允许明文桥接")
+		bridge.RequireTLS = false
+	}
+
 	common.InitPProfFromFile()
 	if level = beego.AppConfig.String("log_level"); level == "" {
 		level = "7"
@@ -257,4 +279,6 @@ github_admin_login=
 
 tls_enable=true
 tls_bridge_port=8025
+# 是否只提供 TLS 桥接：auto / on / off（auto = 面板装了证书就只留 TLS 口）
+bridge_require_tls=auto
 `

@@ -26,6 +26,13 @@ import (
 
 var ServerTlsEnable bool = false
 
+// RequireTLS：是否**只**提供 TLS 桥接（不再监听明文桥接端口）。
+//
+// 由 bridge_require_tls 决定，默认 auto：面板装了证书（web_open_ssl + 证书文件可读）
+// 且 tls_enable=1 时自动开启 —— 「面板用什么证书、桥接就按同样强度来」。
+// 显式 off 可以保留明文口（老客户端 / 内网自签场景）。
+var RequireTLS bool = false
+
 type Client struct {
 	mu        sync.Mutex // 保护 signal/tunnel/Version 等字段的并发读写
 	tunnel    *natpunch_mux.Mux
@@ -78,17 +85,27 @@ func (s *Bridge) StartTunnel() error {
 		})
 	} else {
 
-		go func() {
-			listener, err := connection.GetBridgeListener(s.tunnelType)
-			if err != nil {
-				// 库代码禁止 os.Exit：监听失败记录错误并退出本 goroutine（阶段三 #15）
-				logs.Error("bridge listener start error: %v", err)
-				return
-			}
-			conn.Accept(listener, func(c net.Conn) {
-				s.cliProcess(conn.NewConn(c))
-			})
-		}()
+		// 明文桥接端口。
+		//
+		// RequireTLS=true（默认在「面板装了证书」时自动开启）时**不再监听**明文端口：
+		// 面板都上了 HTTPS，桥接却还留着一个明文口，等于把 MD5(vkey) 静态凭据暴露在
+		// 中间人面前 —— 抓一次就能重放接管隧道。关掉它比"提醒用户"可靠。
+		// 需要明文（老客户端 / 内网自签场景）就在配置里显式写 bridge_require_tls=off。
+		if RequireTLS {
+			logs.Info("bridge: plaintext listener disabled (bridge_require_tls), only tls_bridge_port is served")
+		} else {
+			go func() {
+				listener, err := connection.GetBridgeListener(s.tunnelType)
+				if err != nil {
+					// 库代码禁止 os.Exit：监听失败记录错误并退出本 goroutine（阶段三 #15）
+					logs.Error("bridge listener start error: %v", err)
+					return
+				}
+				conn.Accept(listener, func(c net.Conn) {
+					s.cliProcess(conn.NewConn(c))
+				})
+			}()
+		}
 
 		// tls
 		if ServerTlsEnable {
