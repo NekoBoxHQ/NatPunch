@@ -17,11 +17,6 @@ import (
 // （复评🟠7：4096 硬编码约 16MB，千兆级客户端大流量下可能批量掉线）
 var WriteQueueMax int64 = 16384
 
-// maxReceiveQueuePackets 单条流接收队列的硬上限（包数，每包 ≤4KB）。
-// 窗口协商只保证"对端**应该**守窗口"，但代码在窗口满之后并不校验就 Push：
-// 异常/恶意对端可以持续灌数据，单流把内存吃到 OOM。4096 包 ≈ 16MB/流。
-const maxReceiveQueuePackets = 4096
-
 const (
 	muxPingFlag uint8 = iota
 	muxNewConnOk
@@ -117,16 +112,8 @@ func (s *Mux) NewConn() (*conn, error) {
 	select {
 	case <-conn.connStatusOkCh:
 		return conn, nil
-	case <-s.done:
-		// mux 已经关了，别再等对端回应
-		return nil, errors.New("create connection fail, the mux has closed")
 	case <-timer.C:
 	}
-	// 超时必须把这条流回收：connMap 里那条已 Set 的 entry 会永远留着，
-	// 而对端随后真的接受了的话，它的数据会持续往本端的 receiveWindow 里灌，
-	// 却永远没人读 —— 内存一路涨到进程被 OOM。conn.Close() 内部会 Delete 并
-	// 给对端发 muxConnClose。
-	_ = conn.Close()
 	return nil, errors.New("create connection fail，the server refused the connection")
 }
 
@@ -166,17 +153,10 @@ func (s *Mux) sendInfo(flag uint8, id int32, data interface{}) {
 		return
 	}
 	if err = s.writeQueue.Push(pack); err != nil {
-		// 写队列满 = 这条链路暂时发不出去（对端慢/拥塞），原来的处理是
-		// **关掉整个 mux** —— 一条突发大流量的隧道会让该客户端上所有隧道一起断。
-		// 现在只关掉造成拥塞的那条流（id 就是流号），其它流继续跑；
-		// 对端会收到 muxConnClose 并把这条流回收。
-		log.Printf("mux: write queue overflow (limit=%d), closing conn %d only", s.writeQueue.maxLength, id)
+		// 独立日志区分「队列限流」与「链路故障」：写端过载（如单连接突发大流量）触发
+		log.Printf("mux: write queue overflow (limit=%d), closing mux", s.writeQueue.maxLength)
 		muxPack.Put(pack)
-		if id > 0 {
-			if c, ok := s.connMap.Get(id); ok && c != nil {
-				_ = c.Close()
-			}
-		}
+		_ = s.Close()
 		return
 	}
 	return
@@ -333,7 +313,7 @@ func (s *Mux) readSession() {
 				}
 				continue
 			}
-			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose.Load() {
+			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose {
 				switch pack.flag {
 				case muxNewMsg, muxNewMsgPart: //New msg from remote connection
 					err = s.newMsg(connection, pack)
@@ -356,20 +336,14 @@ func (s *Mux) readSession() {
 					}
 					continue
 				case muxMsgSendOk:
-					if connection.isClose.Load() {
+					if connection.isClose {
 						continue
 					}
 					connection.sendWindow.SetSize(pack.window)
 					continue
 				case muxConnClose: //close the connection
-					connection.closingFlag.Store(true)
+					connection.closingFlag = true
 					connection.receiveWindow.Stop() // close signal to receive window
-					// 对端关流时，本端阻塞在 sendWindow 上的写协程必须被唤醒：
-					// 原来只 Stop 了 receiveWindow，sendWindow 还在等"窗口 + ack"，
-					// 纯写侧的应用（没有读、收不到 EOF）会永久挂住 —— 每条这样的
-					// 流泄漏一个 goroutine + 一个 connMap 条目。
-					connection.sendWindow.CloseWindow()
-					s.connMap.Delete(connection.connId)
 					continue
 				}
 			} else if pack.flag == muxConnClose {
@@ -381,7 +355,7 @@ func (s *Mux) readSession() {
 }
 
 func (s *Mux) newMsg(connection *conn, pack *muxPackager) (err error) {
-	if connection.isClose.Load() {
+	if connection.isClose {
 		err = io.ErrClosedPipe
 		return
 	}
