@@ -169,14 +169,25 @@ func initConfig(confDir string) {
 		publicVkey := crypt.GetRandomString(16) // 公共密钥随机化，避免写死 123（F1-8）
 		content := strings.Replace(defaultNatPunchConf, "web_password=123", "web_password="+webPassword, 1)
 		content = strings.Replace(content, "public_vkey=123", "public_vkey="+publicVkey, 1)
-		f, err := os.Create(confPath)
+		// 0600：这个文件里有面板管理员口令（以及可能的 GitHub client_secret）。
+		// os.Create 默认 0644 = 同机任意用户可读，等于把面板口令公开。
+		f, err := os.OpenFile(confPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
 			return
 		}
 		defer f.Close()
-		f.WriteString(content)
+		_ = f.Chmod(0600) // 抵消 umask 的影响
+		if _, err := f.WriteString(content); err != nil {
+			logs.Error("write default config: %v", err)
+		}
 		logs.Info("Auto-generated default config file:", confPath)
-		logs.Info("Web login username: admin, password:", webPassword)
+		// 口令只提示"已生成"，不打印明文：控制台/journal 里落明文口令是长期隐患。
+		logs.Info("Web login username: admin, password: 已写入 %s（请自行查看，权限 0600）", confPath)
+	}
+	// 存量文件若因历史版本是 0644，启动时顺手收紧。
+	if st, err := os.Stat(confPath); err == nil && st.Mode().Perm()&0077 != 0 {
+		_ = os.Chmod(confPath, 0600)
+		logs.Warn("配置文件权限过宽，已收紧为 0600: %s", confPath)
 	}
 }
 

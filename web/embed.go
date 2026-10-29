@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/astaxie/beego"
 )
 
@@ -63,14 +64,19 @@ func (d diskFirstFS) Open(name string) (http.File, error) {
 
 // StaticHTTPFS returns an http.FileSystem rooted at the embedded static/ directory
 // (so Open("css/style.css") maps to static/css/style.css), with on-disk
-// web/static/ taking priority so admins can drop extra files (e.g. natpunch-client
-// binaries) into web/static/ and serve them over /static/ without a rebuild.
+// <运行目录>/web/static/ taking priority so admins can drop extra files
+// (e.g. natpunch-client binaries) and serve them over /static/ without a rebuild.
+//
+// 磁盘覆盖层要挂在**运行目录**下，而不是进程 CWD：服务由 systemd/procd 拉起时
+// WorkingDirectory 未必是安装目录，用相对路径会去读别处的 web/static
+// （轻则覆盖层失效，重则服务到非预期文件）。
 func StaticHTTPFS() http.FileSystem {
 	sub, err := fs.Sub(StaticFS, "static")
 	if err != nil {
 		panic("web: embed static sub FS: " + err.Error())
 	}
-	return slashFileSystem{fs: diskFirstFS{embedded: http.FS(sub), diskRoot: filepath.Join("web", "static")}}
+	root := filepath.Join(common.GetRunPath(), "web", "static")
+	return slashFileSystem{fs: diskFirstFS{embedded: http.FS(sub), diskRoot: root}}
 }
 
 // ReadStaticFile reads a file from the embedded static FS.

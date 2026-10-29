@@ -198,7 +198,11 @@ set_kv() {
     esac
     [ -f "$CONF" ] || die "配置文件不存在: $CONF"
     awk -v k="$key" 'BEGIN { pat = "^[[:space:]]*#?[[:space:]]*" k "[[:space:]]*=" } $0 !~ pat { print }' "$CONF" > "$CONF.clean" || die "处理配置失败"
+    # 配置里有明文 web_password：重建时必须保持 0600（原来 mv 过来的 .clean 是
+    # umask 022 下的 0644，等于把面板口令对同机所有用户公开）。
+    chmod 600 "$CONF.clean" 2>/dev/null || true
     mv "$CONF.clean" "$CONF" || die "写回配置失败"
+    chmod 600 "$CONF" 2>/dev/null || true
     printf '%s=%s\n' "$key" "$val" >> "$CONF" || die "追加 $key 失败"
     grep -q "^$key=" "$CONF" || die "校验 $key 失败"
 }
