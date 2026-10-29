@@ -88,7 +88,7 @@ func (s *ClientController) Add() {
 		}
 		// 客户端 web 密码 bcrypt 落库（F2-3）；空值保持空（不启用用户登录）
 		webPasswordHash := ""
-		if wp := s.getEscapeString("web_password"); wp != "" {
+		if wp := s.GetString("web_password"); wp != "" {
 			var err error
 			webPasswordHash, err = common.HashPassword(wp)
 			if err != nil {
@@ -96,13 +96,13 @@ func (s *ClientController) Add() {
 				return
 			}
 		}
-		// vkey 防呆：留空自动生成 32 位 hex；手填必须 ≥8 位，杜绝短 key 导致
-		// 服务端/客户端不一致（升级掉线）的误操作。
-		vkey := s.getEscapeString("vkey")
+		// vkey 防呆：留空自动生成 32 位 hex；手填必须合法（8..64 位，只允许字母数字 . _ -），
+		// 杜绝短 key / 含引号分号的 key —— 后者会被拼进「一键部署」命令（命令注入）。
+		vkey := s.GetString("vkey")
 		if vkey == "" {
 			vkey = crypt.GetVkey()
-		} else if len(vkey) < 8 {
-			s.AjaxErr("验证密钥至少 8 位（建议留空自动生成 32 位）")
+		} else if !file.ValidVerifyKey(vkey) {
+			s.AjaxErr("验证密钥只能包含字母、数字和 . _ -，长度 8~64（建议留空自动生成）")
 			return
 		}
 		if !file.GetDb().VerifyVkey(vkey, 0) {
@@ -113,17 +113,17 @@ func (s *ClientController) Add() {
 			VerifyKey: vkey,
 			Id:        id,
 			Status:    true,
-			Remark:    s.getEscapeString("remark"),
+			Remark:    s.GetString("remark"),
 			Cnf: &file.Config{
-				U:        s.getEscapeString("u"),
-				P:        s.getEscapeString("p"),
+				U:        s.GetString("u"),
+				P:        s.GetString("p"),
 				Compress: common.GetBoolByStr(s.getEscapeString("compress")),
 				Crypt:    s.GetBoolNoErr("crypt"),
 			},
 			ConfigConnAllow: s.GetBoolNoErr("config_conn_allow"),
 			RateLimit:       rl,
 			MaxConn:         s.GetIntNoErr("max_conn"),
-			WebUserName:     s.getEscapeString("web_username"),
+			WebUserName:     s.GetString("web_username"),
 			WebPassword:     webPasswordHash,
 			MaxTunnelNum:    s.GetIntNoErr("max_tunnel"),
 			Flow: &file.Flow{
@@ -212,7 +212,7 @@ func (s *ClientController) Edit() {
 	} else {
 		// 客户端 web 密码 bcrypt 落库（F2-3）；空值保持原状（不清空）
 		webPasswordHash := ""
-		if wp := s.getEscapeString("web_password"); wp != "" {
+		if wp := s.GetString("web_password"); wp != "" {
 			var err error
 			webPasswordHash, err = common.HashPassword(wp)
 			if err != nil {
@@ -226,19 +226,19 @@ func (s *ClientController) Edit() {
 			s.AjaxErr("client ID not found")
 			return
 		} else {
-			if s.getEscapeString("web_username") != "" {
-				if s.getEscapeString("web_username") == beego.AppConfig.String("web_username") || !file.GetDb().VerifyUserName(s.getEscapeString("web_username"), c.Id) {
+			if s.GetString("web_username") != "" {
+				if s.GetString("web_username") == beego.AppConfig.String("web_username") || !file.GetDb().VerifyUserName(s.GetString("web_username"), c.Id) {
 					s.AjaxErr("web login username duplicate, please reset")
 					return
 				}
 			}
 			if s.GetSession("isAdmin").(bool) {
 				// vkey 防呆：留空 = 保持原值（绝不因编辑覆盖成空/变短导致客户端掉线）
-				nv := s.getEscapeString("vkey")
+				nv := s.GetString("vkey")
 				if nv == "" {
 					nv = c.VerifyKey
-				} else if len(nv) < 8 {
-					s.AjaxErr("验证密钥至少 8 位（留空保持原值）")
+				} else if !file.ValidVerifyKey(nv) {
+					s.AjaxErr("验证密钥只能包含字母、数字和 . _ -，长度 8~64（留空保持原值）")
 					return
 				}
 				if !file.GetDb().VerifyVkey(nv, c.Id) {
@@ -279,14 +279,14 @@ func (s *ClientController) Edit() {
 				c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
 				c.ExpireTime = normalizeExpireTime(s.getEscapeString("expire_time"))
 			}
-			c.Remark = s.getEscapeString("remark")
-			c.Cnf.U = s.getEscapeString("u")
-			c.Cnf.P = s.getEscapeString("p")
+			c.Remark = s.GetString("remark")
+			c.Cnf.U = s.GetString("u")
+			c.Cnf.P = s.GetString("p")
 			c.Cnf.Compress = common.GetBoolByStr(s.getEscapeString("compress"))
 			c.Cnf.Crypt = s.GetBoolNoErr("crypt")
 			b, err := beego.AppConfig.Bool("allow_user_change_username")
 			if s.GetSession("isAdmin").(bool) || (err == nil && b) {
-				c.WebUserName = s.getEscapeString("web_username")
+				c.WebUserName = s.GetString("web_username")
 			}
 			if webPasswordHash != "" {
 				c.WebPassword = webPasswordHash

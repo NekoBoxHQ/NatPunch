@@ -549,20 +549,37 @@ upgrade() {
     cp "$BIN_SRC" "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "拷贝二进制失败"; }
     chmod +x "$DIR/natpunch.new" || { cd /; rm -rf "$TMP"; die "赋予执行权限失败"; }
     WAS_RUNNING=0; is_running && WAS_RUNNING=1
+    # 升级失败统一回滚：原来的失败路径只覆盖「mv 失败」一种，web 拷贝失败、配置缺失、
+    # start 失败都直接 die —— 而这时旧进程已经 stop、二进制已经换掉，服务就**停在那儿**，
+    # 所有客户端同时掉线且不会自愈。
+    upgrade_rollback() {
+        warn "升级失败，回滚到旧版本…"
+        if [ -n "${BAK:-}" ] && [ -f "$BAK" ]; then
+            cp -f "$BAK" "$BIN" 2>/dev/null && info "已恢复旧二进制: $BAK"
+        fi
+        if [ -n "${CONF_BAK:-}" ] && [ -d "$CONF_BAK" ]; then
+            cp -a "$CONF_BAK/." "$CONF_DIR/" 2>/dev/null && info "已恢复配置目录: $CONF_BAK"
+        fi
+        [ "$WAS_RUNNING" = "1" ] && start
+    }
     stop
     if ! mv "$DIR/natpunch.new" "$BIN"; then
         warn "替换二进制失败，尝试回滚"
-        [ -n "${BAK:-}" ] && [ -f "$BAK" ] && cp "$BAK" "$BIN"
-        [ "$WAS_RUNNING" = "1" ] && start
+        upgrade_rollback
         cd /; rm -rf "$TMP"; die "替换二进制失败"
     fi
     if [ -n "${WEB_SRC:-}" ]; then
         rm -rf "$WEB"
-        cp -r "$WEB_SRC" "$WEB" || { cd /; rm -rf "$TMP"; die "拷贝 web 失败"; }
+        if ! cp -r "$WEB_SRC" "$WEB"; then
+            cd /; rm -rf "$TMP"; upgrade_rollback; die "拷贝 web 失败"
+        fi
         info "已更新 web 目录"
     fi
     cd /; rm -rf "$TMP"
-    [ -f "$CONF" ] || die "缺少配置文件 $CONF"
+    if [ ! -f "$CONF" ]; then
+        upgrade_rollback
+        die "缺少配置文件 $CONF"
+    fi
     # 升级后自检：客户端数据（clients.json）缺失/为空/条数少于备份 → 自动恢复（vkey 不可变）
     if [ -n "$CONF_BAK" ] && [ -s "$CONF_BAK/clients.json" ]; then
         CNT_NEW=$(grep -c '"VerifyKey"' "$CONF_DIR/clients.json" 2>/dev/null || echo 0)
@@ -581,6 +598,16 @@ upgrade() {
     # 必须在 start 之前调：register_autostart 里带 daemon-reload，写晚了 systemd 仍按旧单元起进程。
     register_autostart
     start
+    # 起不来就是升级失败：新版二进制/单元/配置任一处不对，面板会一直停着。
+    # 这里必须回滚旧二进制 + 旧配置再起一次，而不是照常打"升级完成"。
+    if ! is_running; then
+        upgrade_rollback
+        if ! is_running; then
+            warn "回滚后服务仍未启动，请手工检查: $CONF / 日志"
+            die "升级失败且回滚未恢复服务"
+        fi
+        cd /; die "升级后服务未启动，已回滚到旧版本"
+    fi
     # 升级成功后才清理旧备份（失败/回滚路径不清理，保证可回滚）
     cleanup_old_backups
     log "升级完成，当前版本: ${TARGET_VER:-最新版}"

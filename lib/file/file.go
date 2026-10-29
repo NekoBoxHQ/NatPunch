@@ -171,34 +171,34 @@ func (s *JsonDb) GetClient(id int) (c *Client, err error) {
 
 var hostLock sync.Mutex
 
-func (s *JsonDb) StoreHostToJsonFile() {
+func (s *JsonDb) StoreHostToJsonFile() error {
 	hostLock.Lock()
-	storeSyncMapToFile(&s.Hosts, s.HostFilePath)
-	hostLock.Unlock()
+	defer hostLock.Unlock()
+	return storeSyncMapToFile(&s.Hosts, s.HostFilePath)
 }
 
 var taskLock sync.Mutex
 
-func (s *JsonDb) StoreTasksToJsonFile() {
+func (s *JsonDb) StoreTasksToJsonFile() error {
 	taskLock.Lock()
-	storeSyncMapToFile(&s.Tasks, s.TaskFilePath)
-	taskLock.Unlock()
+	defer taskLock.Unlock()
+	return storeSyncMapToFile(&s.Tasks, s.TaskFilePath)
 }
 
 var clientLock sync.Mutex
 
-func (s *JsonDb) StoreClientsToJsonFile() {
+func (s *JsonDb) StoreClientsToJsonFile() error {
 	clientLock.Lock()
-	storeSyncMapToFile(&s.Clients, s.ClientFilePath)
-	clientLock.Unlock()
+	defer clientLock.Unlock()
+	return storeSyncMapToFile(&s.Clients, s.ClientFilePath)
 }
 
 var globalLock sync.Mutex
 
-func (s *JsonDb) StoreGlobalToJsonFile() {
+func (s *JsonDb) StoreGlobalToJsonFile() error {
 	globalLock.Lock()
-	storeGlobalToFile(s.Global, s.GlobalFilePath)
-	globalLock.Unlock()
+	defer globalLock.Unlock()
+	return storeGlobalToFile(s.Global, s.GlobalFilePath)
 }
 
 var quickCmdsLock sync.Mutex
@@ -307,13 +307,13 @@ func loadSyncMapFromFileWithSingleJson(filePath string, f func(value string)) {
 	f(string(b))
 }
 
-func storeSyncMapToFile(m *sync.Map, filePath string) {
+func storeSyncMapToFile(m *sync.Map, filePath string) error {
 	// 0600：JSON 库文件含 VerifyKey/WebPassword 等敏感字段（阶段三 #13）
 	file, err := os.OpenFile(filePath+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	// first create a temporary file to store
 	if err != nil {
 		logs.Error("store to file: create tmp file error: %v", err)
-		return
+		return err
 	}
 	defer func() {
 		file.Close()
@@ -363,23 +363,25 @@ func storeSyncMapToFile(m *sync.Map, filePath string) {
 		return true
 	})
 	if writeErr {
-		return
+		return errors.New("store to file: write error")
 	}
 	_ = file.Sync()
 	_ = file.Close()
 	err = os.Rename(filePath+".tmp", filePath)
 	if err != nil {
 		logs.Error(err, "store to file err, data will lost")
+		return err
 	}
+	return nil
 }
 
-func storeGlobalToFile(m *Glob, filePath string) {
+func storeGlobalToFile(m *Glob, filePath string) error {
 	// 0600：全局配置含 ServerUrl 等（阶段三 #13）
 	file, err := os.OpenFile(filePath+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	// first create a temporary file to store
 	if err != nil {
 		logs.Error("store global to file: create tmp file error: %v", err)
-		return
+		return err
 	}
 	defer func() {
 		file.Close()
@@ -390,17 +392,19 @@ func storeGlobalToFile(m *Glob, filePath string) {
 	b, err = json.Marshal(m)
 	if err != nil {
 		logs.Error("store global to file: marshal error: %v", err)
-		return
+		return err
 	}
 	_, err = file.Write(b)
 	if err != nil {
 		logs.Error("store global to file: write error: %v", err)
-		return
+		return err
 	}
 	_ = file.Sync()
 	_ = file.Close()
 	err = os.Rename(filePath+".tmp", filePath)
 	if err != nil {
 		logs.Error(err, "store to file err, data will lost")
+		return err
 	}
+	return nil
 }

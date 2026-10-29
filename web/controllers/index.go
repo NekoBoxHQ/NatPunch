@@ -172,8 +172,8 @@ func (s *IndexController) Add() {
 			s.AjaxErr("invalid tunnel type")
 			return
 		}
-		username := s.getEscapeString("username")
-		password := s.getEscapeString("password")
+		username := s.GetString("username")
+		password := s.GetString("password")
 
 		// 非管理员仅可为自己的客户端创建隧道（F2-9 IDOR）
 		clientId := s.GetIntNoErr("client_id")
@@ -196,7 +196,7 @@ func (s *IndexController) Add() {
 				Id:           id,
 				Status:       true,
 				Remark:       remark,
-				Password:     s.getEscapeString("password"),
+				Password:     s.GetString("password"),
 				LocalPath:    s.getEscapeString("local_path"),
 				StripPre:     s.getEscapeString("strip_pre"),
 				ProtoVersion: s.getEscapeString("proto_version"),
@@ -242,7 +242,7 @@ func (s *IndexController) Add() {
 		// tcp+udp 为单条隧道（server 层同时监听 TCP/UDP）
 		var firstId int
 		var err error
-		if firstId, err = createOne(mode, s.getEscapeString("remark")); err != nil {
+		if firstId, err = createOne(mode, s.GetString("remark")); err != nil {
 			s.AjaxErr(err.Error())
 			return
 		}
@@ -309,10 +309,10 @@ func (s *IndexController) Edit() {
 			// 注意 t 是库里那个对象的指针，赋值就是改原值 —— 新的 PSK 想"留空保留"
 			// 的话必须先把旧的存下来。
 			oldPassword := t.Password
-			t.Password = s.getEscapeString("password")
+			t.Password = s.GetString("password")
 			// HTTP / SOCKS5 代理账号密码
-			u := s.getEscapeString("username")
-			p := s.getEscapeString("password")
+			u := s.GetString("username")
+			p := s.GetString("password")
 			if (t.Mode == "httpProxy" || t.Mode == "socks5") && u != "" && p != "" {
 				t.MultiAccount = &file.MultiAccount{AccountMap: map[string]string{u: p}}
 			} else {
@@ -335,7 +335,7 @@ func (s *IndexController) Edit() {
 			t.StripPre = s.getEscapeString("strip_pre")
 			t.AccessPath = normAccessPath(s.getEscapeString("access_path"))
 			t.Https = s.GetBoolNoErr("https")
-			t.Remark = s.getEscapeString("remark")
+			t.Remark = s.GetString("remark")
 			// 目标地址：这里原来漏了 —— 编辑页提交了 target，但后端只更新 LocalProxy，
 			// 于是"改目标"永远不生效（表现为隧道只能删了重建）。
 			t.Target.TargetStr = s.getEscapeString("target")

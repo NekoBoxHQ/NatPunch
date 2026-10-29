@@ -108,20 +108,17 @@ func (s *DbUtils) NewTask(t *Tunnel) (err error) {
 	}
 	t.Flow = new(Flow)
 	s.JsonDb.Tasks.Store(t.Id, t)
-	s.JsonDb.StoreTasksToJsonFile()
-	return
+	return s.JsonDb.StoreTasksToJsonFile()
 }
 
 func (s *DbUtils) UpdateTask(t *Tunnel) error {
 	s.JsonDb.Tasks.Store(t.Id, t)
-	s.JsonDb.StoreTasksToJsonFile()
-	return nil
+	return s.JsonDb.StoreTasksToJsonFile()
 }
 
 func (s *DbUtils) DelTask(id int) error {
 	s.JsonDb.Tasks.Delete(id)
-	s.JsonDb.StoreTasksToJsonFile()
-	return nil
+	return s.JsonDb.StoreTasksToJsonFile()
 }
 
 // md5 password
@@ -136,8 +133,7 @@ func (s *DbUtils) GetTask(id int) (t *Tunnel, err error) {
 
 func (s *DbUtils) DelHost(id int) error {
 	s.JsonDb.Hosts.Delete(id)
-	s.JsonDb.StoreHostToJsonFile()
-	return nil
+	return s.JsonDb.StoreHostToJsonFile()
 }
 
 func (s *DbUtils) IsHostExist(h *Host) bool {
@@ -209,8 +205,7 @@ func paginateHosts(all []*Host, start, length int) ([]*Host, int) {
 
 func (s *DbUtils) DelClient(id int) error {
 	s.JsonDb.Clients.Delete(id)
-	s.JsonDb.StoreClientsToJsonFile()
-	return nil
+	return s.JsonDb.StoreClientsToJsonFile()
 }
 
 // GetClientCount 返回计入 max_clients 配额的客户端数量（F1-8）。
@@ -349,8 +344,8 @@ reset:
 		c.Flow = new(Flow)
 	}
 	s.JsonDb.Clients.Store(c.Id, c)
-	s.JsonDb.StoreClientsToJsonFile()
-	return nil
+	// 落盘失败必须冒泡：调用方（面板/桥接注册）以为保存成功，重启后这条记录就没了。
+	return s.JsonDb.StoreClientsToJsonFile()
 }
 
 func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
