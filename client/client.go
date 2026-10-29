@@ -116,25 +116,45 @@ func (s *TRPClient) Status() int {
 	return int(s.nowStatus.Load())
 }
 
+// sleepRetry 等一段退避时间，期间如果 Close() 了就返回 false。
+// 用 closeCh 而不是裸 time.Sleep：否则 Ctrl-C / 服务停止要等满一轮退避才退得掉。
+func (s *TRPClient) sleepRetry(d time.Duration) bool {
+	select {
+	case <-s.closeCh:
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
 // start
 func (s *TRPClient) Start() {
 	s.closeClient.Store(false)
+	// 指数退避 + 抖动：固定 5 秒重连在服务端重启/网络恢复时会让所有客户端
+	// 同一秒撞上来（惊群），而服务端刚起来的几秒正是最脆弱的时候。
+	backoff := 5 * time.Second
 retry:
 	if s.closeClient.Load() {
 		return
 	}
 	s.nowStatus.Store(0)
 	c, err := NewConn(s.bridgeConnType, s.vKey, s.svrAddr, common.WORK_MAIN, s.proxyUrl)
-	if err != nil {
-		s.logError("The connection server failed and will be reconnected in five seconds, error", err.Error())
-		time.Sleep(time.Second * 5)
+	if err != nil || c == nil {
+		if err != nil {
+			s.logError("The connection server failed, retry in %s, error: %s", backoff, err.Error())
+		} else {
+			s.logError("Error data from server, retry in %s", backoff)
+		}
+		if !s.sleepRetry(backoff) {
+			return // 期间 Close() 了，直接退出
+		}
+		backoff *= 2
+		if backoff > 60*time.Second {
+			backoff = 60 * time.Second
+		}
 		goto retry
 	}
-	if c == nil {
-		s.logError("Error data from server, and will be reconnected in five seconds")
-		time.Sleep(time.Second * 5)
-		goto retry
-	}
+	backoff = 5 * time.Second
 	s.logInfo("Successful connection with server %s", s.svrAddr)
 	//monitor the connection
 	go s.ping()

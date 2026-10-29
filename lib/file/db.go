@@ -337,13 +337,17 @@ reset:
 		}
 		return errors.New("Vkey duplicate, please reset")
 	}
+	// 分配 Id 与 Store 必须在同一把锁内：原来 GetClientId() 只锁"扫描+返回"，
+	// 拿到号之后才 Store —— 两个并发注册会取到同一个空号，后写覆盖先写。
+	clientIdLock.Lock()
 	if c.Id == 0 {
-		c.Id = int(s.JsonDb.GetClientId())
+		c.Id = int(s.JsonDb.nextClientIdLocked())
 	}
 	if c.Flow == nil {
 		c.Flow = new(Flow)
 	}
 	s.JsonDb.Clients.Store(c.Id, c)
+	clientIdLock.Unlock()
 	// 落盘失败必须冒泡：调用方（面板/桥接注册）以为保存成功，重启后这条记录就没了。
 	return s.JsonDb.StoreClientsToJsonFile()
 }

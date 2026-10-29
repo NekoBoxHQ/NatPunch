@@ -138,11 +138,12 @@ func (pMux *PortMux) process(conn net.Conn) {
 				conn.Close()
 				break
 			}
-			if strings.Index(string(b), "Host:") == 0 || strings.Index(string(b), "host:") == 0 {
-				// Remove host and space effects
-				str := strings.Replace(string(b), "Host:", "", -1)
-				str = strings.Replace(str, "host:", "", -1)
-				str = strings.TrimSpace(str)
+			// Host 头按 RFC 大小写不敏感、冒号前后可带空白。
+			// 原来只认 "Host:" / "host:" 两种拼写：写成 "HOST:" 或 "Host :" 时
+			// 这一行永远匹配不上 → 循环一路读到 8KB 上限才丢连接。
+			key, val, isHeader := cutHeaderLine(string(b))
+			if isHeader && strings.EqualFold(key, "host") {
+				str := strings.TrimSpace(val)
 				// Determine whether it is the same as the manager domain name
 				if common.GetIpByAddr(str) == pMux.managerHost {
 					ch = pMux.managerConn
@@ -223,4 +224,14 @@ func (pMux *PortMux) GetManagerListener() net.Listener {
 		return nil
 	}
 	return NewPortListener(pMux.managerConn, pMux.Listener.Addr())
+}
+
+// cutHeaderLine 把一行 HTTP 头拆成 key/value（按第一个冒号）。
+// 返回 isHeader=false 表示这一行不是头（请求行、空行等）。
+func cutHeaderLine(line string) (key, val string, isHeader bool) {
+	i := strings.IndexByte(line, ':')
+	if i <= 0 {
+		return "", "", false
+	}
+	return strings.TrimSpace(line[:i]), line[i+1:], true
 }

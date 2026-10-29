@@ -237,9 +237,10 @@ func (s *JsonDb) StoreQuickCmdsToJsonFile() {
 
 var clientIdLock sync.Mutex
 
-func (s *JsonDb) GetClientId() int32 {
-	clientIdLock.Lock()
-	defer clientIdLock.Unlock()
+// nextClientIdLocked 调用方必须已持有 clientIdLock。
+// 「分配」与「写入 map」必须在同一把锁内完成 —— 否则两个并发注册会拿到同一个空号，
+// 后写覆盖先写（前一个客户端的 vkey/隧道记录直接消失）。
+func (s *JsonDb) nextClientIdLocked() int32 {
 	used := make(map[int]bool)
 	s.Clients.Range(func(key, value interface{}) bool {
 		used[value.(*Client).Id] = true
@@ -251,6 +252,12 @@ func (s *JsonDb) GetClientId() int32 {
 			return i
 		}
 	}
+}
+
+func (s *JsonDb) GetClientId() int32 {
+	clientIdLock.Lock()
+	defer clientIdLock.Unlock()
+	return s.nextClientIdLocked()
 }
 
 var taskIdLock sync.Mutex
