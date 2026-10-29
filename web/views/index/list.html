@@ -122,8 +122,9 @@
                 sortable: true,
                 visible: true,//false表示不显示
                 formatter: function (value) {
-                    // 隧道备注可能是客户端自报的（NEW_HOST），按 HTML 渲染就是存储型 XSS
-                    return <div>.text(value == null ? '' : value).html();
+                    // 隧道备注可能是客户端自报的（NEW_HOST），按 HTML 渲染就是存储型 XSS。
+                    // 用 jQuery 建一个游离节点取 .html()，等价于转义。
+                    return $('<div>').text(value == null ? '' : value).html();
                 }
             },
             {

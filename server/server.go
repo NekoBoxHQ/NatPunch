@@ -383,7 +383,11 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 			if clientId != 0 && (v.Client == nil || v.Client.Id != clientId) {
 				return true
 			}
-		} else if (typeVal != "" && v.Mode != typeVal || (clientId != 0 && v.Client.Id != clientId)) || (typeVal == "" && clientId != v.Client.Id) {
+		} else if (typeVal != "" && v.Mode != typeVal) || (clientId != 0 && (v.Client == nil || v.Client.Id != clientId)) {
+			// 归一到「按类型过滤」+「按归属过滤」两件事。
+			// 原来还多挂了一条 `|| (typeVal == "" && clientId != v.Client.Id)`：
+			// 只要 type 是空的（例如 /index/all 没带 client_id），管理员也会被
+			// clientId=0 != 隧道所属客户端 判掉 —— 整页空白。
 			return true
 		}
 		if search != "" {
