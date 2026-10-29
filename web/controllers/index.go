@@ -55,7 +55,18 @@ func normalizeTunnelMode(v string) string {
 
 func (s *IndexController) Index() {
 	s.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
-	s.Data["data"] = server.GetDashboardData()
+	// 普通登录用户只看自己的客户端：仪表盘的汇总也要按会话里的 clientId 过滤，
+	// 否则「非管理员只能看自己」在列表页成立、在仪表盘却全站可见。
+	clientId := 0
+	if admin, ok := s.GetSession("isAdmin").(bool); !ok || !admin {
+		cid, ok := s.GetSession("clientId").(int)
+		if !ok {
+			s.deny()
+			return
+		}
+		clientId = cid
+	}
+	s.Data["data"] = server.GetDashboardData(clientId)
 	s.SetInfo("dashboard")
 	s.display("index/index")
 }

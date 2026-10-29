@@ -490,24 +490,47 @@ func DelClientConnect(clientId int) {
 	Bridge.DelClient(clientId)
 }
 
-func GetDashboardData() map[string]interface{} {
+// GetDashboardData 汇总仪表盘数据。
+//
+// clientId > 0 表示普通登录用户（只能看自己的客户端）：
+// 客户端数、在线数、流量、隧道分类全部按这个 id 过滤 —— 原来不管是谁都返回**全站**汇总，
+// 等于把别人有多少客户端、跑了多少流量都告诉他了。
+func GetDashboardData(clientId int) map[string]interface{} {
 	data := make(map[string]interface{})
 	data["version"] = version.VERSION
-	data["hostCount"] = common.GeSynctMapLen(&file.GetDb().JsonDb.Hosts)
-	data["clientCount"] = common.GeSynctMapLen(&file.GetDb().JsonDb.Clients)
-	if beego.AppConfig.String("public_vkey") != "" { //remove public vkey
-		data["clientCount"] = data["clientCount"].(int) - 1
+	ownOnly := clientId > 0
+	hostCount := 0
+	file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
+		v := value.(*file.Host)
+		if v.Client != nil && (!ownOnly || v.Client.Id == clientId) {
+			hostCount++
+		}
+		return true
+	})
+	data["hostCount"] = hostCount
+	if ownOnly {
+		data["clientCount"] = 1
+	} else {
+		data["clientCount"] = common.GeSynctMapLen(&file.GetDb().JsonDb.Clients)
+		if beego.AppConfig.String("public_vkey") != "" { //remove public vkey
+			data["clientCount"] = data["clientCount"].(int) - 1
+		}
 	}
 	dealClientData()
 	c := 0
 	var in, out int64
 	file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*file.Client)
+		if ownOnly && v.Id != clientId {
+			return true
+		}
 		if v.IsConnect {
 			c += 1
 		}
-		in += v.Flow.InletFlow
-		out += v.Flow.ExportFlow
+		limit, fi, fo := v.Flow.Snapshot()
+		_ = limit
+		in += fi
+		out += fo
 		return true
 	})
 	data["clientOnlineCount"] = c
@@ -515,7 +538,11 @@ func GetDashboardData() map[string]interface{} {
 	data["exportFlowCount"] = int(out)
 	var tcp, socks5, http, ss int
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
-		switch value.(*file.Tunnel).Mode {
+		t := value.(*file.Tunnel)
+		if ownOnly && (t.Client == nil || t.Client.Id != clientId) {
+			return true
+		}
+		switch t.Mode {
 		case "tcp+udp": // 双端隧道（面板里唯一的 TCP/UDP 隧道形态）
 			tcp += 1
 		case "socks5":
