@@ -3,6 +3,7 @@ package file
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/astaxie/beego/logs"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ type JsonDb struct {
 	Clients           sync.Map
 	Global            *Glob
 	Quick             *QuickCmds
+	quickMu           sync.Mutex // 护住 Quick 指针（Get/Save/落盘都要过它）
 	RunPath           string
 	ClientIncreaseId  int32  //client increased id
 	TaskIncreaseId    int32  //task increased id
@@ -54,15 +56,28 @@ type QuickCmds struct {
 }
 
 func (s *JsonDb) LoadTaskFromJsonFile() {
-	loadSyncMapFromFile(s.TaskFilePath, func(v string) {
-		var err error
+	loadSyncMapFromFile(s.TaskFilePath, func(idx int, v string) {
 		post := new(Tunnel)
 		if json.Unmarshal([]byte(v), &post) != nil {
+			logs.Error("load %s: 第 %d 条不是合法 JSON，已跳过（下次保存会把它从文件里丢掉）", s.TaskFilePath, idx)
 			return
 		}
-		if post.Client, err = s.GetClient(post.Client.Id); err != nil {
+		// 防御：tasks.json 里 Client 为 null（手工改坏 / 极端情况下的半截写入）
+		// 会让下一行直接 nil 解引用 panic —— 那意味着整个面板起不来，只能手工删文件。
+		// 这里跳过坏条目，其余隧道照常加载。
+		if post.Client == nil {
+			logs.Error("load %s: 隧道 %d 缺少 Client 字段，已跳过", s.TaskFilePath, post.Id)
 			return
 		}
+		// 注意：GetClient 失败时返回的 c 是 nil，**不能**在 err != nil 分支里再读
+		// post.Client.Id —— 那行赋值已经把 post.Client 覆盖成 nil 了（自己踩过一次）。
+		cid := post.Client.Id
+		cl, cerr := s.GetClient(cid)
+		if cerr != nil {
+			logs.Error("load %s: 隧道 %d 引用的客户端 %d 不存在，已跳过", s.TaskFilePath, post.Id, cid)
+			return
+		}
+		post.Client = cl
 		s.Tasks.Store(post.Id, post)
 		if post.Id > int(s.TaskIncreaseId) {
 			s.TaskIncreaseId = int32(post.Id)
@@ -71,9 +86,10 @@ func (s *JsonDb) LoadTaskFromJsonFile() {
 }
 
 func (s *JsonDb) LoadClientFromJsonFile() {
-	loadSyncMapFromFile(s.ClientFilePath, func(v string) {
+	loadSyncMapFromFile(s.ClientFilePath, func(idx int, v string) {
 		post := new(Client)
 		if json.Unmarshal([]byte(v), &post) != nil {
+			logs.Error("load %s: 第 %d 条不是合法 JSON，已跳过（下次保存会把它从文件里丢掉）", s.ClientFilePath, idx)
 			return
 		}
 		post.Rate = NewClientRate(post)
@@ -89,15 +105,24 @@ func (s *JsonDb) LoadClientFromJsonFile() {
 }
 
 func (s *JsonDb) LoadHostFromJsonFile() {
-	loadSyncMapFromFile(s.HostFilePath, func(v string) {
-		var err error
+	loadSyncMapFromFile(s.HostFilePath, func(idx int, v string) {
 		post := new(Host)
 		if json.Unmarshal([]byte(v), &post) != nil {
+			logs.Error("load %s: 第 %d 条不是合法 JSON，已跳过（下次保存会把它从文件里丢掉）", s.HostFilePath, idx)
 			return
 		}
-		if post.Client, err = s.GetClient(post.Client.Id); err != nil {
+		if post.Client == nil {
+			logs.Error("load %s: Host %d 缺少 Client 字段，已跳过", s.HostFilePath, post.Id)
 			return
 		}
+		// 同上：GetClient 失败时返回 nil，先存下 id 再查。
+		cid := post.Client.Id
+		cl, cerr := s.GetClient(cid)
+		if cerr != nil {
+			logs.Error("load %s: Host %d 引用的客户端 %d 不存在，已跳过", s.HostFilePath, post.Id, cid)
+			return
+		}
+		post.Client = cl
 		s.Hosts.Store(post.Id, post)
 		if post.Id > int(s.HostIncreaseId) {
 			s.HostIncreaseId = int32(post.Id)
@@ -181,10 +206,13 @@ var quickCmdsLock sync.Mutex
 func (s *JsonDb) StoreQuickCmdsToJsonFile() {
 	quickCmdsLock.Lock()
 	defer quickCmdsLock.Unlock()
-	if s.Quick == nil {
+	s.quickMu.Lock()
+	q := s.Quick
+	s.quickMu.Unlock()
+	if q == nil {
 		return
 	}
-	b, err := json.Marshal(s.Quick)
+	b, err := json.Marshal(q)
 	if err != nil {
 		return
 	}
@@ -248,16 +276,21 @@ func (s *JsonDb) GetHostId() int32 {
 	return atomic.AddInt32(&s.HostIncreaseId, 1)
 }
 
-func loadSyncMapFromFile(filePath string, f func(value string)) {
+func loadSyncMapFromFile(filePath string, f func(idx int, value string)) {
 	if !common.FileExists(filePath) {
 		return
 	}
 	b, err := common.ReadAllFromFile(filePath)
 	if err != nil {
-		panic(err)
+		// 读不动就别装作"库里没数据"继续跑：随后的 Store* 会用空库覆盖掉真实数据。
+		// 直接 panic 让 systemd/procd 把进程拉起来重试，比静默丢数据强。
+		panic(fmt.Sprintf("read %s failed: %v (refuse to start with a possibly empty db)", filePath, err))
 	}
-	for _, v := range strings.Split(string(b), "\n"+common.CONN_DATA_SEQ) {
-		f(v)
+	for i, v := range strings.Split(string(b), "\n"+common.CONN_DATA_SEQ) {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		f(i, v)
 	}
 }
 

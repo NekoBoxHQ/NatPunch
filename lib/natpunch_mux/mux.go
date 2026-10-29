@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -40,6 +41,8 @@ type Mux struct {
 	newConnCh          chan *conn
 	id                 int32
 	closeChan          chan struct{}
+	done               chan struct{} // Close 时 close 一次，用于广播
+	closeOnce          sync.Once
 	isClose            atomic.Bool
 	counter            *latencyCounter
 	bw                 *bandwidth
@@ -73,6 +76,7 @@ func NewMux(c net.Conn, connType string, pingCheckThreshold int) *Mux {
 		connMap:            NewConnMap(),
 		id:                 0,
 		closeChan:          make(chan struct{}, 1),
+		done:               make(chan struct{}),
 		newConnCh:          make(chan *conn),
 		bw:                 NewBandwidth(fd),
 		connType:           connType,
@@ -117,11 +121,18 @@ func (s *Mux) Accept() (net.Conn, error) {
 	if s.isClose.Load() {
 		return nil, errors.New("accpet error,the mux has closed")
 	}
-	conn := <-s.newConnCh
-	if conn == nil {
-		return nil, errors.New("accpet error,the conn has closed")
+	// 用 done 做「关闭广播」。原实现阻塞在 <-s.newConnCh，而 Close 里 close 了这个
+	// channel —— 生产者（readSession 的 muxNewConnOk 分支）很可能正卡在
+	// `s.newConnCh <- connection` 上，close 与 send 并发 = panic，整个进程退出。
+	select {
+	case conn := <-s.newConnCh:
+		if conn == nil {
+			return nil, errors.New("accpet error,the conn has closed")
+		}
+		return conn, nil
+	case <-s.done:
+		return nil, errors.New("accpet error,the mux has closed")
 	}
-	return conn, nil
 }
 
 func (s *Mux) Addr() net.Addr {
@@ -251,8 +262,13 @@ func (s *Mux) readSession() {
 				break // make sure that is closed
 			}
 			s.connMap.Set(connection.connId, connection) //it has been Set before send ok
-			s.newConnCh <- connection
-			s.sendInfo(muxNewConnOk, connection.connId, nil)
+			select {
+			case s.newConnCh <- connection:
+				s.sendInfo(muxNewConnOk, connection.connId, nil)
+			case <-s.done:
+				// mux 已关闭：Accept 不会再取，直接放弃这条待建流（原来会永久阻塞）
+				return
+			}
 		}
 	}()
 	go func() {
@@ -288,7 +304,13 @@ func (s *Mux) readSession() {
 				windowBuff.Put(pack.content)
 				continue
 			case muxPingReturn:
-				s.pingCh <- pack.content
+				// pingCh 是无缓冲的，接收协程（ping 巡检）在 Close 后已经退了：
+				// 原来在这里直接发，会把 readSession 永久卡死（每关一个 mux 漏一个 goroutine）。
+				select {
+				case s.pingCh <- pack.content:
+				case <-s.done:
+					windowBuff.Put(pack.content)
+				}
 				continue
 			}
 			if connection, ok := s.connMap.Get(pack.id); ok && !connection.isClose {
@@ -348,20 +370,28 @@ func (s *Mux) newMsg(connection *conn, pack *muxPackager) (err error) {
 }
 
 func (s *Mux) Close() (err error) {
-	if s.isClose.Load() {
+	// 原来用 isClose.Load() 做 check-then-act，两个 goroutine 同时 Close 会
+	// 重复走下面这一段（close 已关的 channel → panic）。用 once 收口。
+	ran := false
+	s.closeOnce.Do(func() {
+		ran = true
+		s.isClose.Store(true)
+		close(s.done) // 广播：Accept / readSession 生产者都靠它退出
+		log.Println("close mux")
+		s.connMap.Close()
+		//s.connMap = nil
+		s.closeChan <- struct{}{}
+		// 这里**不能** close(s.newConnCh)：生产者可能正阻塞在 send 上，
+		// close 与 send 并发会直接 panic（send on closed channel）。
+		// while target host close socket without finish steps, conn.Close method maybe blocked
+		// and tcp status change to CLOSE WAIT or TIME WAIT, so we close it in other goroutine
+		_ = s.conn.SetDeadline(time.Now().Add(time.Second * 5))
+		go s.conn.Close()
+		s.release()
+	})
+	if !ran {
 		return errors.New("the mux has closed")
 	}
-	s.isClose.Store(true)
-	log.Println("close mux")
-	s.connMap.Close()
-	//s.connMap = nil
-	s.closeChan <- struct{}{}
-	close(s.newConnCh)
-	// while target host close socket without finish steps, conn.Close method maybe blocked
-	// and tcp status change to CLOSE WAIT or TIME WAIT, so we close it in other goroutine
-	_ = s.conn.SetDeadline(time.Now().Add(time.Second * 5))
-	go s.conn.Close()
-	s.release()
 	return
 }
 

@@ -125,6 +125,34 @@ func normAccessPath(p string) string {
 	return p
 }
 
+// allowedTunnelModes 面板允许用户创建的隧道类型。
+//
+// webServer / httpHostServer / tcpTrans 是**服务端内部模式**，绝不能由请求指定：
+// NewMode("webServer") 会调 InitFromCsv()，而 InitFromCsv 又遍历所有 Status=true
+// 的任务调 AddTask —— 刚写进库的那条 webServer 就在里面，于是无限递归。
+// Go 栈溢出是 fatal error（recover 接不住）→ 进程退出；tasks.json 里还留着这条
+// 记录，下次启动继续递归 → 面板永久起不来。
+var allowedTunnelModes = map[string]bool{
+	"tcp+udp":     true,
+	"httpProxy":   true,
+	"socks5":      true,
+	"shadowsocks": true,
+}
+
+func validTunnelMode(m string) bool { return allowedTunnelModes[m] }
+
+// localProxyAllowed：local_proxy=true 表示**由面板服务器自己拨号**（SendLinkInfo
+// 里直接 net.Dial，不经过客户端）。它等于把面板变成内网代理/SSRF 跳板，
+// 所以必须同时满足两个条件：配置显式打开 allow_local_proxy，且操作者是管理员。
+// 原来 allow_local_proxy 只被塞进模板变量，全仓库没有任何校验。
+func (s *IndexController) localProxyAllowed() bool {
+	if v, _ := beego.AppConfig.Bool("allow_local_proxy"); !v {
+		return false
+	}
+	admin, _ := s.GetSession("isAdmin").(bool)
+	return admin
+}
+
 func (s *IndexController) Add() {
 	if s.Ctx.Request.Method == "GET" {
 		addMode := normalizeTunnelMode(s.getEscapeString("type"))
@@ -135,6 +163,15 @@ func (s *IndexController) Add() {
 		s.display()
 	} else {
 		mode := normalizeTunnelMode(s.getEscapeString("type"))
+		// 只允许面板上真实存在的四种隧道。**必须白名单**：`webServer` 是服务端
+		// 内部模式（NewMode 里会调 InitFromCsv，而 InitFromCsv 又遍历所有
+		// Status=true 的任务再 AddTask —— 刚写进库的这条就在里面，于是无限递归）。
+		// Go 的栈溢出是 fatal error，beego 的 recover 接不住：进程直接退出，而且
+		// tasks.json 里已经留下这条 webServer 记录，下次启动继续递归 —— 重启即崩。
+		if !validTunnelMode(mode) {
+			s.AjaxErr("invalid tunnel type")
+			return
+		}
 		username := s.getEscapeString("username")
 		password := s.getEscapeString("password")
 
@@ -155,7 +192,7 @@ func (s *IndexController) Add() {
 				Port:         s.GetIntNoErr("port"),
 				ServerIp:     s.getEscapeString("server_ip"),
 				Mode:         m,
-				Target:       &file.Target{TargetStr: s.getEscapeString("target"), LocalProxy: s.GetBoolNoErr("local_proxy")},
+				Target:       &file.Target{TargetStr: s.getEscapeString("target"), LocalProxy: s.localProxyAllowed() && s.GetBoolNoErr("local_proxy")},
 				Id:           id,
 				Status:       true,
 				Remark:       remark,
@@ -264,6 +301,11 @@ func (s *IndexController) Edit() {
 			}
 			t.ServerIp = s.getEscapeString("server_ip")
 			t.Mode = normalizeTunnelMode(s.getEscapeString("type"))
+			// 同 Add：不允许把隧道改成服务端内部模式（webServer 会触发递归）
+			if !validTunnelMode(t.Mode) {
+				s.AjaxErr("invalid tunnel type")
+				return
+			}
 			// 注意 t 是库里那个对象的指针，赋值就是改原值 —— 新的 PSK 想"留空保留"
 			// 的话必须先把旧的存下来。
 			oldPassword := t.Password
@@ -300,12 +342,20 @@ func (s *IndexController) Edit() {
 			// GetRandomTarget 会把 TargetStr 拆进 TargetArr 并缓存；改了字符串必须让缓存失效，
 			// 否则会继续用旧目标（负载均衡列表尤其明显）。
 			t.Target.TargetArr = nil
-			t.Target.LocalProxy = s.GetBoolNoErr("local_proxy")
-			if s.GetString("flow_inlet") != "" {
-				t.Flow.InletFlow = int64(s.GetIntNoErr("flow_inlet"))
-			}
-			if s.GetString("flow_export") != "" {
-				t.Flow.ExportFlow = int64(s.GetIntNoErr("flow_export"))
+			t.Target.LocalProxy = s.localProxyAllowed() && s.GetBoolNoErr("local_proxy")
+			// 流量计数只允许管理员改写：普通用户提交 flow_inlet/flow_export 就能
+			// 把自己的用量清零，绕过管理员配的 flow_limit。
+			if isAdmin, _ := s.GetSession("isAdmin").(bool); isAdmin {
+				if s.GetString("flow_inlet") != "" || s.GetString("flow_export") != "" {
+					_, in, out := t.Flow.Snapshot()
+					if s.GetString("flow_inlet") != "" {
+						in = int64(s.GetIntNoErr("flow_inlet"))
+					}
+					if s.GetString("flow_export") != "" {
+						out = int64(s.GetIntNoErr("flow_export"))
+					}
+					t.Flow.SetFlows(in, out)
+				}
 			}
 			file.GetDb().UpdateTask(t)
 			if err := server.StopServer(t.Id); err != nil {

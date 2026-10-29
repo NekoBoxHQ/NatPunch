@@ -51,16 +51,9 @@ func (s *AuthController) IpWhiteAuth() {
 		return
 	}
 
-	ipExists := false
-	for _, existingIp := range c.IpWhiteList {
-		if existingIp == ip {
-			ipExists = true
-			break
-		}
-	}
-
-	if !ipExists {
-		c.IpWhiteList = append(c.IpWhiteList, ip)
+	// 去重 + 追加在 client 的写锁内完成（原来读一遍再 append 是 check-then-act，
+	// 并发两个授权请求会把同一个 IP 加两次；同时它与列表序列化也会撞）。
+	if c.AddIpWhite(ip) {
 		file.GetDb().UpdateClient(c)
 	}
 

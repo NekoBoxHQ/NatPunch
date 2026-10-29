@@ -148,6 +148,7 @@ func (s *Sock5ModeServer) doConnect(c net.Conn, command uint8) {
 		host = string(domain)
 	default:
 		s.sendReply(c, addrTypeNotSupported)
+		c.Close()
 		return
 	}
 
@@ -179,6 +180,10 @@ func (s *Sock5ModeServer) handleConnect(c net.Conn) {
 
 // passive mode
 func (s *Sock5ModeServer) handleBind(c net.Conn) {
+	// BIND 没实现：明确回 commandNotSupported 并关闭。
+	// 原来是个空函数 —— 回什么都不回、连接也不关，而 Start 的回调已经把连接配额还了。
+	s.sendReply(c, commandNotSupported)
+	c.Close()
 }
 func (s *Sock5ModeServer) sendUdpReply(writeConn net.Conn, c net.Conn, rep uint8, serverIp string) {
 	reply := []byte{
@@ -240,7 +245,10 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 		}
 		host = string(domain)
 	default:
+		// 不支持的 ATYP：回完错误必须关连接，否则 Start 的回调还完配额后
+		// socket 仍然开着 —— fd 泄漏且 MaxConn 不再生效。
 		s.sendReply(c, addrTypeNotSupported)
+		c.Close()
 		return
 	}
 	//读取端口

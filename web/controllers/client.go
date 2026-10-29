@@ -261,11 +261,23 @@ func (s *ClientController) Edit() {
 				c.MaxConn = s.GetIntNoErr("max_conn")
 				c.MaxTunnelNum = s.GetIntNoErr("max_tunnel")
 			}
-			if s.GetString("flow_inlet") != "" {
-				c.Flow.InletFlow = int64(s.GetIntNoErr("flow_inlet"))
-			}
-			if s.GetString("flow_export") != "" {
-				c.Flow.ExportFlow = int64(s.GetIntNoErr("flow_export"))
+			isAdmin, _ := s.GetSession("isAdmin").(bool)
+			if isAdmin {
+				// 用量/到期/配置注册开关都只允许管理员改。普通用户编辑自己那条时，
+				// 请求里塞 flow_inlet=0&flow_export=0 就能把管理员设的配额清零，
+				// 塞 expire_time=（空）就能把到期时间抹掉。
+				if s.GetString("flow_inlet") != "" || s.GetString("flow_export") != "" {
+					_, in, out := c.Flow.Snapshot()
+					if s.GetString("flow_inlet") != "" {
+						in = int64(s.GetIntNoErr("flow_inlet"))
+					}
+					if s.GetString("flow_export") != "" {
+						out = int64(s.GetIntNoErr("flow_export"))
+					}
+					c.Flow.SetFlows(in, out)
+				}
+				c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
+				c.ExpireTime = normalizeExpireTime(s.getEscapeString("expire_time"))
 			}
 			c.Remark = s.getEscapeString("remark")
 			c.Cnf.U = s.getEscapeString("u")
@@ -279,7 +291,6 @@ func (s *ClientController) Edit() {
 			if webPasswordHash != "" {
 				c.WebPassword = webPasswordHash
 			}
-			c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
 			c.IpWhite = s.GetBoolNoErr("ipwhite")
 			c.IpWhitePass = s.getEscapeString("ipwhitepass")
 			c.IpWhiteList = RemoveRepeatedElement(strings.Split(s.getEscapeString("ipwhitelist"), "\r\n"))
@@ -290,7 +301,6 @@ func (s *ClientController) Edit() {
 			c.Rate.Start()
 
 			c.BlackIpList = RemoveRepeatedElement(strings.Split(s.getEscapeString("blackiplist"), "\r\n"))
-			c.ExpireTime = normalizeExpireTime(s.getEscapeString("expire_time"))
 			file.GetDb().JsonDb.StoreClientsToJsonFile()
 		}
 		s.AjaxOk("save success")
@@ -355,8 +365,9 @@ func normalizeExpireTime(s string) string {
 func (s *ClientController) ChangeStatus() {
 	id := s.GetIntNoErr("id")
 	if client, err := file.GetDb().GetClient(id); err == nil {
-		client.Status = s.GetBoolNoErr("status")
-		if client.Status == false {
+		status := s.GetBoolNoErr("status")
+		client.SetStatus(status) // 持写锁，别和列表序列化/落盘抢同一个字段
+		if !status {
 			server.DelClientConnect(client.Id)
 		}
 		s.AjaxOk("modified success")

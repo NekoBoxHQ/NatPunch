@@ -2,6 +2,7 @@ package goroutine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -169,14 +170,20 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 					} else {
 						flow.Add(int64(nw), 0)
 					}
-					// <<20 = 1024 * 1024
-					if flow.FlowLimit > 0 && (flow.FlowLimit<<20) < (flow.ExportFlow+flow.InletFlow) {
+					// <<20 = 1024 * 1024；用 Snapshot 读，别裸读（Add 是持锁写的）
+					limit, inFlow, outFlow := flow.Snapshot()
+					if limit > 0 && (limit<<20) < (outFlow+inFlow) {
 						// task 可能为 nil（httpProxy/socks5/transport 路径），不可直接解引用（F1-6）
 						if task != nil {
 							logs.Error("隧道[%s]流量已经超出", task.Client.VerifyKey)
 						} else {
 							logs.Error("流量已经超出")
 						}
+						// ⚠️ 必须带上 error 再 break：原来 break 后 err 仍是 nil，
+						// copyConnGroup 只在 err != nil 时才 Close 两端 —— 于是
+						// 两条 socket、两个 worker、NowConn/全局配额一起泄漏，
+						// 另一个方向还阻塞在 Read 上，copyConns 的 wg.Wait() 永不返回。
+						err = errFlowLimit
 						break
 					}
 				}
@@ -218,19 +225,16 @@ func copyConnGroup(group interface{}) {
 	if !ok {
 		return
 	}
+	// defer：CopyBuffer 里一旦 panic，wg 永远不会 Done，copyConns 的 wg.Wait() 会把
+	// 整个 worker 卡死（现在池子里少一个槽就永久少一个）。
+	defer cg.wg.Done()
 
-	var err error
-	err = CopyBuffer(cg.dst, cg.src, cg.flow, cg.task, cg.host, cg.remote, cg.dir)
+	err := CopyBuffer(cg.dst, cg.src, cg.flow, cg.task, cg.host, cg.remote, cg.dir)
 	if err != nil {
 		cg.src.Close()
 		cg.dst.Close()
 		//logs.Warn("close natpunch-client by copy from natpunch", err, c.connId)
 	}
-
-	//if conns.flow != nil {
-	//	conns.flow.Add(in, out)
-	//}
-	cg.wg.Done()
 }
 
 type Conns struct {
@@ -274,6 +278,9 @@ func copyConns(group interface{}) {
 	//}
 	conns.wg.Done()
 }
+
+// errFlowLimit 流量超限的哨兵错误：必须让它冒泡到 copyConnGroup，否则两端不会关闭。
+var errFlowLimit = errors.New("flow limit exceeded")
 
 var connCopyPool, _ = ants.NewPoolWithFunc(200000, copyConnGroup, ants.WithNonblocking(false))
 var CopyConnsPool, _ = ants.NewPoolWithFunc(100000, copyConns, ants.WithNonblocking(false))

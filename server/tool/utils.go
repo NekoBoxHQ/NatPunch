@@ -95,14 +95,24 @@ func getSeverStatus() {
 		}
 		m := make(map[string]interface{})
 		loads, _ := load.Avg()
-		m["load1"] = loads.Load1
-		m["load5"] = loads.Load5
-		m["load15"] = loads.Load15
-		m["cpu"] = math.Round(cpuAll / float64(len(cpuPercet)))
-		swap, _ := mem.SwapMemory()
-		m["swap_mem"] = math.Round(swap.UsedPercent)
-		vir, _ := mem.VirtualMemory()
-		m["virtual_mem"] = math.Round(vir.UsedPercent)
+		if loads != nil {
+			m["load1"] = loads.Load1
+			m["load5"] = loads.Load5
+			m["load15"] = loads.Load15
+		}
+		// 分母为 0（cpu.Percent 在 cgroup 受限的容器里会返回空切片）时 0/0 = NaN，
+		// 而 encoding/json 遇到 NaN 直接报错 → 整个仪表盘接口 500。
+		if len(cpuPercet) > 0 {
+			m["cpu"] = math.Round(cpuAll / float64(len(cpuPercet)))
+		}
+		// gopsutil 在拿不到 /proc/meminfo 的容器/精简系统上会返回 (nil, err)，
+		// 直接解引用 = 这个 goroutine panic = 整个服务端退出（这里没有 recover）。
+		if swap, err := mem.SwapMemory(); err == nil && swap != nil {
+			m["swap_mem"] = math.Round(swap.UsedPercent)
+		}
+		if vir, err := mem.VirtualMemory(); err == nil && vir != nil {
+			m["virtual_mem"] = math.Round(vir.UsedPercent)
+		}
 		conn, _ := net.ProtoCounters(nil)
 		if cached, ok := IORateCache.Load().(map[string]uint64); ok {
 			m["io_send"] = cached["io_send"]

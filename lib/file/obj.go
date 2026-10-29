@@ -1,6 +1,7 @@
 package file
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,32 @@ func (s *Flow) Add(in, out int64) {
 	defer s.Unlock()
 	s.InletFlow += int64(in)
 	s.ExportFlow += int64(out)
+}
+
+// Snapshot 一次性读回 (限额, 入, 出)。
+//
+// 转发路径（限速判断、流量超限检查、Dashboard）原本是直接读这三个字段，
+// 而 Add 是持写锁累加的：数据竞争，且 32 位平台（armv7 / mipsle）上 int64
+// 撕裂读会让限流误判（漏限或误杀）。读侧统一走这里。
+func (s *Flow) Snapshot() (limit, in, out int64) {
+	s.RLock()
+	defer s.RUnlock()
+	return s.FlowLimit, s.InletFlow, s.ExportFlow
+}
+
+// SetLimit 更新流量上限（持写锁，面板改配置走这里）。
+func (s *Flow) SetLimit(limitMB int64) {
+	s.Lock()
+	s.FlowLimit = limitMB
+	s.Unlock()
+}
+
+// SetFlows 直接改写累计流量（面板上的"清零/手工修正"走这里，同样持锁）。
+func (s *Flow) SetFlows(in, out int64) {
+	s.Lock()
+	s.InletFlow = in
+	s.ExportFlow = out
+	s.Unlock()
 }
 
 type Config struct {
@@ -247,4 +274,74 @@ type Glob struct {
 	BlackIpList []string
 	ServerUrl   string
 	sync.RWMutex
+}
+
+// ---------------------------------------------------------------------------
+// 序列化即快照。
+//
+// 这些对象是**活对象**：网桥在客户端连上/断开时会改 Client 的
+// IsConnect / Version / LastOnlineTime / Addr，服务端在启停隧道时会改
+// Tunnel 的 Status / RunStatus、健康检查会改 TargetArr / HealthRemoveArr，
+// 面板改路径时还会改 Host.Location。
+//
+// 而 json.Marshal 发生在完全不同的 goroutine 里：每次面板列表请求、
+// 每次 clients.json / tasks.json 落盘（连接一断就落一次）。
+//
+// 两个 goroutine 同时碰同一个 string 字段是什么后果：string 头部是
+// (指针, 长度) 两个字，写入不是原子的。读方可能拿到「新指针 + 旧长度」，
+// 于是把相邻的堆内存当成字符串尾部一起序列化出去（列表里出现乱码，
+// 而且可能把别的内存内容写进 JSON）；int64 在 32 位平台（armv7/mipsle
+// 都在发布矩阵里）还会直接撕裂，读出一半旧一半新的数字。
+//
+// 做法：MarshalJSON 里先 RLock 再序列化「同字段、无方法」的别名类型。
+// 前提是所有写方都持写锁（bridge.go / server.go / controllers 已统一）。
+// 别名的字段布局与原名完全一致，所以磁盘上的 JSON 格式不变。
+// ---------------------------------------------------------------------------
+
+// MarshalJSON 见上：对活对象加读锁后再序列化。
+func (s *Client) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type plain Client
+	return json.Marshal((*plain)(s))
+}
+
+// MarshalJSON 见上。
+func (s *Flow) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type plain Flow
+	return json.Marshal((*plain)(s))
+}
+
+// MarshalJSON 见上。Tunnel 内嵌的 *Client 会走到它自己的 MarshalJSON。
+func (s *Tunnel) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type plain Tunnel
+	return json.Marshal((*plain)(s))
+}
+
+// MarshalJSON 见上。
+func (s *Host) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type plain Host
+	return json.Marshal((*plain)(s))
+}
+
+// MarshalJSON 见上。TargetArr 由健康检查在 Tunnel/Host 写锁内维护。
+func (s *Target) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type plain Target
+	return json.Marshal((*plain)(s))
+}
+
+// MarshalJSON 见上。
+func (s *Glob) MarshalJSON() ([]byte, error) {
+	s.RLock()
+	defer s.RUnlock()
+	type plain Glob
+	return json.Marshal((*plain)(s))
 }

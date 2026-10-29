@@ -26,3 +26,6 @@ docs/.vscode
 # OS
 .DS_Store
 Thumbs.db
+
+# 本地构建/审计产物（不发布）
+dist/

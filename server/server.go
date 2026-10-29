@@ -157,7 +157,9 @@ func checkClientExpire() {
 		if now.Before(t) {
 			return true
 		}
+		v.Lock()
 		v.Status = false
+		v.Unlock()
 		changed = true
 		logs.Info("client id %d (remark: %s) expired at %s, auto paused", v.Id, v.Remark, v.ExpireTime)
 		DelClientConnect(v.Id)
@@ -346,7 +348,9 @@ func StartTask(id int) error {
 	if err := AddTask(t); err != nil {
 		return err
 	}
+	t.Lock()
 	t.Status = true
+	t.Unlock()
 	file.GetDb().UpdateTask(t)
 	return nil
 }
@@ -391,18 +395,19 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 				return true
 			}
 		}
+		// 运行时字段原本是在这读路径里裸写的，而同一对象会被另一个 goroutine
+		// 序列化（列表接口 / tasks.json 落盘）—— 写 string/bool 与读并发。
+		// 这里统一走各自的写锁；锁只覆盖赋值，不覆盖后面的序列化（会自锁）。
 		if v.Client != nil {
-			if _, ok := Bridge.Client.Load(v.Client.Id); ok {
-				v.Client.IsConnect = true
-			} else {
-				v.Client.IsConnect = false
-			}
+			_, connected := Bridge.Client.Load(v.Client.Id)
+			v.Client.Lock()
+			v.Client.IsConnect = connected
+			v.Client.Unlock()
 		}
-		if _, ok := RunList.Load(v.Id); ok {
-			v.RunStatus = true
-		} else {
-			v.RunStatus = false
-		}
+		_, running := RunList.Load(v.Id)
+		v.Lock()
+		v.RunStatus = running
+		v.Unlock()
 		all_list = append(all_list, v)
 		return true
 	})
@@ -432,20 +437,20 @@ func GetClientList(start, length int, search, sortField, order string, clientId 
 }
 
 func dealClientData() {
-
 	file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*file.Client)
-		if vv, ok := Bridge.Client.Load(v.Id); ok {
+		vv, ok := Bridge.Client.Load(v.Id)
+		v.Lock()
+		if ok {
 			v.IsConnect = true
 			v.LastOnlineTime = time.Now().Format("2006-01-02 15:04:05")
 			v.Version = vv.(*bridge.Client).Version
 		} else {
 			v.IsConnect = false
 		}
-
+		v.Unlock()
 		return true
 	})
-	return
 }
 
 // delete all host and tasks by client id

@@ -213,7 +213,20 @@ func (s *BaseController) AjaxTable(list interface{}, cnt int, recordsTotal int, 
 
 // ajax table参数
 func (s *BaseController) GetAjaxParams() (start, limit int) {
-	return s.GetIntNoErr("offset"), s.GetIntNoErr("limit")
+	start, limit = s.GetIntNoErr("offset"), s.GetIntNoErr("limit")
+	// 必须夹住：64 位上 offset=1&limit=MaxInt64 会让 start+length 回绕成负数，
+	// 分页函数里的 all[start:end] 直接 slice bounds panic（beego recover 成 500
+	// 并打一整串 [C] 堆栈，等于给任意登录用户一个刷日志/打崩请求的口子）。
+	if start < 0 {
+		start = 0
+	}
+	if start > 1<<20 {
+		start = 1 << 20
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	return
 }
 
 func (s *BaseController) SetInfo(name string) {

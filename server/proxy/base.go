@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"sort"
 	"sync"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
@@ -48,7 +47,10 @@ func (s *BaseServer) proxyAuth(r *http.Request, c *conn.Conn, u, p string) error
 }
 
 func (s *BaseServer) doAuth(r *http.Request, c *conn.Conn, u, p, failBytes, errMsg string) error {
-	if u != "" && p != "" && !common.CheckAuth(r, u, p) {
+	// **配了任一半就必须认证**。原条件 u != "" && p != "" 在"只填了用户名、密码留空"
+	// （或反过来）时整体跳过校验 —— 把代理直接变成开放代理，而且没有任何告警。
+	// 这种半配置在面板上很容易出现（用户以为空密码 = 不要密码）。
+	if (u != "" || p != "") && !common.CheckAuth(r, u, p) {
 		c.Write([]byte(failBytes))
 		c.Close()
 		return errors.New(errMsg)
@@ -58,7 +60,8 @@ func (s *BaseServer) doAuth(r *http.Request, c *conn.Conn, u, p, failBytes, errM
 
 // check flow limit of the client ,and decrease the allow num of client
 func (s *BaseServer) CheckFlowAndConnNum(client *file.Client) error {
-	if client.Flow.FlowLimit > 0 && (client.Flow.FlowLimit<<20) < (client.Flow.ExportFlow+client.Flow.InletFlow) {
+	limit, in, out := client.Flow.Snapshot()
+	if limit > 0 && (limit<<20) < (in+out) {
 		return errors.New("Traffic exceeded")
 	}
 	if !client.GetConn() {
@@ -67,11 +70,17 @@ func (s *BaseServer) CheckFlowAndConnNum(client *file.Client) error {
 	return nil
 }
 
+// in 判断 target 是否在列表里。
+//
+// 这里**不能** sort.Strings(str_array)：str_array 通常就是 file.Glob.BlackIpList
+// 那一份底层切片，而本函数在每个连接 / 每个 UDP 包上都会被调用 —— 等于拿并发写
+// 共享切片（数据竞争）。排序过程中别的读者还可能读到「新指针 + 旧长度」的 string，
+// 比较或打日志时越界。黑名单量级很小，线性扫描更便宜也更安全。
 func in(target string, str_array []string) bool {
-	sort.Strings(str_array)
-	index := sort.SearchStrings(str_array, target)
-	if index < len(str_array) && str_array[index] == target {
-		return true
+	for _, v := range str_array {
+		if v == target {
+			return true
+		}
 	}
 	return false
 }

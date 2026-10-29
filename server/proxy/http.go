@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/NekoBoxHQ/NatPunch/bridge"
 	"github.com/NekoBoxHQ/NatPunch/lib/cache"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type httpServer struct {
@@ -170,10 +172,14 @@ func (s *httpServer) handleHttp(c *conn.Conn, r *http.Request, br *bufio.Reader)
 		}
 	}
 	defer releaseCounted()
+	// wroteResponse：本请求是否已经自己把响应写完了（IP 白名单授权页 / 授权 JSON）。
+	// 原来这两条路径把内容塞进 s.errorContent（服务对象上的共享字段）再由下面的 defer
+	// 统一发：并发请求互相覆盖，而且 defer 固定先写 "HTTP/1.1 404 Not Found"。
+	wroteResponse := false
 	defer func() {
 		if connClient != nil {
 			connClient.Close()
-		} else {
+		} else if !wroteResponse {
 			s.writeConnFail(c.Conn)
 		}
 		c.Close()
@@ -223,41 +229,42 @@ reset:
 		if common.IsAuthIp(c.RemoteAddr().String(), host.Client.VerifyKey, whiteList) {
 
 			if r.URL.Path == "/authIp" {
-				rawQuery := r.URL.RawQuery
-
 				var jsonBytes []byte
 				ip := common.GetIpByAddr(c.RemoteAddr().String())
+				// 用 r.URL.Query() 取值：它负责百分号解码（原来 Split(rawQuery,"pass=")[1]
+				// 拿的是未解码原文，密码里有 & = 空格 中文 就永远对不上）。
+				pass := r.URL.Query().Get("pass")
 
-				if strings.Contains(rawQuery, "pass=") {
-					// 截取 = 后面的值
-					pass := strings.Split(rawQuery, "pass=")[1]
-					if pass == host.Client.IpWhitePass {
-						// copy-on-write：不要原地改已经发布出去的切片（读者正持有它）
-						host.Client.Lock()
-						host.Client.IpWhiteList = append(append([]string(nil), host.Client.IpWhiteList...), ip)
-						host.Client.Unlock()
-						file.GetDb().UpdateClient(host.Client)
-						logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
-						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
-					} else {
-						// 不打印密码（阶段三 #18 日志脱敏）
-						logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
-						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
-					}
-				} else {
+				if pass == "" {
 					logs.Error("客户端IP白名单认证授权参数错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
 					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "参数错误"})
+				} else if common.ConstantTimeStrEq(pass, host.Client.IpWhitePass) {
+					// copy-on-write：不要原地改已经发布出去的切片（读者正持有它）
+					host.Client.Lock()
+					host.Client.IpWhiteList = append(append([]string(nil), host.Client.IpWhiteList...), ip)
+					host.Client.Unlock()
+					file.GetDb().UpdateClient(host.Client)
+					logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
+					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+				} else {
+					// 不打印密码（阶段三 #18 日志脱敏）
+					logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
+					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
 				}
-				s.errorContent = jsonBytes
-				s.errorCode = 200
+				// 直接把响应写给这个连接。原来写进 s.errorContent 由 defer 里的
+				// writeConnFail 统一发 —— 那是**服务对象上的共享字段**：
+				// ① 并发请求互相覆盖（数据竞争，${ip} 也会串成别人的 IP）；
+				// ② writeConnFail 固定先写 "HTTP/1.1 404 Not Found"，于是这里
+				//    返回的授权 JSON 是 404，授权页也是 404 而不是 401。
+				writeSimpleResponse(c.Conn, "200 OK", "application/json; charset=utf-8", jsonBytes)
+				wroteResponse = true
 				return
 			}
 
 			errorContent, _ := web.ReadStaticFile("page/auth.html")
-			authHtml := string(errorContent)
-			authHtml = strings.ReplaceAll(authHtml, "${ip}", common.GetIpByAddr(c.RemoteAddr().String()))
-			s.errorContent = []byte(authHtml)
-			s.errorCode = 401
+			authHtml := strings.ReplaceAll(string(errorContent), "${ip}", common.GetIpByAddr(c.RemoteAddr().String()))
+			writeSimpleResponse(c.Conn, "401 Unauthorized", "text/html; charset=utf-8", []byte(authHtml))
+			wroteResponse = true
 			return
 		}
 	}
@@ -400,9 +407,51 @@ func writeRequestRaw(w io.Writer, r *http.Request, br *bufio.Reader) error {
 	return nil
 }
 
+// writeSimpleResponse 直接往这条连接写一个完整的短响应（自带 Content-Length 与
+// Connection: close）。用于 IP 白名单授权页/授权 JSON 这类"握手阶段自己回话"的场景：
+// 这些响应以前借道 s.errorContent，会被并发请求串台，也拿不到正确的状态码。
+func writeSimpleResponse(c net.Conn, status, contentType string, body []byte) {
+	hdr := fmt.Sprintf("HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
+		status, contentType, len(body))
+	_, _ = c.Write([]byte(hdr))
+	_, _ = c.Write(body)
+}
+
+// 单行上限：chunk-size 行、trailer 行都不该很长，超过就判恶意（原来用
+// bufio.ReadString 无上限，一个不回 \n 的长行就能把堆吃光）。
+const (
+	maxChunkLineLen     = 4 << 10
+	maxChunkSize        = 64 << 20 // 单个 chunk 上限
+	maxChunkTrailerLine = 64       // trailer 最多几行
+)
+
+// readLineLimited 是带长度上限的 ReadString('\n')：超限返回错误而不是无限吃内存。
+func readLineLimited(br *bufio.Reader, max int) (string, error) {
+	var sb strings.Builder
+	for {
+		line, err := br.ReadSlice('\n')
+		if len(line) > 0 {
+			sb.Write(line)
+		}
+		if sb.Len() > max {
+			return "", errors.New("line too long")
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != nil {
+			if sb.Len() == 0 {
+				return "", err
+			}
+			return sb.String(), err
+		}
+		return sb.String(), nil
+	}
+}
+
 func copyRawChunked(w io.Writer, br *bufio.Reader) error {
 	for {
-		line, err := br.ReadString('\n')
+		line, err := readLineLimited(br, maxChunkLineLen)
 		if err != nil {
 			return err
 		}
@@ -417,9 +466,12 @@ func copyRawChunked(w io.Writer, br *bufio.Reader) error {
 		if err != nil {
 			return err
 		}
+		if size < 0 || size > maxChunkSize {
+			return errors.New("chunk size out of range")
+		}
 		if size == 0 {
-			for {
-				tline, err := br.ReadString('\n')
+			for i := 0; i < maxChunkTrailerLine; i++ {
+				tline, err := readLineLimited(br, maxChunkLineLen)
 				if err != nil {
 					return err
 				}
@@ -430,6 +482,7 @@ func copyRawChunked(w io.Writer, br *bufio.Reader) error {
 					return nil
 				}
 			}
+			return errors.New("too many trailer lines")
 		}
 		if _, err := io.CopyN(w, br, size); err != nil {
 			return err
@@ -451,6 +504,12 @@ func (s *httpServer) NewServer(port int, scheme string) *http.Server {
 			r.URL.Scheme = scheme
 			s.handleTunneling(w, r)
 		}),
+		// 公网口默认一个超时都没有 = 标准 Slowloris：几十条慢连接就能把
+		// goroutine / fd 占满。只限 header 读，不设 ReadTimeout —— 大文件上传
+		// 走的是 hijack 之后的裸连接，不受这里影响。
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		// Disable HTTP/2.
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 	}

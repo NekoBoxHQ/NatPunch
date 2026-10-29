@@ -21,6 +21,41 @@ import (
 // shellSessions：ShellID -> clientId，供 WS 收到 resize 控制帧时定位目标客户端
 var shellSessions sync.Map
 
+// 终端 WebSocket 的存活参数。
+//
+// 浏览器断网 / 合盖休眠 / 进程被杀时，TCP 不会立刻收到 FIN：
+// 原实现不设任何读超时，ReadMessage 会**永远**阻塞，于是
+//
+//	服务端 goroutine + 隧道 link + 客户端上的 shell 进程（还带一个 PTY）
+//
+// 全部泄漏，直到内核 keepalive（默认 2 小时）才发现对端已死。手机切网、笔记本合盖
+// 都是高频操作，一个人用一天能攒出几十个僵尸 shell。
+// 这里用 ping/pong 做空闲探测：浏览器（WebSocket 规范）会自动回 pong，
+// 90 秒收不到任何东西就判定连接已死并回收。
+const (
+	wsPingPeriod = 30 * time.Second
+	wsPongWait   = 90 * time.Second
+	wsWriteWait  = 10 * time.Second
+	// 单帧上限：终端数据都是小块，1MB 足够；防止恶意/异常客户端用超大帧把内存打爆
+	wsMaxMessage = 1 << 20
+	// PTY 尺寸上限：cols/rows 直接来自 URL 与 resize 控制帧，客户端会按它
+	// pty.Setsize(uint16(...))。不设上限时 1e6 会被截断成 16960 列，
+	// 远端 shell（vim/top）按这个尺寸排版会直接发疯。
+	wsMaxCols = 500
+	wsMaxRows = 200
+)
+
+// clampPTY 把终端宽高夹到合理范围，非法值回落默认 80x24。
+func clampPTY(v, def, max int) int {
+	if v <= 0 {
+		return def
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 type TerminalController struct {
 	BaseController
 }
@@ -54,10 +89,21 @@ func (s *TerminalController) GetCmds() {
 	s.ServeJSON()
 }
 
-// SaveCmds 保存快捷命令到面板服务器
+// SaveCmds 保存快捷命令到面板服务器。
+//
+// 这份列表是**全局共享**的（conf/quick_cmds.json，所有用户打开终端页都会看到），
+// 而点一下就会把命令发进目标机器的 root shell。所以只允许管理员改：
+// 否则任意普通账号都能给管理员"种"一条命令，管理员点一下即执行。
 func (s *TerminalController) SaveCmds() {
+	if admin, _ := s.GetSession("isAdmin").(bool); !admin {
+		s.Ctx.Output.SetStatus(403)
+		s.Data["json"] = map[string]interface{}{"code": 0, "msg": "forbidden"}
+		s.ServeJSON()
+		return
+	}
 	var q file.QuickCmds
-	b, err := io.ReadAll(s.Ctx.Request.Body)
+	// 限 64KB：原来是无上限 io.ReadAll，认证用户随手就能灌爆内存
+	b, err := io.ReadAll(io.LimitReader(s.Ctx.Request.Body, 64<<10))
 	if err != nil || len(b) == 0 {
 		s.Data["json"] = map[string]interface{}{"code": 0, "msg": "empty body"}
 		s.ServeJSON()
@@ -154,14 +200,8 @@ func (s *TerminalController) Ws() {
 	// 注意：BaseController.Prepare 会把会话 clientId 写入 Ctx.Input 参数（base.go SetParam），
 	// 覆盖 URL 的 client_id；这里必须读原始 URL query，否则归属校验永远比对到会话自身（F2-6）
 	clientId, _ := strconv.Atoi(s.Ctx.Request.URL.Query().Get("client_id"))
-	cols := s.GetIntNoErr("cols")
-	rows := s.GetIntNoErr("rows")
-	if cols <= 0 {
-		cols = 80
-	}
-	if rows <= 0 {
-		rows = 24
-	}
+	cols := clampPTY(s.GetIntNoErr("cols"), 80, wsMaxCols)
+	rows := clampPTY(s.GetIntNoErr("rows"), 24, wsMaxRows)
 	// 归属校验必须在 Upgrade 之前：非管理员仅可连接自己的客户端（F2-6）
 	if clientId <= 0 || !s.canOperateClient(clientId) {
 		s.Ctx.Output.SetStatus(403)
@@ -175,6 +215,32 @@ func (s *TerminalController) Ws() {
 		return
 	}
 	defer ws.Close()
+
+	// 空闲探测：ping 由独立 goroutine 发（gorilla 的 WriteControl 内部有锁，
+	// 可与其他写并发），pong 回来就把读超时往后推；任一侧消失都会在 wsPongWait 内被发现。
+	ws.SetReadLimit(wsMaxMessage)
+	_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
+	ws.SetPongHandler(func(string) error {
+		return ws.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+	pingDone := make(chan struct{})
+	defer close(pingDone)
+	go func() {
+		tk := time.NewTicker(wsPingPeriod)
+		defer tk.Stop()
+		for {
+			select {
+			case <-pingDone:
+				return
+			case <-tk.C:
+				if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteWait)); err != nil {
+					// 写 ping 失败说明连接已经不可用；关掉让读循环退出即可
+					_ = ws.Close()
+					return
+				}
+			}
+		}
+	}()
 
 	if clientId <= 0 {
 		ws.WriteMessage(websocket.TextMessage, []byte("client_id required"))
@@ -227,6 +293,8 @@ func (s *TerminalController) Ws() {
 		if err != nil {
 			break
 		}
+		// 有任何数据往来就续期（打字/命令输出都算活着）
+		_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
 		if mt == websocket.BinaryMessage {
 			n, werr := t.Write(data)
 			if n > 0 {
@@ -245,7 +313,8 @@ func (s *TerminalController) Ws() {
 			}
 			if json.Unmarshal(data, &r) == nil && r.Type == "resize" && r.Cols > 0 && r.Rows > 0 {
 				if cid, ok := shellSessions.Load(shellID); ok {
-					_ = server.Bridge.SendShellResize(cid.(int), shellID, r.Cols, r.Rows)
+					_ = server.Bridge.SendShellResize(cid.(int), shellID,
+						clampPTY(r.Cols, 80, wsMaxCols), clampPTY(r.Rows, 24, wsMaxRows))
 				}
 			}
 		}

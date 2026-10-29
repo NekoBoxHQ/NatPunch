@@ -421,11 +421,17 @@ func (s *DbUtils) GetGlobal() (c *Glob) {
 
 // SaveQuickCmds 持久化快捷命令（面板服务器存储）
 func (s *DbUtils) SaveQuickCmds(q *QuickCmds) {
+	// Quick 是**裸指针**字段：原来的写法在并发「保存」与「读取」之间是数据竞争
+	// （两个管理员同时点保存、或保存的同时有人在开终端页）。用一个锁把指针换手护住。
+	s.JsonDb.quickMu.Lock()
 	s.JsonDb.Quick = q
+	s.JsonDb.quickMu.Unlock()
 	s.JsonDb.StoreQuickCmdsToJsonFile()
 }
 
 func (s *DbUtils) GetQuickCmds() *QuickCmds {
+	s.JsonDb.quickMu.Lock()
+	defer s.JsonDb.quickMu.Unlock()
 	if s.JsonDb.Quick == nil {
 		s.JsonDb.Quick = &QuickCmds{Customs: []QuickCmdItem{}, Hidden: []string{}}
 	}
@@ -454,7 +460,9 @@ func (s *DbUtils) GetClientByVkey(vkey string) (c *Client, err error) {
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if fmt.Sprintf("%x", md5.Sum([]byte(v.VerifyKey))) == vkey {
+		// 与 GetClientIdByVkey 同口径：vkey 是连接凭据，比较走恒定时间，
+		// 别让响应时间泄露"前缀对了几位"。
+		if common.ConstantTimeStrEq(fmt.Sprintf("%x", md5.Sum([]byte(v.VerifyKey))), vkey) {
 			exist = true
 			c = v
 			return false
@@ -466,6 +474,27 @@ func (s *DbUtils) GetClientByVkey(vkey string) (c *Client, err error) {
 	}
 	err = errors.New("未找到客户端")
 	return
+}
+
+// SetStatus 改「是否允许连接」标志（持写锁）。
+func (c *Client) SetStatus(status bool) {
+	c.Lock()
+	c.Status = status
+	c.Unlock()
+}
+
+// AddIpWhite 把 ip 加进白名单；已存在返回 false。持写锁，
+// 避免与「列表序列化 / clients.json 落盘」并发读写同一 slice。
+func (c *Client) AddIpWhite(ip string) bool {
+	c.Lock()
+	defer c.Unlock()
+	for _, v := range c.IpWhiteList {
+		if v == ip {
+			return false
+		}
+	}
+	c.IpWhiteList = append(c.IpWhiteList, ip)
+	return true
 }
 
 func (s *DbUtils) GetHostById(id int) (h *Host, err error) {
@@ -505,19 +534,21 @@ func (s *DbUtils) GetInfoByHost(host string, r *http.Request) (h *Host, err erro
 	})
 
 	for _, v := range hosts {
-		//If not set, default matches all
-		if v.Location == "" {
-			v.Location = "/"
+		// 默认匹配所有路径。**不要**把 "/" 写回 v.Location：
+		// 这是每个请求都会走的读路径，写共享对象会和面板编辑 Host 打架（数据竞争）。
+		loc := v.Location
+		if loc == "" {
+			loc = "/"
 		}
 		// "*" means SNI-based HTTPS lookup where actual URI is unknown, skip location filter
 		if r.RequestURI == "*" {
-			if h == nil || (len(v.Location) > len(h.Location)) {
+			if h == nil || (len(loc) > len(h.Location)) {
 				h = v
 			}
 			continue
 		}
-		if strings.Index(r.RequestURI, v.Location) == 0 {
-			if h == nil || (len(v.Location) > len(h.Location)) {
+		if strings.Index(r.RequestURI, loc) == 0 {
+			if h == nil || (len(loc) > len(h.Location)) {
 				h = v
 			}
 		}

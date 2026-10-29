@@ -211,7 +211,11 @@ func (https *HttpsServer) handleHttps2(c net.Conn, hostName string, rb []byte, r
 		return
 	}
 	if targetAddr, err = host.Target.GetRandomTarget(); err != nil {
+		// 原来的写法是只打日志、继续往下走：targetAddr 会是空串，客户端收到空
+		// Host 去 Dial 必然失败，还白建一条隧道流。http.go / tcp.go 的同类分支都 return。
 		logs.Warn(err.Error())
+		c.Close()
+		return
 	}
 	logs.Info("new https connection,clientId %d,host %s,remote address %s", host.Client.Id, r.Host, c.RemoteAddr().String())
 	https.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, host.Target.LocalProxy, nil, host)

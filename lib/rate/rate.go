@@ -2,6 +2,7 @@ package rate
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,7 +15,29 @@ type Rate struct {
 	mu        sync.Mutex
 	stopChan  chan struct{}
 	readTotal func() int64 // 每个采样周期读一次累计字节（来自 Client.Flow，含 TCP+UDP）
-	NowRate   int64        // 字节/秒
+	NowRate   int64        // 字节/秒。读写都要持 mu：32 位平台（armv7 / mipsle 都在发布矩阵里）上
+	// 裸读裸写 int64 会撕裂，面板会把速率显示成一半旧值一半新值的鬼数字。
+}
+
+// GetNowRate 读当前速率（持锁）。
+func (s *Rate) GetNowRate() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.NowRate
+}
+
+// setNowRate 写当前速率（持锁）。
+func (s *Rate) setNowRate(v int64) {
+	s.mu.Lock()
+	s.NowRate = v
+	s.mu.Unlock()
+}
+
+// MarshalJSON 让「面板列表里的速率」与采样协程之间不再有裸读写。
+// 输出形状与原来一致（只有 NowRate 一个键），磁盘上的 clients.json 格式不变，
+// 所以不能简单套别名类型 —— 那样会把未导出的 limiter 等字段一起卷进来。
+func (s *Rate) MarshalJSON() ([]byte, error) {
+	return []byte(`{"NowRate":` + strconv.FormatInt(s.GetNowRate(), 10) + `}`), nil
 }
 
 func NewRate(addSize int64) *Rate {
@@ -69,7 +92,7 @@ func (s *Rate) Start() {
 					}
 					instant := delta / 2 // 2 秒窗口 → 字节/秒
 					// 单客户端流量比整机更突发，做 50% 指数平滑，别在 0 和满格之间跳
-					s.NowRate = (s.NowRate + instant) / 2
+					s.setNowRate((s.GetNowRate() + instant) / 2)
 				}
 				lastTotal = total
 				haveLast = true

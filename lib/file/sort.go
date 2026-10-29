@@ -94,7 +94,7 @@ func nowRate(c *Client) int64 {
 	if c == nil || c.Rate == nil {
 		return 0
 	}
-	return c.Rate.NowRate
+	return c.Rate.GetNowRate()
 }
 
 // SortTunnels sorts tunnels in-place by the given field.

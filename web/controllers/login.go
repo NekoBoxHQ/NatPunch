@@ -214,7 +214,11 @@ func (self *LoginController) Register() {
 }
 
 func (self *LoginController) Out() {
-	self.SetSession("auth", false)
+	// 只把 auth 置 false 是不够的：服务端会话里 isAdmin/clientId/username 还在，
+	// 旧 cookie 依然有效（共享电脑上"退出"等于没退）。直接销毁会话并让浏览器
+	// 丢掉 cookie。
+	self.DestroySession()
+	self.Ctx.SetCookie(beego.BConfig.WebConfig.Session.SessionName, "", -1, "/")
 	self.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
 }
 
