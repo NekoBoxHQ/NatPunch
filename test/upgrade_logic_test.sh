@@ -504,11 +504,20 @@ else
         bad "失败后没有回滚 —— NAT 机上会静默变成黑盒子"
     fi
 fi
-if grep -q 'BIN_BAK="/tmp/natpunch-bin.old' "$INSTALL" \
-   && grep -q 'CONF_BAK="/tmp/natpunch-conf.old' "$INSTALL"; then
+if grep -q 'BIN_BAK=.*natpunch-bin.old' "$INSTALL" \
+   && grep -q 'CONF_BAK=.*natpunch-conf.old' "$INSTALL"; then
     ok "install.sh 会留一份旧二进制 / 旧配置给回滚脚本"
 else
     bad "install.sh 没留回滚备份 —— 内嵌脚本拿到的是空路径，回滚无从下手"
+fi
+# 备份/收尾脚本必须走 mktemp（随机名 + O_EXCL），不能再是 /tmp/xxx.$$：
+# 可预测路径 = 本地用户预置符号链接后让 root 写/执行任意文件。
+if grep -q 'mktemp /tmp/natpunch-bin.old' "$INSTALL" \
+   && grep -q 'mktemp /tmp/natpunch-conf.old' "$INSTALL" \
+   && ! grep -q 'BIN_BAK="/tmp/natpunch-bin.old\.\$\$"' "$INSTALL"; then
+    ok "回滚备份走 mktemp（不可预测，防 /tmp 预置）"
+else
+    bad "回滚备份仍是可预测的 /tmp 固定名 —— 本地提权落点"
 fi
 # 每份二进制备份 15MB。真机上跑两趟就攒了四份 —— 必须有人负责收掉：
 # 前台路径归 install.sh 的 EXIT 陷阱，脱离路径归内嵌脚本（成功时删，回滚也失败才留）。

@@ -16,7 +16,21 @@ CONF="/etc/natpunch.conf"
 BIN="/usr/bin/natpunch-client"
 INIT="/etc/init.d/natpunch-client"
 UNIT="/etc/systemd/system/natpunch-client.service"
-TMP_DIR="/tmp/natpunch_install.$$"
+# 临时目录必须是 **mktemp 出来的私有目录（0700、随机名）**。
+# 原来是 /tmp/natpunch_install.$$：本地任意用户都能按 PID 猜出路径并预建同名目录；
+# mkdir -p 不报错、也不校验属主，随后 `find ... -name natpunch-client` 可能取到
+# 攻击者预置的二进制，被 install -m0755 装进 /usr/bin —— 而 SHA256/minisign
+# 只覆盖 pkg.tar.gz，不覆盖「最终被安装的那个文件」。
+# 拿不到 mktemp（极老 busybox）时退化为 mkdir + 属主校验。
+_np_tmp_dir() {
+    d="$(mktemp -d "${TMPDIR:-/tmp}/natpunch_install.XXXXXX" 2>/dev/null)" && [ -n "$d" ] && { echo "$d"; return 0; }
+    d="${TMPDIR:-/tmp}/natpunch_install.$$"
+    (umask 077 && mkdir "$d") 2>/dev/null || return 1
+    # 目录已存在时 mkdir 会失败（上面的 || return 1）；走到这里的一定是我们新建的
+    echo "$d"
+}
+TMP_DIR="$(_np_tmp_dir)" || { echo "错误: 无法创建私有临时目录" >&2; exit 1; }
+chmod 700 "$TMP_DIR" 2>/dev/null || true
 LOG="/tmp/natpunch-client.log"
 START_TIMEOUT=15
 log()  { echo "==> $*"; }
@@ -224,7 +238,9 @@ else
 fi
 URL="$BASE_URL/$PKG"
 log "下载 $PKG ..."
-mkdir -p "$TMP_DIR" || die "无法创建临时目录 $TMP_DIR"
+# 目录已在脚本开头用 mktemp 建好（0700）。这里只校验，不再 mkdir -p ——
+# 万一被人抢先替换成符号链接/他人目录，直接中止而不是往里写。
+[ -d "$TMP_DIR" ] && [ ! -L "$TMP_DIR" ] || die "临时目录异常: $TMP_DIR"
 fetch "$URL" "$TMP_DIR/pkg.tar.gz" || die "下载失败: $URL"
 [ -s "$TMP_DIR/pkg.tar.gz" ] || die "下载文件为空: $URL"
 # 强制 SHA256 校验（F2-8）：校验失败即中止
@@ -324,6 +340,12 @@ tar -tzf "$TMP_DIR/pkg.tar.gz" >/dev/null 2>&1 || die "压缩包损坏"
 tar -zxf "$TMP_DIR/pkg.tar.gz" -C "$TMP_DIR" || die "解压失败"
 BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client | head -n1)"
 [ -n "$BIN_SRC" ] || die "未找到 natpunch-client 二进制"
+# 目录是 0700 私有的，但再多一道：必须是普通文件、非常规外的可执行位不依赖，
+# 且不能是他人可写的（防止某些 tar 实现把权限带进来）。
+[ -f "$BIN_SRC" ] && [ ! -L "$BIN_SRC" ] || die "解压出的二进制不是普通文件: $BIN_SRC"
+if [ -n "$(find "$BIN_SRC" -perm -o+w 2>/dev/null)" ]; then
+    die "解压出的二进制对其他人可写，拒绝安装: $BIN_SRC"
+fi
 # 清掉历史遗留的回滚备份（安装被打断、或回滚本身也失败时才会留下）。
 # **按年龄判据，不看 PID**：文件名里的 PID 是当时那个脚本的 $$，它早没了；
 # 按 PID 判断会把正在被收尾脚本使用的备份删掉（同款教训见 uninstall_client.sh）。
@@ -339,8 +361,12 @@ BIN_TMP="$BIN.new.$$"
 # 留一份旧的：脱离会话的收尾脚本起不来时要拿它回滚。没有旧的就留空 = 首次安装。
 BIN_BAK=""
 if [ -f "$BIN" ]; then
-    BIN_BAK="/tmp/natpunch-bin.old.$$"
-    cp -f "$BIN" "$BIN_BAK" 2>/dev/null || BIN_BAK=""
+    # mktemp 先把目标文件以 0600、O_EXCL 建出来：名字不可预测，且之后的 cp 写的是
+    # 我们自己刚建的那个普通文件（不会被符号链接带到 /etc/passwd 之类的地方）。
+    BIN_BAK="$(mktemp /tmp/natpunch-bin.old.XXXXXX 2>/dev/null)" || BIN_BAK=""
+    if [ -n "$BIN_BAK" ]; then
+        cp -f "$BIN" "$BIN_BAK" 2>/dev/null || BIN_BAK=""
+    fi
 fi
 if command -v install >/dev/null 2>&1; then
     install -m 0755 "$BIN_SRC" "$BIN_TMP" 2>/dev/null \
@@ -355,7 +381,7 @@ BIN_TMP=""
 # 同样留一份旧的给回滚用
 CONF_BAK=""
 if [ -f "$CONF" ]; then
-    CONF_BAK="/tmp/natpunch-conf.old.$$"
+    CONF_BAK="$(mktemp /tmp/natpunch-conf.old.XXXXXX 2>/dev/null)" || CONF_BAK=""
     cp -f "$CONF" "$CONF_BAK" 2>/dev/null || CONF_BAK=""
 fi
 log "写入配置 $CONF"
@@ -508,8 +534,11 @@ fi
 # systemd 用 EnvironmentFile，任何一次重启都会读到新配置；procd/systemd 本来就会把进程拉回来
 # （真机实测：killall 之后 systemd 6 秒、procd 8 秒把它拉回来）。
 if client_running; then
-    APPLY="/tmp/natpunch_install_run.$$"
-    DETACH_LOG="/tmp/natpunch-install.log"
+    APPLY="$(mktemp /tmp/natpunch_install_run.XXXXXX 2>/dev/null)" || APPLY="/tmp/natpunch_install_run.$$"
+    # 日志同样用 mktemp：固定名 /tmp/natpunch-install.log 一旦被人预置成符号链接，
+    # `: > "$DETACH_LOG"` 就会以 root 身份把目标文件截断成 0 字节。
+    DETACH_LOG="$(mktemp /tmp/natpunch-install.XXXXXX.log 2>/dev/null)" || DETACH_LOG="${TMPDIR:-/tmp}/natpunch-install.log"
+
     cat > "$APPLY" <<'APPLYEOF'
 #!/bin/sh
 # install.sh 的收尾：停旧 → 起新 → 自检（起不来就回滚）。**必须脱离会话执行** ——

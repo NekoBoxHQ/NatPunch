@@ -179,7 +179,11 @@ re:
 			goto re
 		}
 
-		if b, err = c.GetShortContent(16); err != nil {
+		// 服务端用「长度前缀」回传新 vkey（32 位 hex，但允许自定义长度）。
+		// 原来是 GetShortContent(16)：只读了 16 字节，剩下 16 字节留在接收缓冲里，
+		// 一是拿到的 key 是截断的（MAIN 必然验证失败、无限重连），
+		// 二是把后续 host/task 的应答整体读错位。
+		if b, err = c.GetShortLenContent(); err != nil {
 			logs.Error(err)
 			goto re
 		}

@@ -346,7 +346,7 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 			c.Close()
 			return
 		}
-		go s.getConfig(c, isPub, client)
+		go s.getConfig(c, isPub, client, id)
 	case common.WORK_REGISTER:
 		go s.register(c)
 	}
@@ -447,7 +447,10 @@ func (s *Bridge) ping() {
 }
 
 // get config and add task from client config
-func (s *Bridge) getConfig(c *conn.Conn, isPub bool, client *file.Client) {
+// getConfig 处理客户端自报配置（NEW_CONF / NEW_HOST / NEW_TASK 等）。
+// authId 是握手阶段用 vkey 认证出的客户端 id —— 客户端自报的 Id 必须与它对齐，
+// 否则就是"用自己的连接改别人的记录"。
+func (s *Bridge) getConfig(c *conn.Conn, isPub bool, client *file.Client, authId int) {
 	var fail bool
 loop:
 	for {
@@ -490,6 +493,31 @@ loop:
 				c.WriteAddFail()
 				break loop
 			} else {
+				// 客户端自报的 Id **不可信**：GetConfigInfo 原样保留了 JSON 里的 Id，
+				// 而 NewClient 会按这个 Id 直接 Store。于是任何开了「配置注册」
+				// （ConfigConnAllow）的客户端，只要在配置里把 Id 写成别人的，
+				// 就能覆盖对方整条记录（vkey / web 密码 / 黑白名单 / 到期时间）：
+				// 原客户端永久验证失败，重启后 tasks/hosts 还会按 Id 重绑到攻击者记录。
+				//
+				// 规则：
+				//   - 用公共 vkey 认证的（合成条目，NoStore）是**新设备自注册** → 分配新 Id；
+				//   - 其他情况一律钉死成握手时 vkey 认证出的 id，只能更新自己的记录。
+				if authRec, aerr := file.GetDb().GetClient(authId); aerr == nil && authRec != nil && authRec.NoStore {
+					client.Id = 0
+				} else {
+					if client.Id != 0 && client.Id != authId {
+						logs.Warn("client id %d tried to register as id %d, forced to own id", authId, client.Id)
+					}
+					client.Id = authId
+				}
+				// 自报 vkey 还要过字符集/长度校验：它会被原样写回、也会出现在面板
+				// “一键部署”命令里（sh -s -- '<vkey>'），含引号/分号就是命令注入。
+				if client.VerifyKey != "" && !file.ValidVerifyKey(client.VerifyKey) {
+					logs.Warn("client id %d reported an invalid verify key, rejected", authId)
+					fail = true
+					c.WriteAddFail()
+					break loop
+				}
 				// **客户端自报配置注册进来的，同样是一条真实设备，必须落盘。**
 				//
 				// GetConfigInfo() 会把它标成 NoStore（历史语义：这条路上来的都当临时件），
@@ -518,7 +546,14 @@ loop:
 					break loop
 				}
 				c.WriteAddOk()
-				c.Write([]byte(client.VerifyKey))
+				// 用**带长度前缀**的格式回传 vkey：原来这里裸写 32 字节，而客户端
+				// 只 GetShortContent(16) 读 16 字节 —— 拿到的是截断的 key，
+				// 后续 MAIN 永远 "Validation key incorrect"，还会让后续应答错位；
+				// 服务端则留下一条持久化的孤儿客户端。两端同版本才有意义。
+				if err := c.WriteLenContent([]byte(client.VerifyKey)); err != nil {
+					logs.Error("write vkey to client %d error: %v", client.Id, err)
+					break loop
+				}
 				// LoadOrStore：不覆盖活跃条目，旧连接（signal/tunnel/file）显式关闭（阶段三 G6）
 				if old, loaded := s.Client.LoadOrStore(client.Id, NewClient(nil, nil, "")); loaded {
 					cl := old.(*Client)

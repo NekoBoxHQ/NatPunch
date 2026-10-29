@@ -236,7 +236,7 @@ ensure_killmode_process() {
         cp -a "$U" "$BAK" 2>/dev/null || true
         # 替换行从文件读，不用 awk -v 传：awk -v 会处理反斜杠转义（mawk 不折 \/ 那次
         # 就是这么中的），而这里的值还含 ${...}。走 heredoc 写的文件最稳。
-        WRAP_NEW="/tmp/natpunch-unit-newline.$$"
+        WRAP_NEW="$(mktemp /tmp/natpunch-unit-newline.XXXXXX 2>/dev/null)" || WRAP_NEW="/tmp/natpunch-unit-newline.$$"
         cat > "$WRAP_NEW" <<'EXECLINE'
 ExecStart=/bin/sh -c 'exec /usr/bin/natpunch-client -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG}'
 EXECLINE
@@ -361,7 +361,8 @@ do_update() {
         [ -n "$(find "$_d" -maxdepth 0 -mmin +60 2>/dev/null)" ] || continue
         rm -rf "$_d" 2>/dev/null || true
     done
-    TMP_DIR="/tmp/natpunch_update.$$"
+    TMP_DIR="$(mktemp -d /tmp/natpunch_update.XXXXXX 2>/dev/null)" || TMP_DIR="/tmp/natpunch_update.$$"
+chmod 700 "$TMP_DIR" 2>/dev/null || true
     rm -rf "$TMP_DIR"
     mkdir -p "$TMP_DIR" || die "无法创建临时目录"
     # 下载/解压阶段失败时自动清理临时目录；
@@ -378,7 +379,7 @@ do_update() {
     BIN_SRC="$(find "$TMP_DIR" -type f -name natpunch-client 2>/dev/null | head -n1)"
     [ -n "${BIN_SRC:-}" ] || die "压缩包内未找到 natpunch-client 二进制"
     # —— 内嵌生成 update apply 脚本（唯一 PID 副本，与主脚本同版本，无外部拉取） ——
-    APPLY="/tmp/natpunch_apply.$$"
+    APPLY="$(mktemp /tmp/natpunch_apply.XXXXXX 2>/dev/null)" || APPLY="/tmp/natpunch_apply.$$"
     cat > "$APPLY" <<'APPLY'
 #!/bin/sh
 # NatPunch 客户端更新应用脚本（替换+重启）
@@ -453,7 +454,7 @@ ensure_killmode_process() {
         cp -a "$U" "$BAK" 2>/dev/null || true
         # 替换行从文件读，不用 awk -v 传：awk -v 会处理反斜杠转义（mawk 不折 \/ 那次
         # 就是这么中的），而这里的值还含 ${...}。走 heredoc 写的文件最稳。
-        WRAP_NEW="/tmp/natpunch-unit-newline.$$"
+        WRAP_NEW="$(mktemp /tmp/natpunch-unit-newline.XXXXXX 2>/dev/null)" || WRAP_NEW="/tmp/natpunch-unit-newline.$$"
         cat > "$WRAP_NEW" <<'EXECLINE'
 ExecStart=/bin/sh -c 'exec /usr/bin/natpunch-client -server="${SERVER}:${PORT}" -vkey="${VKEY}" -type=tcp ${TLS_FLAG}'
 EXECLINE
@@ -711,7 +712,7 @@ APPLY
     # 那段时间客户端就是停着的，没人拉起来 = 彻底失联。先挂一个
     # "过一会儿还不 alive 就把它拉起来"的独立任务，作为最后一道保险。
     # 幂等：客户端在跑就什么都不做，重复触发也无害。
-    GUARD="/tmp/natpunch_guard.$$"
+    GUARD="$(mktemp /tmp/natpunch_guard.XXXXXX 2>/dev/null)" || GUARD="/tmp/natpunch_guard.$$"
     cat > "$GUARD" <<'GUARD'
 #!/bin/sh
 # 由 uninstall_client.sh 生成：升级看门狗。
@@ -806,7 +807,7 @@ do_uninstall() {
     log "卸载 NatPunch 客户端..."
     rm -f "$DONE_FILE"
     # —— 内嵌生成 uninstall apply 脚本（唯一 PID 副本，与主脚本同版本，无外部拉取） ——
-    APPLY="/tmp/natpunch_uninstall.$$"
+    APPLY="$(mktemp /tmp/natpunch_uninstall.XXXXXX 2>/dev/null)" || APPLY="/tmp/natpunch_uninstall.$$"
     cat > "$APPLY" <<'APPLY'
 #!/bin/sh
 # NatPunch 客户端卸载应用脚本（静默完整卸载）

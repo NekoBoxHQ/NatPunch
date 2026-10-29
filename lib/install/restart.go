@@ -85,11 +85,29 @@ case "$0" in /tmp/natpunch_restart.*) rm -f "$0" 2>/dev/null || true ;; esac
 // 拿不到可用的脱离手段时**不硬来**：原地重启比不重启更糟（会把调用方的会话一起
 // 切断，而且服务停在半路），这时只打印人工提示，维持原来的行为。
 func restartServiceDetached(service, bin string) {
-	script := fmt.Sprintf("/tmp/natpunch_restart.%d", os.Getpid())
-	if err := os.WriteFile(script, []byte(restartHelper), 0755); err != nil {
+	// 用 CreateTemp（O_EXCL + 随机名）而不是 /tmp/natpunch_restart.<pid>：
+	// 后者名字可预测，本地用户预置同名符号链接 → root 把脚本内容写到任意文件；
+	// 预置自己的普通文件 → root 写入后属主仍是攻击者，可在执行前改掉内容。
+	// 这个脚本随后会被以 root 用 /bin/sh 执行，是典型的提权落点。
+	f, err := os.CreateTemp("", "natpunch_restart.*")
+	if err != nil {
 		log.Printf("写重启脚本失败，请手动重启 %s: %v", service, err)
 		return
 	}
+	script := f.Name()
+	if _, err := f.WriteString(restartHelper); err != nil {
+		f.Close()
+		_ = os.Remove(script)
+		log.Printf("写重启脚本失败，请手动重启 %s: %v", service, err)
+		return
+	}
+	if err := f.Chmod(0755); err != nil {
+		f.Close()
+		_ = os.Remove(script)
+		log.Printf("写重启脚本失败，请手动重启 %s: %v", service, err)
+		return
+	}
+	f.Close()
 
 	var cmd *exec.Cmd
 	switch {

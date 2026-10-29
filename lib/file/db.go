@@ -287,6 +287,27 @@ func syncClientRate(existing *Client, c *Client) {
 	c.Rate = NewClientRate(c)
 }
 
+// ValidVerifyKey 校验 vkey 的字符集与长度。
+//
+// vkey 会原样写回客户端、落进 clients.json，还会被面板拼进「一键部署」命令
+// （`sh -s -- '<vkey>'`）和 HTML 属性 —— 带引号/分号/尖括号就是命令注入或 XSS。
+// 合法字符集只留字母、数字和 `._-`（自动生成的 32 位 hex 天然满足）。
+func ValidVerifyKey(k string) bool {
+	if len(k) < 8 || len(k) > 64 {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.' || c == '_' || c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (s *DbUtils) NewClient(c *Client) error {
 	// 客户端注册上限（数据层统一校验，所有入口生效；0=不限）
 	// 合成条目（NoStore：内置公共 vkey 客户端）不计入配额，也不受配额限制（复评🟠2）

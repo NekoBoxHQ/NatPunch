@@ -83,14 +83,24 @@ func TestUpdatePathsCallRestart(t *testing.T) {
 	}
 }
 
-// TestRestartScriptPathIsUnderTmp 脚本落在 /tmp 下，与 uninstall_client.sh 的
-// /tmp/natpunch_apply.$$ 保持一致；自删的形态限定也依赖这个前缀。
+// TestRestartScriptPathIsUnderTmp 重启脚本必须落在临时目录、名字带 natpunch_restart 前缀
+// （内嵌脚本的自删形态限定依赖这个前缀），且**必须是 CreateTemp 生成的随机名**：
+// 原来的 /tmp/natpunch_restart.<pid> 可预测，本地用户预置符号链接/同名文件后，
+// root 会把脚本内容写进任意文件、或让 root 执行被调包的内容。
 func TestRestartScriptPathIsUnderTmp(t *testing.T) {
 	src, err := os.ReadFile("restart.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), `"/tmp/natpunch_restart.%d"`) {
-		t.Error("重启脚本路径不是 /tmp/natpunch_restart.<pid> —— 与自删形态限定不一致")
+	s := string(src)
+	if !strings.Contains(s, `os.CreateTemp("", "natpunch_restart.*")`) {
+		t.Error("重启脚本不是用 os.CreateTemp 生成的随机名 —— 可预测路径是本地提权落点")
+	}
+	if strings.Contains(s, `"/tmp/natpunch_restart.%d"`) {
+		t.Error("重启脚本路径仍是 /tmp/natpunch_restart.<pid>（可预测）")
+	}
+	// 内嵌脚本的自删形态必须能覆盖新名字
+	if !strings.Contains(s, "/tmp/natpunch_restart.*") {
+		t.Error("内嵌脚本的自删形态不再匹配 natpunch_restart.*")
 	}
 }
