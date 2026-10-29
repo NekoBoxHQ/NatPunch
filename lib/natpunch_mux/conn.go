@@ -22,6 +22,13 @@ type conn struct {
 	receiveWindow    *receiveWindow
 	sendWindow       *sendWindow
 	once             sync.Once
+	// writeMu 串行化 Write。
+	//
+	// sendWindow.WriteFull 会用连接级的 sendBuf/off 拼分片（SetSendBuf 直接覆盖
+	// Self.buf、把 off 归零），两个 goroutine 同时写同一条流时会互相重置对方的
+	// 发送缓冲 —— 同一段被重复发或截断，对端拿到错位 payload。
+	// net.Conn 的契约允许并发 Write，调用方（含 io.Copy 的两端）没有义务自己串行。
+	writeMu sync.Mutex
 }
 
 func NewConn(connId int32, mux *Mux) *conn {
@@ -53,14 +60,17 @@ func (s *conn) Read(buf []byte) (n int, err error) {
 }
 
 func (s *conn) Write(buf []byte) (n int, err error) {
+	if len(buf) == 0 {
+		return 0, nil
+	}
+	// 见 conn.writeMu 的注释：sendWindow 的发送缓冲是连接级的，必须串行。
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if s.isClose {
 		return 0, errors.New("the conn has closed")
 	}
 	if s.closingFlag {
 		return 0, errors.New("io: write on closed conn")
-	}
-	if len(buf) == 0 {
-		return 0, nil
 	}
 	n, err = s.sendWindow.WriteFull(buf, s.connId)
 	return
@@ -116,7 +126,7 @@ type window struct {
 	// wait   maxSize  useless  done
 	// wait zero means false, one means true
 	off       uint32
-	closeOp   bool
+	closeOp   atomic.Bool // 用 CAS 收口：CloseWindow 会被 Close / 对端 muxConnClose 等多条路径并发调用
 	closeOpCh chan struct{}
 	mux       *Mux
 }
@@ -152,8 +162,9 @@ func (Self *window) New() {
 }
 
 func (Self *window) CloseWindow() {
-	if !Self.closeOp {
-		Self.closeOp = true
+	// CAS 只放行一次：closeOpCh 容量是 2，重复发第 3、4 个 token 会**永久阻塞**
+	// （调用方可能是 Close、对端 muxConnClose、release 三条路径并发）。
+	if Self.closeOp.CompareAndSwap(false, true) {
 		Self.closeOpCh <- struct{}{}
 		Self.closeOpCh <- struct{}{}
 	}
@@ -260,7 +271,7 @@ func (Self *receiveWindow) calcSize() {
 }
 
 func (Self *receiveWindow) Write(buf []byte, l uint16, part bool, id int32) (err error) {
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		return errors.New("conn.receiveWindow: write on closed window")
 	}
 	element, err := newListElement(buf, l, part)
@@ -289,6 +300,13 @@ start:
 			// another goroutine change the status, make sure shall we need wait
 		}
 	} // maybe there are still some data received even if window is full, just keep the wait status
+	// 硬上限：窗口满之后对端仍可能继续发（恶意或异常客户端），而这里不校验窗口
+	// 就 Push，队列会无限增长 —— 单流就能把内存吃光（窗口本身可 advertised 到 128MB，
+	// 且没有跨流预算）。超过上限直接判这条流不可用，让上层关连接，别拖垮整个进程。
+	if Self.bufQueue.Len() > maxReceiveQueuePackets {
+		Self.mux.sendInfo(muxConnClose, id, nil)
+		return errors.New("conn.receiveWindow: receive queue overflow, stream closed")
+	}
 	// and push into queue. when receive window read enough, send window will be acknowledged.
 	Self.bufQueue.Push(element)
 	// status check finish, now we can push the element into the queue
@@ -300,7 +318,7 @@ start:
 }
 
 func (Self *receiveWindow) Read(p []byte, id int32) (n int, err error) {
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		return 0, io.EOF // receive close signal, returns eof
 	}
 	Self.bw.StartRead()
@@ -317,7 +335,7 @@ copyData:
 		// on the first Read method invoked, Self.off and Self.element.l
 		// both zero value
 		listEle.Put(Self.element)
-		if Self.closeOp {
+		if Self.closeOp.Load() {
 			return 0, io.EOF
 		}
 		Self.element, err = Self.bufQueue.Pop()
@@ -459,7 +477,7 @@ func (Self *sendWindow) SetSize(currentMaxSizeDone uint64) (closed bool) {
 			closed = true
 		}
 	}()
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		close(Self.setSizeCh)
 		return true
 	}
@@ -528,7 +546,7 @@ func (Self *sendWindow) sent(sentSize uint32) {
 func (Self *sendWindow) WriteTo() (p []byte, sendSize uint32, part bool, err error) {
 	// returns buf segments, return only one segments, need a loop outside
 	// until err = io.EOF
-	if Self.closeOp {
+	if Self.closeOp.Load() {
 		return nil, 0, false, errors.New("conn.writeWindow: window closed")
 	}
 	if Self.off >= uint32(len(Self.buf)) {

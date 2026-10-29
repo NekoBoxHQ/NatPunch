@@ -17,6 +17,11 @@ import (
 // （复评🟠7：4096 硬编码约 16MB，千兆级客户端大流量下可能批量掉线）
 var WriteQueueMax int64 = 16384
 
+// maxReceiveQueuePackets 单条流接收队列的硬上限（包数，每包 ≤4KB）。
+// 窗口协商只保证"对端**应该**守窗口"，但代码在窗口满之后并不校验就 Push：
+// 异常/恶意对端可以持续灌数据，单流把内存吃到 OOM。4096 包 ≈ 16MB/流。
+const maxReceiveQueuePackets = 4096
+
 const (
 	muxPingFlag uint8 = iota
 	muxNewConnOk
@@ -112,8 +117,16 @@ func (s *Mux) NewConn() (*conn, error) {
 	select {
 	case <-conn.connStatusOkCh:
 		return conn, nil
+	case <-s.done:
+		// mux 已经关了，别再等对端回应
+		return nil, errors.New("create connection fail, the mux has closed")
 	case <-timer.C:
 	}
+	// 超时必须把这条流回收：connMap 里那条已 Set 的 entry 会永远留着，
+	// 而对端随后真的接受了的话，它的数据会持续往本端的 receiveWindow 里灌，
+	// 却永远没人读 —— 内存一路涨到进程被 OOM。conn.Close() 内部会 Delete 并
+	// 给对端发 muxConnClose。
+	_ = conn.Close()
 	return nil, errors.New("create connection fail，the server refused the connection")
 }
 
@@ -344,6 +357,12 @@ func (s *Mux) readSession() {
 				case muxConnClose: //close the connection
 					connection.closingFlag = true
 					connection.receiveWindow.Stop() // close signal to receive window
+					// 对端关流时，本端阻塞在 sendWindow 上的写协程必须被唤醒：
+					// 原来只 Stop 了 receiveWindow，sendWindow 还在等"窗口 + ack"，
+					// 纯写侧的应用（没有读、收不到 EOF）会永久挂住 —— 每条这样的
+					// 流泄漏一个 goroutine + 一个 connMap 条目。
+					connection.sendWindow.CloseWindow()
+					s.connMap.Delete(connection.connId)
 					continue
 				}
 			} else if pack.flag == muxConnClose {
