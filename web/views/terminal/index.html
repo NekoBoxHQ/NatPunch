@@ -395,19 +395,37 @@ html, body { overflow: hidden !important; }
     .tp-cmds-add { padding: 6px 6px; font-size: 11.5px; }
 }
 
-/* 竖屏：即使屏幕较宽（平板竖放），面板也不该占太多横向空间 */
+/* 竖屏：面板只占 1/4 屏宽（终端优先），命令文字换成最多两行折行 */
 @media (orientation: portrait) and (max-width: 1024px) {
     .tp-cmds {
         position: absolute;
         top: 0;
         right: 0;
         bottom: 0;
-        width: 44vw;
-        max-width: 240px;
+        width: 25vw;
+        max-width: none;
         z-index: 40;
         border-left: 1px solid rgba(255, 255, 255, 0.12);
         box-shadow: -6px 0 18px rgba(0, 0, 0, 0.5);
     }
+    .tp-cmds-head { padding: 0 4px 0 6px; font-size: 11px; }
+    .tp-cmds-count { display: none; }
+    .tp-cmds-body { padding: 2px; }
+    /* 25% 宽度下只放得下命令本身：行内操作按钮挤掉一半文字，竖屏里隐藏，
+       编辑/删除请横屏或桌面端操作（命令仍可点按执行） */
+    .cmd-row .cmd-edit, .cmd-row .cmd-del { display: none; }
+    .cmd-row .cmd-run {
+        font-size: 11px;
+        line-height: 1.35;
+        padding: 6px 4px;
+        /* 单行省略改成最多两行，长命令不至于只剩前两个字 */
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        text-overflow: ellipsis;
+    }
+    .tp-cmds-add { padding: 5px 4px; font-size: 11px; }
 }
 </style>
 
