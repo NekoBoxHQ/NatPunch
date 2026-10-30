@@ -379,8 +379,31 @@ html, body { overflow: hidden !important; }
         top: 0;
         right: 0;
         bottom: 0;
-        width: 72vw;
-        max-width: 260px;
+        /* 原来 72vw / 260px：竖屏 390px 的手机上占掉 2/3 屏，终端只剩一条缝。
+           56vw + 196px 上限 ≈ 半屏。 */
+        width: 56vw;
+        max-width: 196px;
+        z-index: 40;
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: -6px 0 18px rgba(0, 0, 0, 0.5);
+    }
+    .tp-cmds-head { padding: 0 6px 0 8px; }
+    .cmd-row .cmd-run { font-size: 11.5px; padding: 7px 5px; }
+    /* 触屏没有 hover：编辑/删除按钮原本是透明的，看不见又点不到，却仍占着宽度。
+       手机上让它们常显并缩窄，把宽度留给命令文本。 */
+    .cmd-row .cmd-edit, .cmd-row .cmd-del { color: #6b7683; font-size: 11px; padding: 6px 2px; width: 20px; }
+    .tp-cmds-add { padding: 6px 6px; font-size: 11.5px; }
+}
+
+/* 竖屏：即使屏幕较宽（平板竖放），面板也不该占太多横向空间 */
+@media (orientation: portrait) and (max-width: 1024px) {
+    .tp-cmds {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 44vw;
+        max-width: 240px;
         z-index: 40;
         border-left: 1px solid rgba(255, 255, 255, 0.12);
         box-shadow: -6px 0 18px rgba(0, 0, 0, 0.5);
