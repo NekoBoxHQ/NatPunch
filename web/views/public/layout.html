@@ -58,9 +58,19 @@
         line-height: 1.5;
         text-align: center;
     }
-    /* 在线/开放：绿底深绿字；离线/关闭：灰底深灰字（用户指定配色） */
-    .np-badge-box.on  { border-color: #22C55E; background: #22C55E; color: #14532D; }
-    .np-badge-box.off { border-color: #9CA3AF; background: #9CA3AF; color: #1F2937; }
+    /* 在线/开放：绿底深绿字；离线/关闭：灰底深灰字（用户指定配色）
+       全部加 !important：主题和浏览器插件里有一堆给表格文字上色的规则，
+       不加会被盖成白字（真机上就是这个现象：绿底 + 白字 + 青色描边）。 */
+    #page-wrapper .np-badge-box.on {
+        border-color: #22C55E !important;
+        background-color: #22C55E !important;
+        color: #14532D !important;
+    }
+    #page-wrapper .np-badge-box.off {
+        border-color: #9CA3AF !important;
+        background-color: #9CA3AF !important;
+        color: #1F2937 !important;
+    }
 </style>
 
 <style>
