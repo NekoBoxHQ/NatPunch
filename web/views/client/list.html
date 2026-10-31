@@ -286,7 +286,7 @@
                 visible: true,
                 formatter: function (value, row, index) {
                     return '<a href="{{.web_base_url}}/index/all?client_id=' + row.Id
-                        + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
+                        + '" class="btn btn-outline btn-primary" style="white-space:nowrap;padding:5px 10px;" langtag="word-tunnel"></a>'
                 }
             },
             {
@@ -327,9 +327,10 @@
                     var ow = "uclient-fetch -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     var lx = "wget -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     // 只放两个部署按钮；隧道已经拆到左边单独一栏
-                    return '<div class="btn-group">'
-                        + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
-                        + '<button class="btn btn-outline btn-warning deploy-copy" data-clipboard-text="' + lx + '">Linux 部署</button>'
+                    // nowrap：两个按钮在窄列里会各占一行，看着像坏掉
+                    return '<div class="btn-group" style="display:inline-flex;flex-wrap:nowrap;">'
+                        + '<button class="btn btn-outline btn-info deploy-copy" style="white-space:nowrap;padding:5px 9px;" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
+                        + '<button class="btn btn-outline btn-warning deploy-copy" style="white-space:nowrap;padding:5px 9px;" data-clipboard-text="' + lx + '">Linux 部署</button>'
                         + '</div>'
                 }
             }
