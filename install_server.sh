@@ -510,6 +510,7 @@ install() {
     set_kv http_proxy_port  0
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
+    publish_selfhost
     log "安装完成"
 }
 upgrade() {
@@ -635,7 +636,58 @@ upgrade() {
     fi
     # 升级成功后才清理旧备份（失败/回滚路径不清理，保证可回滚）
     cleanup_old_backups
+    publish_selfhost
     log "升级完成，当前版本: ${TARGET_VER:-最新版}"
+}
+
+# publish_selfhost —— 把这次用到的那份发布物拉进面板静态目录，形成自建源。
+#
+# 目的：闭合「发版 → 面板升级 → 客户端从面板安装」这条链，全程不依赖 GitHub。
+#   · 版本目录：$DIR/web/static/dl/<版本>/（包 + 校验和 + 签名 + 校验器 + 三个脚本）
+#   · 稳定入口：$DIR/web/static/dl/{install.sh,uninstall_client.sh,install_server.sh}
+#   · 配置 install_base_url=auto（面板按「当前访问域名」自动拼 URL）
+# 任何失败都只告警、不影响安装/升级本身。
+publish_selfhost() {
+    PUB_VER="${TARGET_VER:-${VER:-}}"
+    [ -n "${PUB_VER:-}" ] || return 0
+    PUB_SRC="${BASE_URL:-}"
+    [ -n "${PUB_SRC:-}" ] || return 0
+    PUB_SH="$DIR/web/static/dl/.selfhost-publish.sh"
+
+    mkdir -p "$DIR/web/static/dl" 2>/dev/null || return 0
+    RAW_SCRIPTS="https://raw.githubusercontent.com/$REPO/master"
+    # 优先用本机已装的脚本副本（离线场景），没有再从 master 取
+    PUB_SCRIPT_SRC="$RAW_SCRIPTS"
+    if [ -f /usr/local/lib/natpunch-selfhost-publish.sh ]; then
+        PUB_SH=/usr/local/lib/natpunch-selfhost-publish.sh
+    fi
+
+    if [ ! -f "$PUB_SH" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL --max-time 60 -o "$PUB_SH" "$RAW_SCRIPTS/scripts/selfhost-publish.sh" 2>/dev/null || PUB_SH=""
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q --timeout=30 -O "$PUB_SH" "$RAW_SCRIPTS/scripts/selfhost-publish.sh" 2>/dev/null || PUB_SH=""
+        fi
+    fi
+    if [ -n "${PUB_SH:-}" ] && [ -s "$PUB_SH" ]; then
+        if sh "$PUB_SH" "$DIR" "$PUB_SRC" "$PUB_VER" "$PUB_SCRIPT_SRC"; then
+            info "自建源已更新：$DIR/web/static/dl/$PUB_VER"
+        else
+            warn "自建源更新失败（不影响服务），可稍后手动重跑"
+        fi
+    else
+        warn "取不到 selfhost-publish.sh，跳过自建源更新"
+    fi
+
+    # install_base_url=auto：面板按访问域名自动拼自建源地址，换域名不用改配置
+    if [ -f "$CONF" ]; then
+        if grep -q '^install_base_url=' "$CONF"; then
+            cur=$(sed -n 's/^install_base_url=//p' "$CONF" | head -1)
+            [ -n "$cur" ] || sed -i 's|^install_base_url=.*|install_base_url=auto|' "$CONF"
+        else
+            printf 'install_base_url=auto\n' >> "$CONF"
+        fi
+    fi
 }
 # ================= 备份清理 =================
 # 升级/改密会累积三类备份，每次升级成功、改密成功后只保留最新一份：

@@ -8,6 +8,7 @@ import (
 	"github.com/NekoBoxHQ/NatPunch/lib/common"
 	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
 	"github.com/NekoBoxHQ/NatPunch/lib/file"
+	"github.com/NekoBoxHQ/NatPunch/lib/version"
 	"github.com/NekoBoxHQ/NatPunch/server"
 	"github.com/astaxie/beego"
 )
@@ -52,6 +53,8 @@ func (s *ClientController) List() {
 		// 配了 install_base_url（比如面板自己托管发布包）就指向它，完全不访问 GitHub；
 		// 不配则保持原来的 raw.githubusercontent.com 行为，不影响其它部署。
 		s.Data["install_base_url"] = strings.TrimRight(beego.AppConfig.String("install_base_url"), "/")
+		// 自建源要有版本号才能拼出 .../dl/<版本> 目录
+		s.Data["nb_version"] = version.VERSION
 		s.display("client/list")
 		return
 	}
