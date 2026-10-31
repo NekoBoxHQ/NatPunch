@@ -248,6 +248,20 @@
                 }
             },
             {
+                // 隧道单独一栏（原来和部署挤在「查看」里）。按钮小，占 1/4；部署占 3/4。
+                field: 'tunnel_btn',
+                title: '隧道',
+                align: 'center',
+                halign: 'center',
+                valign: 'middle',
+                width: '9%',
+                visible: true,
+                formatter: function (value, row, index) {
+                    return '<a href="{{.web_base_url}}/index/all?client_id=' + row.Id
+                        + '" class="btn btn-outline btn-primary" style="white-space:nowrap;padding:5px 10px;" langtag="word-tunnel"></a>'
+                }
+            },
+            {
                 field: 'option',//域值
                 title: '<span langtag="word-option"></span>',//内容
                 align: 'center',
@@ -273,20 +287,6 @@
                     btn_group += '<a href="{{.web_base_url}}/terminal/index?client_id=' + row.Id
                     btn_group += '" class="btn btn-outline btn-info" title="SSH"><i class="fa fa-terminal"></i></a></div>'
                     return btn_group
-                }
-            },
-            {
-                // 隧道单独一栏（原来和部署挤在「查看」里）。按钮小，占 1/4；部署占 3/4。
-                field: 'tunnel_btn',
-                title: '隧道',
-                align: 'center',
-                halign: 'center',
-                valign: 'middle',
-                width: '9%',
-                visible: true,
-                formatter: function (value, row, index) {
-                    return '<a href="{{.web_base_url}}/index/all?client_id=' + row.Id
-                        + '" class="btn btn-outline btn-primary" style="white-space:nowrap;padding:5px 10px;" langtag="word-tunnel"></a>'
                 }
             },
             {
