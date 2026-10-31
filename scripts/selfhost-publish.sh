@@ -66,16 +66,26 @@ done
 chmod 755 "$VERDIR"/minisign-check-linux-* 2>/dev/null
 chmod 644 "$VERDIR"/* 2>/dev/null
 
-# 自检：包能对应上校验和，才认为自建源可用
+# 自检：包能对应上校验和，才认为自建源可用。
+# 退出码给调用方用：0=可用；1=不完整/校验不符（install_server.sh 会据此还原上一版 dl）。
+RC=1
 if [ -s "$VERDIR/SHA256SUMS" ] && [ -s "$VERDIR/linux_amd64_client.tar.gz" ]; then
     want=$(awk '$2=="linux_amd64_client.tar.gz"{print $1}' "$VERDIR/SHA256SUMS")
     got=$(sha256sum "$VERDIR/linux_amd64_client.tar.gz" 2>/dev/null | awk '{print $1}')
     if [ -n "$want" ] && [ "$want" = "$got" ]; then
+        RC=0
         echo "selfhost: 已发布 $VER 到 $VERDIR（校验一致，ok=$ok fail=$fail）"
     else
-        echo "selfhost: 警告——$VER 的 SHA256 与包不一致（ok=$ok fail=$fail）" >&2
+        echo "selfhost: 失败——$VER 的 SHA256 与包不一致（ok=$ok fail=$fail）" >&2
     fi
 else
-    echo "selfhost: 警告——$VER 发布不完整（ok=$ok fail=$fail）" >&2
+    echo "selfhost: 失败——$VER 发布不完整（ok=$ok fail=$fail）" >&2
 fi
-exit 0
+# 稳定入口三个脚本缺任何一个也算不完整（客户端靠它们安装）
+for f in install.sh uninstall_client.sh install_server.sh; do
+    if [ ! -s "$DLROOT/$f" ]; then
+        echo "selfhost: 失败——稳定入口缺 $DLROOT/$f" >&2
+        RC=1
+    fi
+done
+exit $RC

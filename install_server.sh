@@ -113,7 +113,23 @@ acquire_lock() {
     if [ -f "$LOCK_DIR/pid" ]; then
         OLD=$(cat "$LOCK_DIR/pid" 2>/dev/null)
         if [ -n "${OLD:-}" ] && kill -0 "${OLD:-}" 2>/dev/null; then
-            die "已有 NatPunch 操作进行中 (PID ${OLD})，请稍后重试"
+            # 持有者还活着不一定是真在干活：真机上遇到过「脚本被中途打断，进程卡在
+            # read 上」的情况 —— 锁永远不释放，之后每次升级都被它挡住。
+            # 安装/升级正常都在分钟级完成，所以按锁的年龄兜底：超过 10 分钟就接管。
+            LOCK_AGE=0
+            if command -v stat >/dev/null 2>&1; then
+                LOCK_TS=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo "")
+                case "${LOCK_TS:-}" in
+                    ''|*[!0-9]*) LOCK_AGE=0 ;;
+                    *) LOCK_AGE=$(( $(date +%s) - LOCK_TS )) ;;
+                esac
+            fi
+            if [ "$LOCK_AGE" -ge 600 ]; then
+                warn "锁已存在 ${LOCK_AGE}s（PID ${OLD} 仍在），判定为卡死，强制接管"
+                rm -rf "$LOCK_DIR" 2>/dev/null
+            else
+                die "已有 NatPunch 操作进行中 (PID ${OLD})，请稍后重试"
+            fi
         fi
         info "清理陈旧锁 (PID ${OLD:-未知})"
         rm -rf "$LOCK_DIR" 2>/dev/null
@@ -596,6 +612,16 @@ upgrade() {
         cd /; rm -rf "$TMP"; die "替换二进制失败"
     fi
     if [ -n "${WEB_SRC:-}" ]; then
+        # rm -rf web 会连带删掉 web/static/dl（自建源）。发布物在包里没有，
+        # 只能靠 publish_selfhost 事后重建 —— 一旦重建失败（网络/取脚本失败），
+        # 客户端下次安装就会 404。所以先把 dl 备份出来，发布完检查，不完整就还原。
+        DL_BAK=""
+        if [ -d "$WEB/static/dl" ]; then
+            DL_BAK=$(mktemp -d "$DIR/.dlbak.XXXXXX" 2>/dev/null) || DL_BAK=""
+            if [ -n "$DL_BAK" ]; then
+                cp -a "$WEB/static/dl/." "$DL_BAK/" 2>/dev/null || DL_BAK=""
+            fi
+        fi
         rm -rf "$WEB"
         if ! cp -r "$WEB_SRC" "$WEB"; then
             cd /; rm -rf "$TMP"; upgrade_rollback; die "拷贝 web 失败"
@@ -638,6 +664,17 @@ upgrade() {
     # 升级成功后才清理旧备份（失败/回滚路径不清理，保证可回滚）
     cleanup_old_backups
     publish_selfhost
+    # 自建源完整性兜底：publish 失败或没取全 → 还原升级前的 dl（旧版本仍可安装）
+    if [ -n "${DL_BAK:-}" ]; then
+        if [ ! -s "$WEB/static/dl/install.sh" ] || [ -z "$(ls -1 "$WEB/static/dl" 2>/dev/null | grep -E '^v[0-9]' | head -1)" ]; then
+            warn "自建源不完整（发布失败），还原升级前的 dl 目录"
+            mkdir -p "$WEB/static/dl" 2>/dev/null
+            cp -a "$DL_BAK/." "$WEB/static/dl/" 2>/dev/null \
+                && info "已还原自建源（旧版本，仍可安装）" \
+                || warn "还原自建源失败，请手工检查 $WEB/static/dl"
+        fi
+        rm -rf "$DL_BAK" 2>/dev/null
+    fi
     log "升级完成，当前版本: ${TARGET_VER:-最新版}"
 }
 
