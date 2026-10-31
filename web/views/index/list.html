@@ -210,9 +210,9 @@
                 sortable: true,
                 formatter: function (value, row, index) {
                     if (value) {
-                        return '<span class="badge badge-primary" langtag="word-open"></span>'
+                        return '<span class="np-badge-box on" langtag="word-open"></span>'
                     } else {
-                        return '<span class="badge badge-badge" langtag="word-close"></span>'
+                        return '<span class="np-badge-box off" langtag="word-close"></span>'
                     }
                 }
             },
@@ -225,9 +225,9 @@
                 sortable: true,
                 formatter: function (value, row, index) {
                     if (value) {
-                        return '<span class="badge badge-primary" langtag="word-open"></span>'
+                        return '<span class="np-badge-box on" langtag="word-open"></span>'
                     } else {
-                        return '<span class="badge badge-badge" langtag="word-close"></span>'
+                        return '<span class="np-badge-box off" langtag="word-close"></span>'
                     }
                 }
             },
@@ -240,9 +240,9 @@
                 sortable: true,
                 formatter: function (value, row, index) {
                     if (row.Client.IsConnect) {
-                        return '<span class="badge badge-primary" langtag="word-online"></span>'
+                        return '<span class="np-badge-box on" langtag="word-online"></span>'
                     } else {
-                        return '<span class="badge badge-badge" langtag="word-offline"></span>'
+                        return '<span class="np-badge-box off" langtag="word-offline"></span>'
                     }
                 }
             },

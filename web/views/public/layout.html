@@ -43,6 +43,24 @@
 </head>
 
 <style>
+    /* 状态方框：和列表里的操作按钮同尺寸，别再用小 badge 扎眼。
+       用法：<span class="np-badge-box on|off" langtag="word-open"></span> */
+    .np-badge-box {
+        display: inline-block;
+        cursor: default;
+        white-space: nowrap;
+        padding: 5px 10px;
+        border: 1px solid;
+        border-radius: 3px;
+        font-size: 12px;
+        line-height: 1;
+        text-align: center;
+    }
+    .np-badge-box.on { border-color: #23c6c8; color: #23c6c8; }
+    .np-badge-box.off { border-color: #4a525c; color: #8a94a0; }
+</style>
+
+<style>
     #page-wrapper .ibox,
     #page-wrapper .ibox-content,
     #page-wrapper .ibox-title,
