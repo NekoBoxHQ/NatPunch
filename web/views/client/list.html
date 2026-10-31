@@ -31,6 +31,16 @@
             {{end}}
                 <div class="ibox-content">
 
+                    <!-- 切源：默认「GitHub」；勾选后部署命令改指面板自建源（不访问 GitHub）。
+                         状态记在浏览器本地，刷新后保持。面板没启用自建源时自动禁用。 -->
+                    <div class="np-src" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;">
+                        <label style="margin:0;display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:normal;">
+                            <input type="checkbox" id="np_src_switch" style="margin:0;">
+                            <span>切源</span>
+                        </label>
+                        <span id="np_src_hint" class="text-muted" style="font-size:12px;"></span>
+                    </div>
+
                     <table id="table"></table>
 
                 </div>
@@ -50,6 +60,11 @@
         });
     }
     /*bootstrap table*/
+    // 「切源」开关：默认走 GitHub（false），勾选后部署命令改指面板自建源。
+    // 状态存 localStorage，刷新后保持；formatter 里读这个变量。
+    var NP_SRC_KEY = 'np_inst_src';
+    var npUsePanel = false;
+    try { npUsePanel = localStorage.getItem(NP_SRC_KEY) === '1'; } catch (e) { npUsePanel = false; }
     $('#table').bootstrapTable({
         toolbar: "#toolbar",
         method: 'post', // 服务器数据的请求方式 get or post
@@ -284,20 +299,20 @@
                     // 不防中间人"，实测 24 小时能刷 136 条。两个 flag 用空格分隔，install.sh 逐段校验。
                     var tlsFlag = "{{if .tls_enable}}-tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}{{end}}";
                     // install.sh 的来源：
-                    //   install_base_url=auto  → 按「当前访问域名」拼：<origin><web_base_url>/static/dl
-                    //                            （面板自建源，换域名不用改配置）
-                    //   install_base_url=<url> → 用它
-                    //   留空                   → GitHub raw（老行为）
+                    //   「切源」开关勾选 → 面板自建源（不访问 GitHub）
+                    //   未勾选（默认）  → GitHub raw
+                    // 面板地址：install_base_url=auto 时按当前访问域名拼 <origin><web_base_url>/static/dl
                     var instCfg = "{{.install_base_url}}";
                     var instVer = "{{.nb_version}}";
-                    var instBase = instCfg === "auto"
+                    var panelBase = instCfg === "auto"
                         ? (location.origin + "{{.web_base_url}}" + "/static/dl")
                         : instCfg;
-                    var instUrl = instBase
-                        ? instBase + "/install.sh"
+                    var usePanel = npUsePanel && !!panelBase;
+                    var instUrl = usePanel
+                        ? panelBase + "/install.sh"
                         : "https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh";
                     // 自建源：把版本目录作为下载基准传给安装脚本（脚本自身不写死任何地址）
-                    var instEnv = instBase ? ("NATPUNCH_BASE_URL=" + instBase + "/" + instVer + " ") : "";
+                    var instEnv = usePanel ? ("NATPUNCH_BASE_URL=" + panelBase + "/" + instVer + " ") : "";
                     var ow = "uclient-fetch -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     var lx = "wget -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
@@ -320,6 +335,36 @@
     }
 
     var clipboard = new ClipboardJS('.copy, .deploy-copy');
+
+    // 「切源」开关初始化与联动
+    (function () {
+        var panelReady = "{{.install_base_url}}" !== "";
+        var cfg = "{{.install_base_url}}";
+        var $sw = $('#np_src_switch');
+        var $hint = $('#np_src_hint');
+        function refreshHint() {
+            if (!panelReady) {
+                $hint.text('面板未启用自建源（install_base_url 为空），只能用 GitHub');
+                return;
+            }
+            $hint.text(npUsePanel
+                ? '当前：面板自建源（不访问 GitHub）'
+                : '当前：GitHub（勾选后改用面板）');
+        }
+        if (!panelReady) {
+            $sw.prop('disabled', true).prop('checked', false);
+            npUsePanel = false;
+        } else {
+            $sw.prop('checked', npUsePanel);
+        }
+        refreshHint();
+        $sw.on('change', function () {
+            npUsePanel = this.checked;
+            try { localStorage.setItem(NP_SRC_KEY, npUsePanel ? '1' : '0'); } catch (e) {}
+            refreshHint();
+            $('#table').bootstrapTable('refresh'); // 重算每行的部署命令
+        });
+    })();
     clipboard.on('success', function (e) {
         // alert("复制成功"+e.text)
         toastr.success('复制成功');
