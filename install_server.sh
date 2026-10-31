@@ -12,6 +12,10 @@ LOG="$DIR/natpunch.log"
 # 版本号不写死：下载优先走 get_latest_ver 探测到的最高版本 tag（releases/download/$VER），
 # 探测失败才回退 releases/latest/download（自动指向最新发布）。
 REPO="NekoBoxHQ/NatPunch"
+# 镜像前缀（NATPUNCH_MIRROR）归一化。脚本以 set -u 运行，必须先给默认值，
+# 否则 upgrade 分支里引用 ${MIRROR} 会直接 "parameter not set" 中止。
+MIRROR=""
+if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
 SELF="$(basename "$0")"
 SERVICE_NAME="natpunch"
 # 发布方 minisign 公钥（内置默认，环境变量 MINISIGN_PUBKEY 可覆盖：自建发布链场景）
@@ -467,9 +471,6 @@ install() {
         mips|mipsel|mipsle) SERVER_PKG="linux_mipsle_server.tar.gz";;
         *) die "不支持的架构: $ARCH（支持 amd64/arm64/armv7/mipsle）；请手动下载对应安装包";;
     esac
-    # 镜像前缀归一化（同 install.sh）
-    MIRROR=""
-    if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
     info "下载最新发布 ($SERVER_PKG) ..."
     # 与 install.sh 一致：GitHub 访问不了时可用环境变量指定发布目录/镜像：
     #   NATPUNCH_BASE_URL=http(s)://.../dl/v26.10.59   直接取该目录下的包与校验和
