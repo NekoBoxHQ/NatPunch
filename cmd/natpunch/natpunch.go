@@ -244,6 +244,8 @@ web_username=admin
 web_password=123
 web_port = 8081
 web_ip=0.0.0.0
+# 部署按钮生成的安装命令从哪取 install.sh；留空 = GitHub raw，填写 = 面板自建源（如 https://面板:8443/static/dl）
+install_base_url=
 web_base_url=
 web_open_ssl=false
 web_cert_file=conf/server.pem

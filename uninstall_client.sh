@@ -294,6 +294,18 @@ do_update() {
     esac
     # 取版本号最高的 tag（不是 /releases/latest），拿不到就退回 latest 并告警
     VER_LIST=""
+    # 与 install.sh 一致：GitHub 不可达时可用环境变量改源
+    #   NATPUNCH_BASE_URL  直接指定发布目录（完全不访问 GitHub）
+    #   NATPUNCH_VERSION   只覆盖版本号
+    #   NATPUNCH_MIRROR    镜像前缀
+    MIRROR=""
+    if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
+    if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+        BASE_URL="${NATPUNCH_BASE_URL%/}"
+        VER="${NATPUNCH_VERSION:-本地目录}"
+        log "使用指定发布目录: $BASE_URL"
+    else
+    if [ -z "${NATPUNCH_VERSION:-}" ]; then
     if [ "$HAS_WGET" -eq 1 ]; then
         VER_LIST="$(wget -qO- --timeout=10 \
             "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
@@ -301,12 +313,13 @@ do_update() {
         VER_LIST="$(curl -fsSL --max-time 10 \
             "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
     fi
-    VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
+    fi
+    VER="${NATPUNCH_VERSION:-$(printf '%s\n' "$VER_LIST" | pick_highest_version)}"
     # 备路：api.github.com 对匿名请求有每小时配额（60 次/IP），路由器出口 IP 常常是
     # 共享的、很容易被限流 —— 限流时上面的请求会拿到 403 的 JSON 错误体，pick 出空值。
     # releases.atom 是普通 HTTPS 页面、不吃 API 配额，把 <title>vX.Y.Z</title> 转成
     # tag_name 形式后可以复用同一套"版本号最高"比较（不是 /releases/latest 的"发布最新"）。
-    if [ -z "$VER" ]; then
+    if [ -z "$VER" ] && [ -z "${NATPUNCH_VERSION:-}" ]; then
         if [ "$HAS_WGET" -eq 1 ]; then
             VER_LIST="$(wget -qO- --timeout=10 \
                 "https://github.com/$REPO/releases.atom" 2>/dev/null)"
@@ -318,11 +331,12 @@ do_update() {
         [ -n "$VER" ] && log "目标版本（atom 备路）: $VER"
     fi
     if [ -n "$VER" ]; then
-        BASE_URL="https://github.com/$REPO/releases/download/$VER"
+        BASE_URL="${MIRROR}https://github.com/$REPO/releases/download/$VER"
         log "目标版本: $VER"
     else
-        BASE_URL="https://github.com/$REPO/releases/latest/download"
+        BASE_URL="${MIRROR}https://github.com/$REPO/releases/latest/download"
         warn "无法确定最高版本号，回退到 releases/latest（可能不是最新版）"
+    fi
     fi
     # 已经是最新版本就别动。升级 = 停客户端 → 断隧道 → 再拉起来，
     # 版本没变还走一遍，等于白给自己制造一次失联窗口。

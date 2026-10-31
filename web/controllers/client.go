@@ -48,6 +48,10 @@ func (s *ClientController) List() {
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "client"
 		s.SetInfo("client")
+		// 「部署」按钮生成的命令从哪取 install.sh。
+		// 配了 install_base_url（比如面板自己托管发布包）就指向它，完全不访问 GitHub；
+		// 不配则保持原来的 raw.githubusercontent.com 行为，不影响其它部署。
+		s.Data["install_base_url"] = strings.TrimRight(beego.AppConfig.String("install_base_url"), "/")
 		s.display("client/list")
 		return
 	}

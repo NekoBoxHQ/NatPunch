@@ -283,8 +283,15 @@
                     // 拿它们装的客户端只会警告"TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，
                     // 不防中间人"，实测 24 小时能刷 136 条。两个 flag 用空格分隔，install.sh 逐段校验。
                     var tlsFlag = "{{if .tls_enable}}-tls_enable=true{{if .bridge_fingerprint}} -tls_fingerprint={{.bridge_fingerprint}}{{end}}{{end}}";
-                    var ow = "uclient-fetch -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
-                    var lx = "wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
+                    // install.sh 的来源：配了 install_base_url（面板自己托管发布包）就指向面板，
+                    // 不配则回退到 GitHub raw —— 国内网络访问 raw 经常超时/被 407 拦，改成
+                    // 自建源后整条安装链路不依赖外网。
+                    var instBase = "{{.install_base_url}}";
+                    var instUrl = instBase
+                        ? instBase + "/install.sh"
+                        : "https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh";
+                    var ow = "uclient-fetch -qO- " + instUrl + " | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
+                    var lx = "wget -qO- " + instUrl + " | sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
                         + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
                         + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
