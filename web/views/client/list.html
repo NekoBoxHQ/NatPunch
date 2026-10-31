@@ -24,6 +24,10 @@
                         <i class="fa fa-fw fa-lg fa-plus"></i> <span langtag="word-add"></span></a>
                         <a href="#" onclick="batchDelete('{{.web_base_url}}/client/del');return false;" class="btn btn-danger dim">
                         <i class="fa fa-fw fa-lg fa-trash"></i> <span langtag="word-batchdelete"></span></a>
+                        <!-- 切源：部署命令从哪儿取 install.sh。默认 GitHub，点一下切成面板自建源 -->
+                        <button type="button" id="np_src_btn" class="btn btn-outline btn-default"
+                                style="margin-left:8px;"
+                                title="部署命令的来源：GitHub / 面板自建源">切源：GitHub</button>
                     </div>
                     <table id="taskList_table" class="table-striped table-hover" data-mobile-responsive="true"></table>
                 </div>
@@ -305,18 +309,9 @@
                     var instEnv = usePanel ? ("NATPUNCH_BASE_URL=" + panelBase + "/" + instVer + " ") : "";
                     var ow = "uclient-fetch -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     var lx = "wget -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
-                    // 「切源」放在原来「查看」的位置（查看那个按钮基本没人用）：
-                    // 勾选后本行两个部署按钮生成的命令改从面板自建源取，不访问 GitHub。
-                    // 开关是全局的（存 localStorage），勾任意一行都生效。
-                    var panelReady = "{{.install_base_url}}" !== "";
-                    // 「切源」就是一个按钮，占原来「查看」的位置，点一下在 GitHub / 面板之间切
-                    var swOn = npUsePanel && panelReady;
-                    var srcBtn = '<button type="button" class="btn np-src-btn '
-                        + (swOn ? 'btn-primary' : 'btn-outline btn-default') + '"'
-                        + (panelReady ? '' : ' disabled')
-                        + ' title="' + (swOn ? '当前：面板自建源（点击切回 GitHub）' : '当前：GitHub（点击切到面板自建源）') + '"'
-                        + '>切源</button>';
-                    return '<div class="btn-group">' + srcBtn
+                    // 三颗按钮：隧道（恢复原来的入口）+ 两个部署。切源开关在表格顶部工具栏。
+                    return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
+                        + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
                         + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
                         + '<button class="btn btn-outline btn-warning deploy-copy" data-clipboard-text="' + lx + '">Linux 部署</button>'
                         + '</div>'
@@ -336,13 +331,32 @@
 
     var clipboard = new ClipboardJS('.copy, .deploy-copy');
 
-    // 「切源」按钮：点一下在 GitHub / 面板自建源之间切（全局状态，任意一行都生效）
+    // 「切源」按钮（表格顶部工具栏）：点一下在 GitHub / 面板自建源之间切
     (function () {
-        if ("{{.install_base_url}}" === "") { npUsePanel = false; }
-        $(document).on('click', '.np-src-btn', function () {
+        var panelReady = "{{.install_base_url}}" !== "";
+        if (!panelReady) { npUsePanel = false; }
+        var $b = $('#np_src_btn');
+        function paint() {
+            if (!panelReady) {
+                $b.prop('disabled', true).text('切源：未启用')
+                  .attr('title', '面板未配置 install_base_url，只能用 GitHub')
+                  .removeClass('btn-primary').addClass('btn-outline btn-default');
+                return;
+            }
+            if (npUsePanel) {
+                $b.text('切源：面板').removeClass('btn-outline btn-default').addClass('btn-primary')
+                  .attr('title', '当前从面板自建源取安装包（点击切回 GitHub）');
+            } else {
+                $b.text('切源：GitHub').removeClass('btn-primary').addClass('btn-outline btn-default')
+                  .attr('title', '当前从 GitHub 取安装包（点击切到面板自建源）');
+            }
+        }
+        paint();
+        $b.on('click', function () {
             if ($(this).prop('disabled')) { return; }
             npUsePanel = !npUsePanel;
             try { localStorage.setItem(NP_SRC_KEY, npUsePanel ? '1' : '0'); } catch (e) {}
+            paint();
             $('#table').bootstrapTable('refresh'); // 重算每行的部署命令
         });
     })();
