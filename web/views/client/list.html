@@ -31,16 +31,6 @@
             {{end}}
                 <div class="ibox-content">
 
-                    <!-- 切源：默认「GitHub」；勾选后部署命令改指面板自建源（不访问 GitHub）。
-                         状态记在浏览器本地，刷新后保持。面板没启用自建源时自动禁用。 -->
-                    <div class="np-src" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;">
-                        <label style="margin:0;display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:normal;">
-                            <input type="checkbox" id="np_src_switch" style="margin:0;">
-                            <span>切源</span>
-                        </label>
-                        <span id="np_src_hint" class="text-muted" style="font-size:12px;"></span>
-                    </div>
-
                     <table id="table"></table>
 
                 </div>
@@ -315,10 +305,21 @@
                     var instEnv = usePanel ? ("NATPUNCH_BASE_URL=" + panelBase + "/" + instVer + " ") : "";
                     var ow = "uclient-fetch -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     var lx = "wget -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
-                    return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
-                        + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
+                    // 「切源」放在原来「查看」的位置（查看那个按钮基本没人用）：
+                    // 勾选后本行两个部署按钮生成的命令改从面板自建源取，不访问 GitHub。
+                    // 开关是全局的（存 localStorage），勾任意一行都生效。
+                    var panelReady = "{{.install_base_url}}" !== "";
+                    var swChecked = (npUsePanel && panelReady) ? ' checked' : '';
+                    var swDisabled = panelReady ? '' : ' disabled';
+                    return '<div class="np-deploy-cell">'
+                        + '<label class="np-src-cell" title="勾选后部署命令改用面板自建源（不访问 GitHub）">'
+                        + '<input type="checkbox" class="np-src-chk"' + swChecked + swDisabled + '>'
+                        + '<span>切源</span>'
+                        + '</label>'
+                        + '<div class="btn-group">'
                         + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
                         + '<button class="btn btn-outline btn-warning deploy-copy" data-clipboard-text="' + lx + '">Linux 部署</button>'
+                        + '</div>'
                         + '</div>'
                 }
             }
@@ -336,32 +337,13 @@
 
     var clipboard = new ClipboardJS('.copy, .deploy-copy');
 
-    // 「切源」开关初始化与联动
+    // 「切源」开关（行内，替换了原来的「查看」按钮）：全局状态，勾任意一行都生效
     (function () {
         var panelReady = "{{.install_base_url}}" !== "";
-        var cfg = "{{.install_base_url}}";
-        var $sw = $('#np_src_switch');
-        var $hint = $('#np_src_hint');
-        function refreshHint() {
-            if (!panelReady) {
-                $hint.text('面板未启用自建源（install_base_url 为空），只能用 GitHub');
-                return;
-            }
-            $hint.text(npUsePanel
-                ? '当前：面板自建源（不访问 GitHub）'
-                : '当前：GitHub（勾选后改用面板）');
-        }
-        if (!panelReady) {
-            $sw.prop('disabled', true).prop('checked', false);
-            npUsePanel = false;
-        } else {
-            $sw.prop('checked', npUsePanel);
-        }
-        refreshHint();
-        $sw.on('change', function () {
+        if (!panelReady) { npUsePanel = false; }
+        $(document).on('change', '.np-src-chk', function () {
             npUsePanel = this.checked;
             try { localStorage.setItem(NP_SRC_KEY, npUsePanel ? '1' : '0'); } catch (e) {}
-            refreshHint();
             $('#table').bootstrapTable('refresh'); // 重算每行的部署命令
         });
     })();
