@@ -45,6 +45,15 @@
 <style>
     /* 状态方框：和列表里的操作按钮同尺寸，别再用小 badge 扎眼。
        用法：<span class="np-badge-box on|off" langtag="word-open"></span> */
+    /* 隧道 / SSH 两个按钮：蓝底上青字看不清，改成黑字黑框 */
+    #page-wrapper .np-btn-dark,
+    #page-wrapper .np-btn-dark:hover,
+    #page-wrapper .np-btn-dark:focus,
+    #page-wrapper .np-btn-dark:active {
+        color: #000000 !important;
+        border-color: #000000 !important;
+        background-color: rgba(255,255,255,0.18) !important;
+    }
     .np-badge-box {
         display: inline-block;
         cursor: default;
