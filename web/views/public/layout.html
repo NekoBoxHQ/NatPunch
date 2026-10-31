@@ -52,8 +52,10 @@
         padding: 5px 10px;
         border: 1px solid;
         border-radius: 3px;
-        font-size: 12px;
-        line-height: 1;
+        /* 必须和 .btn 一致：字号 13px、行高 1.42857143 —— 之前用 12px/line-height:1，
+           量出来是 46x24，而「隧道」按钮是 48x32，矮了 8px，看着就不齐。 */
+        font-size: 13px;
+        line-height: 1.5;
         text-align: center;
     }
     .np-badge-box.on { border-color: #23c6c8; color: #23c6c8; }
