@@ -219,22 +219,39 @@ pick_highest_version() {
     '
 }
 # ---------- 获取版本（按版本号取最高，latest 按发布时间排序会指向旧版） ----------
+#
+# 三个环境变量用于「GitHub 访问不了 / 要挂代理才能下」的场景（国内常见）：
+#   NATPUNCH_BASE_URL  直接指定发布目录，如 https://你的面板:8443/static/dl/v26.10.59
+#                      给了它就不再访问 api.github.com / github.com，整套包从该目录取
+#                      （包、SHA256SUMS、SHA256SUMS.minisig、校验器都在同一目录即可）
+#   NATPUNCH_VERSION   只覆盖版本号，仍按官方 URL 拼
+#   NATPUNCH_MIRROR    镜像前缀，拼在官方 URL 前面，如 https://ghfast.top
+# 例：wget -O- http://内网/install.sh | NATPUNCH_BASE_URL=http://内网/dl/v26.10.59 sh -s -- <vkey> ...
+# 镜像前缀归一化成「协议头://主机/」，避免与 github 地址粘连（https://m.examplehttps://github.com/...）
+MIRROR=""
+if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
 log "获取最新版本..."
-VER=""
+VER="${NATPUNCH_VERSION:-}"
 VER_LIST=""
-if [ "$HAS_WGET" -eq 1 ]; then
-    VER_LIST="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
+if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+    echo "    使用指定发布目录：$NATPUNCH_BASE_URL"
 else
-    VER_LIST="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
+    if [ "$HAS_WGET" -eq 1 ]; then
+        VER_LIST="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
+    else
+        VER_LIST="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
+    fi
+    VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
+    echo "    版本选取：${VER:-回退 latest}"
 fi
-VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
-echo "    版本选取：${VER:-回退 latest}"
-echo "    ${VER:-最新发布}"
+echo "    ${VER:-${NATPUNCH_BASE_URL:-最新发布}}"
 # ---------- 下载 ----------
-if [ -n "$VER" ]; then
-    BASE_URL="https://github.com/$REPO/releases/download/$VER"
+if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+    BASE_URL="${NATPUNCH_BASE_URL%/}"
+elif [ -n "$VER" ]; then
+    BASE_URL="${MIRROR}https://github.com/$REPO/releases/download/$VER"
 else
-    BASE_URL="https://github.com/$REPO/releases/latest/download"
+    BASE_URL="${MIRROR}https://github.com/$REPO/releases/latest/download"
 fi
 URL="$BASE_URL/$PKG"
 log "下载 $PKG ..."

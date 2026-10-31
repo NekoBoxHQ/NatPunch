@@ -467,13 +467,27 @@ install() {
         mips|mipsel|mipsle) SERVER_PKG="linux_mipsle_server.tar.gz";;
         *) die "不支持的架构: $ARCH（支持 amd64/arm64/armv7/mipsle）；请手动下载对应安装包";;
     esac
+    # 镜像前缀归一化（同 install.sh）
+    MIRROR=""
+    if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
     info "下载最新发布 ($SERVER_PKG) ..."
-    VER=$(get_latest_ver) || VER=""
-    if [ -n "$VER" ]; then
-        BASE_URL="https://github.com/$REPO/releases/download/$VER"
-        info "最新版本: $VER"
+    # 与 install.sh 一致：GitHub 访问不了时可用环境变量指定发布目录/镜像：
+    #   NATPUNCH_BASE_URL=http(s)://.../dl/v26.10.59   直接取该目录下的包与校验和
+    #   NATPUNCH_VERSION=v26.10.59                     只覆盖版本号
+    #   NATPUNCH_MIRROR=https://ghfast.top              给官方 URL 加前缀
+    if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+        BASE_URL="${NATPUNCH_BASE_URL%/}"
+        VER="${NATPUNCH_VERSION:-本地目录}"
+        info "使用指定发布目录: $BASE_URL"
     else
-        BASE_URL="https://github.com/$REPO/releases/latest/download"
+        VER="${NATPUNCH_VERSION:-}"
+        [ -n "$VER" ] || VER=$(get_latest_ver) || VER=""
+        if [ -n "$VER" ]; then
+            BASE_URL="${MIRROR}https://github.com/$REPO/releases/download/$VER"
+            info "最新版本: $VER"
+        else
+            BASE_URL="${MIRROR}https://github.com/$REPO/releases/latest/download"
+        fi
     fi
     dl "$BASE_URL/$SERVER_PKG" natpunch.tar.gz || { cd /; rm -rf "$TMP"; die "下载失败"; }
     verify_package "$SERVER_PKG" "$BASE_URL"
@@ -518,20 +532,27 @@ upgrade() {
         mips|mipsel|mipsle) SERVER_PKG="linux_mipsle_server.tar.gz";;
         *) die "不支持的架构: $ARCH（支持 amd64/arm64/armv7/mipsle）；请手动下载对应安装包";;
     esac
-    if [ -n "$TARGET_VER" ]; then
-        TARGET_URL="https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"
-        BASE_URL="https://github.com/$REPO/releases/download/$TARGET_VER"
+    if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+        BASE_URL="${NATPUNCH_BASE_URL%/}"
+        TARGET_URL="$BASE_URL/$SERVER_PKG"
+        TARGET_VER="${TARGET_VER:-${NATPUNCH_VERSION:-本地目录}}"
+        info "使用指定发布目录: $BASE_URL"
+    elif [ -n "$TARGET_VER" ]; then
+        TARGET_URL="${MIRROR}https://github.com/$REPO/releases/download/$TARGET_VER/$SERVER_PKG"
+        BASE_URL="${MIRROR}https://github.com/$REPO/releases/download/$TARGET_VER"
         info "下载 $TARGET_VER ..."
     else
         # 按版本号取最高（latest 按发布时间排序，并行发版会指向旧版）
-        VER=$(get_latest_ver) || VER=""
+        VER="${NATPUNCH_VERSION:-}"
+        [ -n "$VER" ] || VER=$(get_latest_ver) || VER=""
         if [ -n "$VER" ]; then
-            TARGET_URL="https://github.com/$REPO/releases/download/$VER/$SERVER_PKG"
-            BASE_URL="https://github.com/$REPO/releases/download/$VER"
+            TARGET_VER="$VER"
+            TARGET_URL="${MIRROR}https://github.com/$REPO/releases/download/$VER/$SERVER_PKG"
+            BASE_URL="${MIRROR}https://github.com/$REPO/releases/download/$VER"
             info "下载最新发布 $VER ..."
         else
-            TARGET_URL="https://github.com/$REPO/releases/latest/download/$SERVER_PKG"
-            BASE_URL="https://github.com/$REPO/releases/latest/download"
+            TARGET_URL="${MIRROR}https://github.com/$REPO/releases/latest/download/$SERVER_PKG"
+            BASE_URL="${MIRROR}https://github.com/$REPO/releases/latest/download"
             info "下载最新发布 ..."
         fi
     fi
