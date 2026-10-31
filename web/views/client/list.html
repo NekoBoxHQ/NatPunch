@@ -276,11 +276,28 @@
                 }
             },
             {
-                field: 'show',//域值
-                title: '<span langtag="word-show">',//内容
+                // 隧道单独一栏（原来和部署挤在「查看」里）。按钮小，占 1/4；部署占 3/4。
+                field: 'tunnel_btn',
+                title: '隧道',
                 align: 'center',
                 halign: 'center',
-                visible: true,//false表示不显示
+                valign: 'middle',
+                width: '9%',
+                visible: true,
+                formatter: function (value, row, index) {
+                    return '<a href="{{.web_base_url}}/index/all?client_id=' + row.Id
+                        + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
+                }
+            },
+            {
+                // 原「查看」列改名为「部署」：只放两个部署按钮
+                field: 'deploy',
+                title: '部署',
+                align: 'center',
+                halign: 'center',
+                valign: 'middle',
+                width: '27%',
+                visible: true,
                 formatter: function (value, row, index) {
                     var dom = location.hostname;
                     var port = "{{if .tls_enable}}{{.tls_p}}{{else}}{{.p}}{{end}}";
@@ -309,9 +326,8 @@
                     var instEnv = usePanel ? ("NATPUNCH_BASE_URL=" + panelBase + "/" + instVer + " ") : "";
                     var ow = "uclient-fetch -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     var lx = "wget -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
-                    // 三颗按钮：隧道（恢复原来的入口）+ 两个部署。切源开关在表格顶部工具栏。
-                    return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
-                        + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
+                    // 只放两个部署按钮；隧道已经拆到左边单独一栏
+                    return '<div class="btn-group">'
                         + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
                         + '<button class="btn btn-outline btn-warning deploy-copy" data-clipboard-text="' + lx + '">Linux 部署</button>'
                         + '</div>'
