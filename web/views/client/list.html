@@ -309,17 +309,16 @@
                     // 勾选后本行两个部署按钮生成的命令改从面板自建源取，不访问 GitHub。
                     // 开关是全局的（存 localStorage），勾任意一行都生效。
                     var panelReady = "{{.install_base_url}}" !== "";
-                    var swChecked = (npUsePanel && panelReady) ? ' checked' : '';
-                    var swDisabled = panelReady ? '' : ' disabled';
-                    return '<div class="np-deploy-cell">'
-                        + '<label class="np-src-cell" title="勾选后部署命令改用面板自建源（不访问 GitHub）">'
-                        + '<input type="checkbox" class="np-src-chk"' + swChecked + swDisabled + '>'
-                        + '<span>切源</span>'
-                        + '</label>'
-                        + '<div class="btn-group">'
+                    // 「切源」就是一个按钮，占原来「查看」的位置，点一下在 GitHub / 面板之间切
+                    var swOn = npUsePanel && panelReady;
+                    var srcBtn = '<button type="button" class="btn np-src-btn '
+                        + (swOn ? 'btn-primary' : 'btn-outline btn-default') + '"'
+                        + (panelReady ? '' : ' disabled')
+                        + ' title="' + (swOn ? '当前：面板自建源（点击切回 GitHub）' : '当前：GitHub（点击切到面板自建源）') + '"'
+                        + '>切源</button>';
+                    return '<div class="btn-group">' + srcBtn
                         + '<button class="btn btn-outline btn-info deploy-copy" data-clipboard-text="' + ow + '">OpenWrt 部署</button>'
                         + '<button class="btn btn-outline btn-warning deploy-copy" data-clipboard-text="' + lx + '">Linux 部署</button>'
-                        + '</div>'
                         + '</div>'
                 }
             }
@@ -337,12 +336,12 @@
 
     var clipboard = new ClipboardJS('.copy, .deploy-copy');
 
-    // 「切源」开关（行内，替换了原来的「查看」按钮）：全局状态，勾任意一行都生效
+    // 「切源」按钮：点一下在 GitHub / 面板自建源之间切（全局状态，任意一行都生效）
     (function () {
-        var panelReady = "{{.install_base_url}}" !== "";
-        if (!panelReady) { npUsePanel = false; }
-        $(document).on('change', '.np-src-chk', function () {
-            npUsePanel = this.checked;
+        if ("{{.install_base_url}}" === "") { npUsePanel = false; }
+        $(document).on('click', '.np-src-btn', function () {
+            if ($(this).prop('disabled')) { return; }
+            npUsePanel = !npUsePanel;
             try { localStorage.setItem(NP_SRC_KEY, npUsePanel ? '1' : '0'); } catch (e) {}
             $('#table').bootstrapTable('refresh'); // 重算每行的部署命令
         });
