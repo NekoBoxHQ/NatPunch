@@ -199,8 +199,12 @@
 		<en-US>Tunnel</en-US>
 	</lang>
 	<lang id="word-terminal">
-		<zh-CN>SSH终端</zh-CN>
-		<en-US>SSH Terminal</en-US>
+		<zh-CN>终端</zh-CN>
+		<en-US>Terminal</en-US>
+	</lang>
+	<lang id="word-host">
+		<zh-CN>主机</zh-CN>
+		<en-US>Hosts</en-US>
 	</lang>
 	<lang id="word-term-cmd">
 		<zh-CN>快捷命令</zh-CN>

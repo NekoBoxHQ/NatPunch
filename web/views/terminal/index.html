@@ -11,8 +11,30 @@
   cmd_list / cmd_add / cmd_modal*。改的只有外观与顶栏那块信息区。
 -->
 <div class="tp" id="tp">
+    <!-- 左侧主机栏：所有客户端列在这里，点一台开一个终端 -->
+    <aside class="tp-side" id="tp_side">
+        <div class="tp-side-head">
+            <span class="tp-side-title" langtag="word-host">主机</span>
+            <span class="tp-side-count" id="host_count">(0)</span>
+            <span class="tp-side-actions">
+                <button type="button" class="tp-icon-btn" id="host_refresh" title="刷新主机列表">&#8635;</button>
+                <button type="button" class="tp-icon-btn" id="side_toggle" title="收起主机栏">&#171;</button>
+            </span>
+        </div>
+        <button type="button" class="tp-batch" id="batch_btn">
+            <i class="fa fa-list-ul"></i><span langtag="word-term-cmd">快捷命令</span>
+        </button>
+        <div class="tp-search">
+            <i class="fa fa-search"></i>
+            <input id="host_search" type="text" autocomplete="off" placeholder="名称或地址">
+        </div>
+        <div class="tp-hosts" id="host_list"></div>
+    </aside>
+
+    <div class="tp-right">
     <!-- 顶栏：连接状态 · 目标客户端 · 终端动作 -->
     <div class="tp-bar">
+        <button type="button" class="tp-icon-btn tp-side-open" id="side_open" title="主机列表"><i class="fa fa-bars"></i></button>
         <div class="tp-bar-l">
             <span class="tp-dot tp-dot-off" id="tp_dot"></span>
             <span class="tp-title" langtag="word-terminal"></span>
@@ -53,6 +75,13 @@
             </div>
             <button type="button" class="tp-cmds-add" id="cmd_add"><span class="tp-plus">+</span> 新建命令</button>
         </aside>
+
+        <!-- 未选主机时的空态 -->
+        <div class="tp-empty" id="tp_empty">
+            <div class="tp-empty-icon"><i class="fa fa-terminal"></i></div>
+            <h3>选择主机，打开终端</h3>
+            <p>从左侧主机列表选择一台可用主机，开始加密终端会话。</p>
+        </div>
     </div>
 
     <!-- 预输入条：手机上没有物理键盘、也不方便直接点 xterm 时用它整行发送 -->
@@ -63,6 +92,7 @@
         <span class="tp-hint">Enter 发送 · Ctrl+Shift+C 复制</span>
         <button id="term_send" class="tp-send"><span langtag="word-term-send"></span></button>
     </div>
+    </div><!-- /tp-right -->
 </div>
 
 <!-- 新建 / 编辑快捷命令 -->
@@ -99,13 +129,208 @@
     --tp-warn: #d29922;
     --tp-err: #f85149;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     height: 100vh;                 /* JS 会按实际可用高度改写成 px */
     min-height: 260px;
     background: var(--tp-bg);
     color: var(--tp-fg);
     overflow: hidden;
     font-size: 13px;
+}
+
+/* 右侧工作区（顶栏 + 终端 + 输入条） */
+.tp-right {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ---------- 左侧主机栏 ---------- */
+.tp-side {
+    flex: 0 0 264px;
+    width: 264px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: #14171b;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    transition: width .18s ease, flex-basis .18s ease;
+}
+.tp-side-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 12px 8px;
+}
+.tp-side-title { font-size: 15px; font-weight: 700; color: #e6edf3; }
+.tp-side-count { font-size: 12px; color: var(--tp-dim); }
+.tp-side-actions { margin-left: auto; display: flex; gap: 4px; }
+
+.tp-icon-btn {
+    width: 26px; height: 26px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 6px;
+    background: transparent;
+    color: #9aa4b2;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+}
+.tp-icon-btn:hover { color: #e6edf3; border-color: rgba(255, 255, 255, 0.24); background: rgba(255, 255, 255, 0.05); }
+.tp-side-open { display: none; margin-right: 8px; }
+
+.tp-batch {
+    margin: 0 12px 10px;
+    height: 34px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 8px;
+    background: #191d22;
+    color: #c9d1d9;
+    font-size: 13px;
+    cursor: pointer;
+}
+.tp-batch:hover { border-color: rgba(255, 255, 255, 0.22); background: #1e2229; }
+.tp-batch i { color: #8b95a3; font-size: 12px; }
+
+.tp-search {
+    margin: 0 12px 8px;
+    height: 34px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 8px;
+    background: #191d22;
+}
+.tp-search i { color: #6e7681; font-size: 12px; }
+.tp-search input {
+    flex: 1; min-width: 0;
+    background: transparent; border: 0; outline: 0;
+    color: #c9d1d9; font-size: 13px;
+}
+.tp-search input::placeholder { color: #6e7681; }
+
+.tp-hosts {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px 8px 12px;
+}
+.tp-host {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+.tp-host:hover { background: rgba(255, 255, 255, 0.05); }
+.tp-host.on { background: rgba(35, 198, 200, 0.12); border-color: rgba(35, 198, 200, 0.35); }
+.tp-host-avatar {
+    flex: 0 0 30px; width: 30px; height: 30px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+}
+.tp-host-main { flex: 1 1 auto; min-width: 0; }
+.tp-host-name {
+    display: block;
+    font-size: 13px; font-weight: 600; color: #e6edf3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tp-host-sub {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px; color: #6e7681;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tp-host-sub .ok { color: #3fb950; }
+.tp-host-sub .off { color: #8b949e; }
+.tp-host-plus {
+    flex: 0 0 22px; width: 22px; height: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    background: transparent; color: #9aa4b2;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+    cursor: pointer;
+}
+.tp-host-plus:hover { color: #e6edf3; border-color: rgba(255, 255, 255, 0.3); }
+
+/* 收起：只留图标 */
+.tp.collapsed .tp-side { flex-basis: 68px; width: 68px; }
+.tp.collapsed .tp-side-title,
+.tp.collapsed .tp-side-count,
+.tp.collapsed .tp-batch span,
+.tp.collapsed .tp-search input,
+.tp.collapsed .tp-host-main,
+.tp.collapsed .tp-host-plus { display: none; }
+.tp.collapsed .tp-side-head { justify-content: center; padding: 12px 6px 8px; }
+.tp.collapsed .tp-side-actions { margin-left: 0; }
+.tp.collapsed #host_refresh { display: none; }
+.tp.collapsed .tp-batch { justify-content: center; padding: 0; margin: 0 10px 10px; }
+.tp.collapsed .tp-search { justify-content: center; padding: 0; margin: 0 10px 8px; }
+.tp.collapsed .tp-host { justify-content: center; padding: 8px 4px; }
+
+/* ---------- 未选主机空态 ---------- */
+.tp-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    padding: 20px;
+    background: var(--tp-bg);
+}
+.tp-empty.hide { display: none; }
+.tp-empty-icon {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(88, 166, 255, 0.12);
+    color: #58a6ff;
+    font-size: 24px;
+}
+.tp-empty h3 { margin: 4px 0 0; font-size: 17px; font-weight: 700; color: #e6edf3; }
+.tp-empty p { margin: 0; font-size: 12.5px; color: #8b949e; max-width: 360px; }
+.tp-main { position: relative; }
+
+/* 窄屏：主机栏默认收起成图标；顶栏出现展开按钮 */
+@media (max-width: 860px) {
+    .tp-side-open { display: inline-flex; }
+    .tp-side { flex-basis: 68px; width: 68px; }
+    .tp-side .tp-side-title,
+    .tp-side .tp-side-count,
+    .tp-side .tp-batch span,
+    .tp-side .tp-search input,
+    .tp-side .tp-host-main,
+    .tp-side .tp-host-plus { display: none; }
+    .tp-side .tp-side-head { justify-content: center; padding: 12px 6px 8px; }
+    .tp-side .tp-side-actions { margin-left: 0; }
+    .tp-side #host_refresh { display: none; }
+    .tp-side .tp-batch { justify-content: center; padding: 0; margin: 0 10px 10px; }
+    .tp-side .tp-search { justify-content: center; padding: 0; margin: 0 10px 8px; }
+    .tp-side .tp-host { justify-content: center; padding: 8px 4px; }
+    /* 窄屏点展开：浮层形式铺开 */
+    .tp.side-open .tp-side {
+        position: absolute; z-index: 30; top: 0; bottom: 0; left: 0;
+        flex-basis: 264px; width: 264px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
+    }
+    .tp.side-open .tp-side .tp-side-title,
+    .tp.side-open .tp-side .tp-side-count,
+    .tp.side-open .tp-side .tp-batch span,
+    .tp.side-open .tp-side .tp-search input,
+    .tp.side-open .tp-side .tp-host-main,
+    .tp.side-open .tp-side .tp-host-plus { display: revert; }
+    .tp.side-open .tp-side .tp-side-actions { margin-left: auto; }
+    .tp.side-open .tp-side #host_refresh { display: inline-flex; }
 }
 
 /* 整页当终端用：不出现页面滚动条，滚动只发生在 xterm 内部 */
@@ -525,6 +750,94 @@ html, body { overflow: hidden !important; }
         });
     }
 
+    // ---------- 左侧主机栏 ----------
+    var HOSTS = [];
+    var curClientId = 0;
+    // 头像配色：同一台主机每次都同色，方便一眼认
+    var AVATAR_COLORS = ['#e5484d', '#f76b15', '#e2a336', '#30a46c', '#0091ff', '#8e4ec6', '#d6409f'];
+    function avatarColor(id) {
+        return AVATAR_COLORS[Math.abs(parseInt(id, 10) || 0) % AVATAR_COLORS.length];
+    }
+    function hostInitial(name) {
+        var s = String(name || '?').trim();
+        return s ? s.charAt(0).toUpperCase() : '?';
+    }
+    function renderHosts() {
+        var kw = ($('#host_search').val() || '').toLowerCase();
+        var $list = $('#host_list');
+        $list.empty();
+        var shown = 0;
+        for (var i = 0; i < HOSTS.length; i++) {
+            var h = HOSTS[i];
+            var name = h.remark || ('客户端 ' + h.id);
+            var addr = h.local_addr || '';
+            var hay = (name + ' ' + addr).toLowerCase();
+            if (kw && hay.indexOf(kw) < 0) { continue; }
+            shown++;
+            var on = (h.id === curClientId);
+            var dot = h.is_connect
+                ? '<span class="ok">● 可连接</span>'
+                : '<span class="off">● 离线</span>';
+            var sub = (addr ? esc(addr) + ' · ' : '') + dot;
+            var $row = $(
+                '<div class="tp-host' + (on ? ' on' : '') + '" data-id="' + h.id + '" data-name="' + esc(name) + '">' +
+                    '<span class="tp-host-avatar" style="background:' + avatarColor(h.id) + '">' + esc(hostInitial(name)) + '</span>' +
+                    '<span class="tp-host-main">' +
+                        '<span class="tp-host-name">' + esc(name) + '</span>' +
+                        '<span class="tp-host-sub">' + sub + '</span>' +
+                    '</span>' +
+                    '<span class="tp-host-plus" title="打开终端">+</span>' +
+                '</div>'
+            );
+            $list.append($row);
+        }
+        if (!shown) {
+            $list.append('<div style="padding:18px 10px;color:#6e7681;font-size:12px;text-align:center;">' +
+                (HOSTS.length ? '没有匹配的主机' : '暂无可用主机') + '</div>');
+        }
+        $('#host_count').text('(' + HOSTS.length + ')');
+    }
+    function loadHosts() {
+        $.get(webBase + '/terminal/getclients', function (d) {
+            HOSTS = (d && d.data) || [];
+            renderHosts();
+        }).fail(function () {
+            HOSTS = [];
+            renderHosts();
+        });
+    }
+    function selectHost(id, name) {
+        curClientId = id;
+        $('#tp_empty').addClass('hide');
+        $('#tp_client').show();
+        $('#tp_client_id').text('#' + id);
+        $('#tp_client_name').text(name || '');
+        document.title = (name ? name + ' - ' : '') + '终端 - NatPunch';
+        renderHosts();
+        if (window.innerWidth <= 860) { $('#tp').removeClass('side-open'); }
+        doConnect(id);
+        layout();
+    }
+    $('#host_list').on('click', '.tp-host', function (e) {
+        e.preventDefault();
+        var id = parseInt($(this).attr('data-id'), 10);
+        if (id > 0) { selectHost(id, $(this).attr('data-name')); }
+    });
+    $('#host_search').on('input', renderHosts);
+    $('#host_refresh').on('click', function (e) { e.preventDefault(); loadHosts(); });
+    $('#side_toggle').on('click', function (e) {
+        e.preventDefault();
+        $('#tp').toggleClass('collapsed');
+        try { localStorage.setItem('np_term_side', $('#tp').hasClass('collapsed') ? '1' : '0'); } catch (err) {}
+        setTimeout(layout, 200);
+    });
+    $('#side_open').on('click', function (e) { e.preventDefault(); $('#tp').toggleClass('side-open'); });
+    $('#batch_btn').on('click', function (e) { e.preventDefault(); togglePanel(); });
+    try {
+        if (localStorage.getItem('np_term_side') === '1' && window.innerWidth > 860) { $('#tp').addClass('collapsed'); }
+    } catch (err) {}
+
+
     function renderCmdPanel() {
         var hidden = getHidden();
         function hiddenCmd(cmd) {
@@ -813,6 +1126,8 @@ html, body { overflow: hidden !important; }
     }
 
     function doConnect(clientId) {
+        curClientId = clientId;
+        $('#tp_empty').addClass('hide');
         openTerm();
         closeWs();
         term.reset();
@@ -862,9 +1177,10 @@ html, body { overflow: hidden !important; }
     $('#tp_font_inc').on('click', function () { setFontSize(fontSize() + 1); });
     $('#tp_font_dec').on('click', function () { setFontSize(fontSize() - 1); });
     $('#tp_panel_btn').on('click', function (e) { e.preventDefault(); togglePanel(); });
-    // 断开状态下点状态文字 = 重连（重连到当前客户端）
+    // 断开状态下点状态文字 = 重连（重连到当前主机）
     $('#tp_status').on('click', function () {
-        if (initClientId > 0 && (!ws || ws.readyState > 1)) { doConnect(initClientId); }
+        var cid = curClientId || initClientId;
+        if (cid > 0 && (!ws || ws.readyState > 1)) { doConnect(cid); }
     });
 
     // 电脑浏览器默认展开快捷命令面板；窄屏默认收起（窄屏下它是浮层，展开会盖住终端）
@@ -893,11 +1209,16 @@ html, body { overflow: hidden !important; }
     // 自动连接（从客户端列表进入）
     layout();
     initPanel();
-    loadClientLabel(initClientId);
+    loadHosts();
     if (initClientId > 0) {
+        $('#tp_empty').addClass('hide');
+        curClientId = initClientId;
+        loadClientLabel(initClientId);
         doConnect(initClientId);
     } else {
-        openTerm();
+        // 没带 client_id：先停在空态，等用户从左侧挑一台主机
+        setStatus('off', '未选择主机');
+        $('#tp_empty').removeClass('hide');
     }
     loadCmds();
 })();
