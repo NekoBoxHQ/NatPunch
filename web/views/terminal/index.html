@@ -50,9 +50,6 @@
             <button type="button" class="tp-btn" id="tp_font_inc" title="增大字号">A+</button>
             <span class="tp-sep"></span>
             <button type="button" class="tp-btn" id="tp_clear" title="清屏"><i class="fa fa-eraser"></i></button>
-            <button type="button" class="tp-btn" id="tp_panel_btn" title="显示/隐藏快捷命令">
-                <i class="fa fa-list-ul"></i><span class="tp-btn-text" langtag="word-term-cmd"></span>
-            </button>
             <button type="button" class="tp-btn tp-btn-close" id="tp_close" title="关闭终端，返回客户端列表"><i class="fa fa-times"></i></button>
         </div>
     </div>
@@ -1009,7 +1006,7 @@ html, body { overflow: hidden !important; }
     function togglePanel(force) {
         var want = (typeof force === 'boolean') ? force : !panelOpen();
         $('#cmd_panel').toggle(want);
-        $('#tp_panel_btn').toggleClass('tp-panel-on', want);
+        $('#batch_btn').toggleClass('on', want);
         sendResize();
     }
 
@@ -1191,7 +1188,6 @@ html, body { overflow: hidden !important; }
     });
     $('#tp_font_inc').on('click', function () { setFontSize(fontSize() + 1); });
     $('#tp_font_dec').on('click', function () { setFontSize(fontSize() - 1); });
-    $('#tp_panel_btn').on('click', function (e) { e.preventDefault(); togglePanel(); });
     // 断开状态下点状态文字 = 重连（重连到当前主机）
     $('#tp_status').on('click', function () {
         var cid = curClientId || initClientId;

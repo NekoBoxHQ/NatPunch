@@ -259,20 +259,6 @@
                 }
             },
             {
-                // 终端单独一栏（原来挤在「选项」里）：放在「隧道」和「选项」之间
-                field: 'ssh_btn',
-                title: '终端',
-                align: 'center',
-                halign: 'center',
-                valign: 'middle',
-                width: '7%',
-                visible: true,
-                formatter: function (value, row, index) {
-                    return '<a href="{{.web_base_url}}/terminal/index?client_id=' + row.Id
-                        + '" class="btn btn-outline btn-info np-btn-dark" style="white-space:nowrap;padding:5px 10px;" title="终端"><i class="fa fa-terminal"></i></a>'
-                }
-            },
-            {
                 field: 'option',//域值
                 title: '<span langtag="word-option"></span>',//内容
                 align: 'center',
