@@ -163,6 +163,26 @@
     #page-wrapper .ibox-title {
         border-color: transparent !important;
     }
+    /* 侧边菜单收窄：刚好放得下 5 个汉字，别再把内容区挤窄 */
+    #wrapper .navbar-static-side,
+    #wrapper nav.navbar-static-side {
+        width: 124px !important;
+        min-width: 124px !important;
+        max-width: 124px !important;
+    }
+    #wrapper .navbar-static-side .nav > li > a {
+        padding: 12px 6px 12px 12px !important;
+        white-space: nowrap;
+    }
+    #wrapper .navbar-static-side .nav-label {
+        white-space: nowrap;
+        font-size: 13px;
+    }
+    #wrapper .navbar-static-side .nav-header {
+        padding: 14px 8px !important;
+    }
+    #wrapper .navbar-static-side .logo-element { display: none; }
+
     #wrapper .navbar-static-side,
     #wrapper nav.navbar-static-side,
     #wrapper #side-menu {
