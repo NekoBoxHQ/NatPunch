@@ -428,7 +428,10 @@ html, body { overflow: hidden !important; }
 #term_box { width: 100%; height: 100%; }
 
 .tp-cmds {
+    /* 和左侧主机栏严格同宽：flex-basis + width 都给，避免父容器不是 flex 时失效 */
     flex: 0 0 var(--tp-side-w);
+    width: var(--tp-side-w);
+    max-width: var(--tp-side-w);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -657,8 +660,6 @@ html, body { overflow: hidden !important; }
 }
 </style>
 
-<script src="{{.web_base_url}}/static/terminal/xterm.min.js"></script>
-<script src="{{.web_base_url}}/static/terminal/xterm-addon-fit.min.js"></script>
 <script>
 (function () {
     var webBase = '{{.web_base_url}}';
@@ -1138,31 +1139,58 @@ html, body { overflow: hidden !important; }
         }, true);
     }
 
+    // xterm 有 ~390KB（压缩后也有 ~100KB），没选主机之前根本用不上。
+    // 进页面就同步加载会让「点 SSH终端」那一下明显卡一帧，所以改成首次连接时再拉。
+    var xtermWaiters = null;
+    function loadXterm(cb) {
+        if (window.Terminal && window.FitAddon) { cb(); return; }
+        if (xtermWaiters) { xtermWaiters.push(cb); return; }
+        xtermWaiters = [cb];
+        function loadSeq(list, i) {
+            if (i >= list.length) {
+                var q = xtermWaiters || [];
+                xtermWaiters = null;
+                for (var k = 0; k < q.length; k++) { try { q[k](); } catch (e) {} }
+                return;
+            }
+            var s = document.createElement('script');
+            s.src = webBase + '/static/terminal/' + list[i];
+            s.onload = function () { loadSeq(list, i + 1); };
+            s.onerror = function () { loadSeq(list, i + 1); };
+            document.head.appendChild(s);
+        }
+        loadSeq(['xterm.min.js', 'xterm-addon-fit.min.js'], 0);
+    }
+
     function doConnect(clientId) {
         curClientId = clientId;
         $('#tp_empty').addClass('hide');
-        openTerm();
-        closeWs();
-        term.reset();
-        setStatus('wait', '连接中…');
-        var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-        var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
-        var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
-        try { ws = new WebSocket(url); } catch (e) { setStatus('err', '无法建立连接 · 点击重连'); return; }
-        ws.binaryType = 'arraybuffer';
-        ws.onopen = function () {
-            setStatus('on', '已连接');
-            $('#term_input').focus();
-        };
-        ws.onmessage = function (ev) {
-            if (ev.data instanceof ArrayBuffer) {
-                term.write(new Uint8Array(ev.data));
-            } else {
-                term.write(String(ev.data));
-            }
-        };
-        ws.onerror = function () {};
-        ws.onclose = function () { setStatus('err', '连接已断开 · 点击重连'); };
+        setStatus('wait', '加载终端…');
+        loadXterm(function () {
+            if (!window.Terminal) { setStatus('err', '终端组件加载失败'); return; }
+            openTerm();
+            closeWs();
+            term.reset();
+            setStatus('wait', '连接中…');
+            var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+            var cols = term ? term.cols : 80, rows = term ? term.rows : 24;
+            var url = proto + location.host + webBase + '/terminal/ws?client_id=' + clientId + '&cols=' + cols + '&rows=' + rows;
+            try { ws = new WebSocket(url); } catch (e) { setStatus('err', '无法建立连接 · 点击重连'); return; }
+            ws.binaryType = 'arraybuffer';
+            ws.onopen = function () {
+                setStatus('on', '已连接');
+                $('#term_input').focus();
+            };
+            ws.onmessage = function (ev) {
+                if (ev.data instanceof ArrayBuffer) {
+                    term.write(new Uint8Array(ev.data));
+                } else {
+                    term.write(String(ev.data));
+                }
+            };
+            ws.onerror = function () {};
+            ws.onclose = function () { setStatus('err', '连接已断开 · 点击重连'); };
+        });
     }
 
     function closeWs() {

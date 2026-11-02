@@ -1,6 +1,7 @@
 package web
 
 import (
+	"compress/gzip"
 	"embed"
 	"io/fs"
 	"net/http"
@@ -109,7 +110,81 @@ func InitBeegoAssets() {
 		beego.DelStaticPath(staticPrefix)
 	}
 
-	fileServer := http.StripPrefix(staticPrefix, http.FileServer(StaticHTTPFS()))
+	fileServer := http.StripPrefix(staticPrefix, gzipStatic(http.FileServer(StaticHTTPFS())))
 	// options[0]=true registers as prefix match: staticPrefix/?:all(.*)
 	beego.Handler(staticPrefix, fileServer, true)
+}
+
+// gzipStatic 对文本类静态资源做即时 gzip。
+//
+// 面板所有页面共用同一批资源：JS 约 850KB、CSS 约 430KB（其中 echarts 383KB、
+// style.css 204KB、bootstrap.css 160KB）。原来是一个字节都不压直接发，每切一次页面
+// 就要重新拉 1.2MB 以上，弱网下就是肉眼可见的卡顿。
+// 这里按扩展名挑文本资源压缩，浏览器普遍能压到 20%~30%，切页明显变快。
+//
+// 已压缩格式（.gz/.png/.ico/.woff2…）不处理，避免白费 CPU。
+func gzipStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") || !compressibleExt(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		grw := &gzipResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(grw, r)
+		grw.close()
+	})
+}
+
+func compressibleExt(p string) bool {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".js", ".css", ".html", ".htm", ".json", ".xml", ".svg", ".txt", ".map":
+		return true
+	}
+	return false
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz     *gzip.Writer
+	wrote  bool
+	failed bool
+}
+
+func (g *gzipResponseWriter) WriteHeader(code int) {
+	if g.wrote {
+		return
+	}
+	g.wrote = true
+	// 只压 200 的文本响应；错误页、304、Range 之类一律走原样
+	if code != http.StatusOK {
+		g.failed = true
+		g.ResponseWriter.WriteHeader(code)
+		return
+	}
+	h := g.ResponseWriter.Header()
+	// 压缩后长度与实体都变了，这两个头不能再留
+	h.Del("Content-Length")
+	h.Del("ETag")
+	h.Set("Content-Encoding", "gzip")
+	h.Add("Vary", "Accept-Encoding")
+	g.ResponseWriter.WriteHeader(code)
+}
+
+func (g *gzipResponseWriter) Write(p []byte) (int, error) {
+	if g.failed {
+		return g.ResponseWriter.Write(p)
+	}
+	if !g.wrote {
+		g.WriteHeader(http.StatusOK)
+	}
+	if g.gz == nil {
+		g.gz = gzip.NewWriter(g.ResponseWriter)
+	}
+	return g.gz.Write(p)
+}
+
+func (g *gzipResponseWriter) close() {
+	if g.gz != nil {
+		_ = g.gz.Close()
+	}
 }

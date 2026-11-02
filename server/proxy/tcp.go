@@ -92,6 +92,10 @@ func (s *WebServer) Start() error {
 		<-stop
 	}
 	beego.BConfig.WebConfig.Session.SessionOn = true
+	// 页面 HTML 由模板渲染（动态），静态资源由 web.InitBeegoAssets 里的 gzipStatic 处理。
+	// 打开 beego 自带的 gzip，让渲染出来的页面也压缩：一页 HTML 有 30~50KB，
+	// 切页时能少传一半以上，弱网下差别明显。
+	beego.BConfig.EnableGzip = true
 	// Serve management UI from embedded assets only (no disk web/ directory).
 	web.InitBeegoAssets()
 	var (
