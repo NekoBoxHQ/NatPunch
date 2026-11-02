@@ -26,7 +26,7 @@
 
 ## 文档
 
-改动涉及用户可见行为时同步：README / README_zh / docs/ / CHANGELOG.md。GPL 声明（README 顶部 + LICENSE 版权行 + NOTICE）保持不变。
+改动涉及用户可见行为时同步：README / docs/ / CHANGELOG.md。GPL 声明（README 顶部 + LICENSE 版权行 + NOTICE）保持不变。
 
 ## 行为准则
 
