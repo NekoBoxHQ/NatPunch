@@ -781,7 +781,8 @@ html, body { overflow: hidden !important; }
             var dot = h.is_connect
                 ? '<span class="ok">● 可连接</span>'
                 : '<span class="off">● 离线</span>';
-            var sub = (addr ? esc(addr) + ' · ' : '') + dot;
+            // 主机行只显示在线状态，内网地址不展示（地址仍参与搜索匹配）
+            var sub = dot;
             var $row = $(
                 '<div class="tp-host' + (on ? ' on' : '') + '" data-id="' + h.id + '" data-name="' + esc(name) + '">' +
                     '<span class="tp-host-avatar" style="background:' + avatarColor(h.id) + '">' + esc(hostInitial(name)) + '</span>' +
