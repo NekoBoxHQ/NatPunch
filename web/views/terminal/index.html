@@ -128,7 +128,7 @@
     --tp-ok: #3fb950;
     --tp-warn: #d29922;
     --tp-err: #f85149;
-    --tp-side-w: 264px;   /* 左侧主机栏 / 右侧快捷命令栏共用同一宽度 */
+    --tp-side-w: 166px;   /* 左侧主机栏 / 右侧快捷命令栏共用；刚好放得下 5 个汉字的主机名 */
     display: flex;
     flex-direction: row;
     height: 100vh;                 /* JS 会按实际可用高度改写成 px */
@@ -227,8 +227,8 @@
     padding: 4px 8px 12px;
 }
 .tp-host {
-    display: flex; align-items: center; gap: 10px;
-    padding: 9px 8px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 6px;
     border-radius: 8px;
     cursor: pointer;
     border: 1px solid transparent;
@@ -256,7 +256,7 @@
 .tp-host-sub .ok { color: #3fb950; }
 .tp-host-sub .off { color: #8b949e; }
 .tp-host-plus {
-    flex: 0 0 22px; width: 22px; height: 22px;
+    flex: 0 0 20px; width: 20px; height: 20px;
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 6px;
     background: transparent; color: #9aa4b2;
