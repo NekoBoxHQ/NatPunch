@@ -300,10 +300,43 @@ do_update() {
     #   NATPUNCH_MIRROR    镜像前缀
     MIRROR=""
     if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
-    if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+
+    # 取一个 URL 的正文（失败输出空）。抽成函数是为了让测试能替换掉它。
+    nx_fetch_stdout() {
+        if [ "${HAS_WGET:-1}" -eq 1 ]; then
+            wget -qO- --timeout=10 "$1" 2>/dev/null
+        else
+            curl -fsSL --max-time 10 "$1" 2>/dev/null
+        fi
+    }
+
+    # 解析 NATPUNCH_BASE_URL：允许直接给 dl 根目录。
+    # 面板每次升级会换掉 web/static/dl，只保留当前版本目录 —— 命令里写死
+    # .../dl/v26.10.76 的话，升级后目录没了就 404。面板发布时会写 dl/version.txt，
+    # 这里读到它就自动拼当前版本目录，命令只写 .../dl 永远有效。
+    nx_resolve_base_url() {
         BASE_URL="${NATPUNCH_BASE_URL%/}"
-        VER="${NATPUNCH_VERSION:-本地目录}"
+        VER="${NATPUNCH_VERSION:-}"
+        if [ -n "$VER" ]; then          # 显式给了版本号，按老行为用
+            return 0
+        fi
+        _nx_ver="$(nx_fetch_stdout "$BASE_URL/version.txt" | head -n1 | tr -d ' \r\n')"
+        case "$_nx_ver" in
+            v[0-9]*)
+                VER="$_nx_ver"
+                BASE_URL="$BASE_URL/$VER"
+                ;;
+            *)
+                VER="本地目录"
+                ;;
+        esac
+        unset _nx_ver
+    }
+
+    if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
+        nx_resolve_base_url
         log "使用指定发布目录: $BASE_URL"
+        [ "$VER" = "本地目录" ] || log "面板源当前版本: $VER"
     else
     if [ -z "${NATPUNCH_VERSION:-}" ]; then
     if [ "$HAS_WGET" -eq 1 ]; then

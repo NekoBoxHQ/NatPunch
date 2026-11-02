@@ -309,7 +309,6 @@
                     //   未勾选（默认）  → GitHub raw
                     // 面板地址：install_base_url=auto 时按当前访问域名拼 <origin><web_base_url>/static/dl
                     var instCfg = "{{.install_base_url}}";
-                    var instVer = "{{.nb_version}}";
                     var panelBase = instCfg === "auto"
                         ? (location.origin + "{{.web_base_url}}" + "/static/dl")
                         : instCfg;
@@ -317,8 +316,9 @@
                     var instUrl = usePanel
                         ? panelBase + "/install.sh"
                         : "https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/install.sh";
-                    // 自建源：把版本目录作为下载基准传给安装脚本（脚本自身不写死任何地址）
-                    var instEnv = usePanel ? ("NATPUNCH_BASE_URL=" + panelBase + "/" + instVer + " ") : "";
+                    // 自建源：把 dl 根目录传给脚本，由脚本读 <根>/version.txt 拼当前版本目录。
+                    // 不写死 vX.Y.Z —— 面板升级后旧版本目录会被清掉，写死就会 404。
+                    var instEnv = usePanel ? ("NATPUNCH_BASE_URL=" + panelBase + " ") : "";
                     var ow = "uclient-fetch -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     var lx = "wget -qO- " + instUrl + " | " + instEnv + "sh -s -- '" + row.VerifyKey + "' " + dom + " " + port + " '" + tlsFlag + "'";
                     // 只放两个部署按钮；隧道已经拆到左边单独一栏

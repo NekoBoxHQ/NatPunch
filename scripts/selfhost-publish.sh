@@ -91,4 +91,13 @@ for f in install.sh uninstall_client.sh install_server.sh; do
         RC=1
     fi
 done
+
+# 当前版本号：客户端脚本读它来拼版本目录。
+# 有了它，面板生成的命令可以只写 .../static/dl，升级换版本目录也不会 404。
+if [ $RC -eq 0 ]; then
+    printf '%s\n' "$VER" > "$DLROOT/version.txt" 2>/dev/null || {
+        echo "selfhost: 失败——写不了 $DLROOT/version.txt" >&2
+        RC=1
+    }
+fi
 exit $RC

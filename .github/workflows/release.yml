@@ -33,6 +33,7 @@ jobs:
           sh -n uninstall_client.sh
           sh -n test/config_keys_test.sh
           sh -n test/checker_anchors_test.sh
+        sh -n test/selfhost_base_test.sh
 
       - name: Shell logic self-test
         # uninstall_client.sh 是升级路径（会停掉客户端再拉起来），出错时是
@@ -55,6 +56,12 @@ jobs:
         # 容易被误读成"包有问题"）。这里用同一套构建参数在普通推送的 check 里先对一遍账，
         # 把这类失败拦在打 tag 之前。见 test/checker_anchors_test.sh。
         run: sh test/checker_anchors_test.sh
+
+      - name: Self-hosted source version resolution
+        # 面板生成的安装/升级命令只写 .../static/dl（根目录），由脚本读 <根>/version.txt
+        # 拼当前版本目录。写死 vX.Y.Z 的命令会在下次升级（旧版本目录被清）后 404 —— 
+        # v26.10.76→77 就发生过一次。见 test/selfhost_base_test.sh。
+        run: sh test/selfhost_base_test.sh
 
       - name: Unit tests (exclude integration)
         run: go test ./...

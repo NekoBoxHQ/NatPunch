@@ -194,6 +194,20 @@ wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_
 
 开关状态记在浏览器本地，按设备能力各选各的即可。
 
+### 为什么命令里只写 `.../static/dl`
+
+面板每次升级会把整个 `dl/` 目录换掉，只保留**当前版本**的子目录。如果命令里写死了
+`.../dl/v26.10.76`，下次升级到 77 之后那个目录就没了，客户端更新会 404。
+
+所以发布时会额外写一个 `dl/version.txt`（内容就是当前版本号），安装/升级脚本读到它就
+自动拼出 `<根>/<版本>/`。**命令只写 `.../static/dl` 永远有效**，换版本不用改命令。
+
+```shell
+# 只写根目录即可（脚本自己找当前版本）
+wget -qO- https://panel.example.com/static/dl/uninstall_client.sh \
+  | NATPUNCH_BASE_URL=https://panel.example.com/static/dl sh -s update
+```
+
 ### 环境变量（三个安装脚本通用）
 
 | 变量 | 作用 | 示例 |

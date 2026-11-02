@@ -230,11 +230,47 @@ pick_highest_version() {
 # 镜像前缀归一化成「协议头://主机/」，避免与 github 地址粘连（https://m.examplehttps://github.com/...）
 MIRROR=""
 if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
+
+# 取一个 URL 的正文（失败输出空）。抽成函数是为了让测试能替换掉它。
+nx_fetch_stdout() {
+    if [ "${HAS_WGET:-1}" -eq 1 ]; then
+        wget -qO- --timeout=10 "$1" 2>/dev/null
+    else
+        curl -fsSL --max-time 10 "$1" 2>/dev/null
+    fi
+}
+
+# 解析 NATPUNCH_BASE_URL：允许直接给 dl 根目录。
+# 面板每次升级会把 web/static/dl 整个换掉，只保留「当前版本」目录；如果命令里
+# 写死了 .../dl/v26.10.76，下次升级后那个目录没了，客户端更新就 404。
+# 所以面板发布时会写一份 dl/version.txt，这里读到它就自动拼当前版本目录，
+# 命令只要写 .../dl 就永远有效。读不到 version.txt 时按老行为原样使用。
+# 入参：BASE_URL、VER（可为空）；输出：BASE_URL、VER（"本地目录" 表示未知版本）
+nx_resolve_base_url() {
+    BASE_URL="${NATPUNCH_BASE_URL%/}"
+    VER="${NATPUNCH_VERSION:-}"
+    if [ -n "$VER" ]; then          # 显式给了版本号，按老行为用
+        return 0
+    fi
+    _nx_ver="$(nx_fetch_stdout "$BASE_URL/version.txt" | head -n1 | tr -d ' \r\n')"
+    case "$_nx_ver" in
+        v[0-9]*)
+            VER="$_nx_ver"
+            BASE_URL="$BASE_URL/$VER"
+            ;;
+        *)
+            VER="本地目录"
+            ;;
+    esac
+    unset _nx_ver
+}
+
 log "获取最新版本..."
 VER="${NATPUNCH_VERSION:-}"
 VER_LIST=""
 if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
-    echo "    使用指定发布目录：$NATPUNCH_BASE_URL"
+    nx_resolve_base_url
+    echo "    使用指定发布目录：$BASE_URL"
 else
     if [ "$HAS_WGET" -eq 1 ]; then
         VER_LIST="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
@@ -244,10 +280,10 @@ else
     VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
     echo "    版本选取：${VER:-回退 latest}"
 fi
-echo "    ${VER:-${NATPUNCH_BASE_URL:-最新发布}}"
+echo "    ${VER:-最新发布}"
 # ---------- 下载 ----------
 if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
-    BASE_URL="${NATPUNCH_BASE_URL%/}"
+    :   # 上面 nx_resolve_base_url 已经把 BASE_URL/VER 解析好了
 elif [ -n "$VER" ]; then
     BASE_URL="${MIRROR}https://github.com/$REPO/releases/download/$VER"
 else
