@@ -146,6 +146,11 @@
     flex-direction: column;
 }
 
+/* 工作区做成一块圆角卡片：四周留白由 JS 按「菜单宽度 / 导航栏高度」算 */
+@media (min-width: 861px) {
+    .tp { border-radius: 10px; overflow: hidden; }
+}
+
 /* ---------- 左侧主机栏 ---------- */
 .tp-side {
     flex: 0 0 264px;
@@ -1010,8 +1015,17 @@ html, body { overflow: hidden !important; }
     // 终端高度 = 视口高度 - 本页顶栏/输入条占位，随窗口与旋屏重算。
     // 不用 100vh 硬顶着：面板里的导航栏在窄屏会变高，硬算会露一截背景。
     function layout() {
+        // 左右对称：右边留白 = 左侧菜单宽度
+        // 上下对称：底部留白 = 顶部（面板导航栏高度）
         var top = $('#tp').offset().top;
-        var h = window.innerHeight - top;
+        var wide = window.innerWidth > 860;
+        var navW = 0;
+        if (wide) {
+            var $nav = $('.navbar-static-side');
+            navW = $nav.length ? Math.round($nav.outerWidth() || 0) : 0;
+        }
+        $('#tp').css('margin-right', navW > 0 ? (navW + 'px') : '0');
+        var h = wide ? (window.innerHeight - top * 2) : (window.innerHeight - top);
         if (h < 260) { h = 260; }
         $('#tp').css('height', h + 'px');
         sendResize();
