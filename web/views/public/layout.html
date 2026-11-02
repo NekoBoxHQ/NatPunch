@@ -260,6 +260,10 @@
                     <a href="{{.web_base_url}}/client/list"><i class="fa fa-desktop fa-lg"></i>
                     <span class="nav-label" langtag="word-client"></span></a>
                 </li>
+                <li class="{{if eq "terminal" .menu}}active{{end}}">
+                    <a href="{{.web_base_url}}/terminal/index"><i class="fa fa-terminal fa-lg"></i>
+                    <span class="nav-label" langtag="word-terminal"></span></a>
+                </li>
                 <li class="{{if eq "tcpudp" .menu}}active{{end}}">
                     <a href="{{.web_base_url}}/index/tcpudp"><i class="fa fa-retweet fa-lg"></i>
                     <span class="nav-label" langtag="word-tunnelmanage"></span></a>
