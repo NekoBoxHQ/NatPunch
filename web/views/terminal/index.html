@@ -115,9 +115,10 @@
 <style>
 /* ---------- 变量 ---------- */
 .tp {
-    --tp-bg: #0d1117;
-    --tp-bar: #151b23;
-    --tp-panel: #11171f;
+    /* 半透明：让面板壁纸透上来一点，配合 backdrop-filter 做磨砂玻璃 */
+    --tp-bg: rgba(13, 17, 23, 0.78);
+    --tp-bar: rgba(21, 27, 35, 0.72);
+    --tp-panel: rgba(17, 23, 31, 0.80);
     --tp-line: rgba(255, 255, 255, 0.07);
     --tp-fg: #c9d1d9;
     --tp-dim: #7d8794;
@@ -131,6 +132,9 @@
     height: 100vh;                 /* JS 会按实际可用高度改写成 px */
     min-height: 260px;
     background: var(--tp-bg);
+    -webkit-backdrop-filter: blur(14px) saturate(1.15);
+    backdrop-filter: blur(14px) saturate(1.15);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
     color: var(--tp-fg);
     overflow: hidden;
     font-size: 13px;
@@ -156,7 +160,9 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: #14171b;
+    background: rgba(20, 23, 27, 0.72);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
     border-right: 1px solid rgba(255, 255, 255, 0.07);
     transition: width .18s ease, flex-basis .18s ease;
 }
@@ -289,7 +295,7 @@
     gap: 10px;
     text-align: center;
     padding: 20px;
-    background: var(--tp-bg);
+    background: radial-gradient(ellipse at center, rgba(13,17,23,0.42), rgba(13,17,23,0.18));
 }
 .tp-empty.hide { display: none; }
 .tp-empty-icon {
@@ -820,6 +826,7 @@ html, body { overflow: hidden !important; }
         document.title = (name ? name + ' - ' : '') + '终端 - NatPunch';
         renderHosts();
         if (window.innerWidth <= 860) { $('#tp').removeClass('side-open'); }
+        togglePanel(!narrow());   // 选中主机后展开快捷命令栏（窄屏保持收起）
         doConnect(id);
         layout();
     }
@@ -1047,6 +1054,7 @@ html, body { overflow: hidden !important; }
         term = new Terminal({
             cursorBlink: true,
             cursorStyle: 'bar',
+            allowTransparency: true,
             fontSize: fontSize(),
             fontFamily: 'Consolas, "Cascadia Mono", Menlo, Monaco, "DejaVu Sans Mono", "Courier New", monospace',
             lineHeight: 1.25,
@@ -1054,7 +1062,7 @@ html, body { overflow: hidden !important; }
             // 原来写死 rendererType:'dom' 且主题只有 background —— 黑底配默认的
             // 高饱和 ANSI 色，在白底玻璃面板里格外刺眼。这里换一套低饱和的深色配色。
             theme: {
-                background: '#0d1117',
+                background: 'rgba(0,0,0,0)',
                 foreground: '#c9d1d9',
                 cursor: '#23c6c8',
                 cursorAccent: '#0d1117',
@@ -1225,7 +1233,8 @@ html, body { overflow: hidden !important; }
 
     // 电脑浏览器默认展开快捷命令面板；窄屏默认收起（窄屏下它是浮层，展开会盖住终端）
     function initPanel() {
-        togglePanel(!narrow());
+        // 没选主机前不展开：空态要干净，且面板会盖住半边
+        togglePanel(false);
     }
 
     $('#term_input').on('keydown', function (e) {
