@@ -128,6 +128,7 @@
     --tp-ok: #3fb950;
     --tp-warn: #d29922;
     --tp-err: #f85149;
+    --tp-side-w: 264px;   /* 左侧主机栏 / 右侧快捷命令栏共用同一宽度 */
     display: flex;
     flex-direction: row;
     height: 100vh;                 /* JS 会按实际可用高度改写成 px */
@@ -153,8 +154,8 @@
 
 /* ---------- 左侧主机栏 ---------- */
 .tp-side {
-    flex: 0 0 264px;
-    width: 264px;
+    flex: 0 0 var(--tp-side-w);
+    width: var(--tp-side-w);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -430,7 +431,7 @@ html, body { overflow: hidden !important; }
 #term_box { width: 100%; height: 100%; }
 
 .tp-cmds {
-    flex: 0 0 216px;
+    flex: 0 0 var(--tp-side-w);
     display: flex;
     flex-direction: column;
     min-height: 0;
