@@ -44,8 +44,11 @@ fetch() { # fetch <url> <dest>：优先 curl，其次 wget
 ok=0; fail=0
 for f in \
     linux_amd64_client.tar.gz linux_arm64_client.tar.gz linux_arm_client.tar.gz \
+    linux_mipsle_client.tar.gz \
     linux_amd64_server.tar.gz linux_arm64_server.tar.gz linux_arm_server.tar.gz \
+    linux_mipsle_server.tar.gz \
     minisign-check-linux-amd64 minisign-check-linux-arm64 minisign-check-linux-arm \
+    minisign-check-linux-mipsle \
     SHA256SUMS SHA256SUMS.minisig
 do
     [ -s "$VERDIR/$f" ] && { ok=$((ok+1)); continue; }
