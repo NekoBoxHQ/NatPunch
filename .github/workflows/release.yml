@@ -33,7 +33,7 @@ jobs:
           sh -n uninstall_client.sh
           sh -n test/config_keys_test.sh
           sh -n test/checker_anchors_test.sh
-        sh -n test/selfhost_base_test.sh
+          sh -n test/selfhost_base_test.sh
 
       - name: Shell logic self-test
         # uninstall_client.sh 是升级路径（会停掉客户端再拉起来），出错时是
