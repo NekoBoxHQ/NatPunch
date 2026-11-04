@@ -105,6 +105,36 @@ else
     ok "没有模板使用 chartdatas（这一版不需要 echarts）"
 fi
 
+echo "== 5. 配置模板里不允许同一个键出现两次 =="
+# 由来：conf/natpunch.conf 里同时留了 `web_base_url=`（空）和 `web_base_url=/natpunch`
+# 两行，ini 语义是「后写覆盖先写」，于是**每个新装的面板都被挂到 /natpunch 下**，
+# 访问根路径 / 直接 404。而编译、CI、配置键对账全绿 —— 因为上面的对账用 sort -u，
+# 重复键被去重了，根本看不出来。这里专门盯重复。
+DUP="$(grep -E '^[[:space:]]*[A-Za-z0-9_]+[[:space:]]*=' "$CONF" \
+        | sed 's/[[:space:]]*=.*//' | sed 's/^[[:space:]]*//' \
+        | sort | uniq -d)"
+if [ -n "$DUP" ]; then
+    for k in $DUP; do
+        bad "$CONF 里键 $k 出现了多次（只有最后一次生效，前一行是死配置，极易误判）"
+    done
+else
+    ok "$CONF 无重复键"
+fi
+# 默认模板（cmd/natpunch/natpunch.go 生成的那份）也要查
+TPL_TMP="$(mktemp)" || TPL_TMP=""
+if [ -n "$TPL_TMP" ]; then
+    awk '/natpunchConf|defaultConf|web_port=/{f=1} f' cmd/natpunch/natpunch.go 2>/dev/null > "$TPL_TMP" || true
+    DUP2="$(grep -E '^[a-z_0-9]+=' "$TPL_TMP" | sed 's/=.*//' | sort | uniq -d)"
+    if [ -n "$DUP2" ]; then
+        for k in $DUP2; do
+            bad "cmd/natpunch/natpunch.go 的默认配置模板里键 $k 重复"
+        done
+    else
+        ok "默认配置模板无重复键"
+    fi
+    rm -f "$TPL_TMP"
+fi
+
 echo
 if [ "$FAIL" -eq 1 ]; then
     echo "配置键对账失败"

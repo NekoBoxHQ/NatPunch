@@ -226,6 +226,62 @@ set_kv() {
     printf '%s=%s\n' "$key" "$val" >> "$CONF" || die "追加 $key 失败"
     grep -q "^$key=" "$CONF" || die "校验 $key 失败"
 }
+
+# 配置文件里同一个键写了多行时，只有最后一行生效（ini 后写覆盖先写）。
+# 真机上遇到过：conf 模板同时留了 `web_base_url=`（空）和 `web_base_url=/natpunch`，
+# 于是每个用新模板装的面板都被挂到 /natpunch 下，访问根路径直接 404。
+#
+# 收口规则：
+#   1. 普通重复键：保留**最后一次出现**（= 当前实际生效值，行为不变）
+#   2. web_base_url 特例：只要重复行里出现过空的（`web_base_url=`），
+#      就保留那一行 —— 空值 + 另一行非空，只可能是模板遗留，不是有人特意配子路径
+#      （特意配的话不会有那条空行）。这样受影响的存量机器升级后自动回到根路径。
+# 没有重复就完全不碰文件（连 mtime 都不变）。
+dedupe_conf_keys() {
+    [ -f "$CONF" ] || return 0
+    awk '
+        {
+            lines[NR] = $0
+            if ($0 ~ /^[[:space:]]*[A-Za-z0-9_]+[[:space:]]*=/) {
+                k = $0
+                sub(/[[:space:]]*=.*/, "", k)
+                gsub(/^[[:space:]]+/, "", k)
+                v = $0
+                sub(/^[^=]*=/, "", v)
+                gsub(/[[:space:]]/, "", v)
+                last[k] = NR
+                keyof[NR] = k
+                if (v == "" && !(k in firstempty)) firstempty[k] = NR
+            }
+        }
+        END {
+            changed = 0
+            for (i = 1; i <= NR; i++) {
+                if (i in keyof) {
+                    k = keyof[i]
+                    keep = last[k]
+                    # web_base_url：重复里带空值 → 认为是模板遗留，保留空值那行
+                    if (k == "web_base_url" && (k in firstempty)) keep = firstempty[k]
+                    if (i != keep) { changed = 1; continue }
+                }
+                print lines[i]
+            }
+            exit (changed ? 0 : 1)
+        }
+    ' "$CONF" > "$CONF.clean" 2>/dev/null
+    RC_DD=$?
+    if [ "$RC_DD" -eq 0 ] && [ -s "$CONF.clean" ]; then
+        chmod 600 "$CONF.clean" 2>/dev/null || true
+        if mv "$CONF.clean" "$CONF"; then
+            chmod 600 "$CONF" 2>/dev/null || true
+            info "已合并配置文件里的重复键（web_base_url 若一空一空则恢复为根路径）"
+        else
+            rm -f "$CONF.clean" 2>/dev/null || true
+        fi
+    else
+        rm -f "$CONF.clean" 2>/dev/null || true
+    fi
+}
 # ================= 安全输入 =================
 read_secret() {
     # read_secret <prompt> <varname>
@@ -527,6 +583,7 @@ install() {
     set_kv http_proxy_port  0
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
+    dedupe_conf_keys
     publish_selfhost
     log "安装完成"
 }
@@ -645,6 +702,7 @@ upgrade() {
     set_kv http_proxy_port  0
     set_kv https_proxy_port 0
     set_kv web_host         0.0.0.0
+    dedupe_conf_keys
     # 重新注册自启单元。原先 upgrade 完全不碰 unit（只有 install 才写），于是
     # **单元文件里的加固改动永远到不了已安装的机器** —— 真机上就是这么积下来的：
     # 装完那天写的 unit 一直没刷新，procd 的 retry 停在 5、systemd 缺 StartLimitIntervalSec=0。

@@ -34,6 +34,7 @@ jobs:
           sh -n test/config_keys_test.sh
           sh -n test/checker_anchors_test.sh
           sh -n test/selfhost_base_test.sh
+          sh -n test/conf_dedupe_test.sh
 
       - name: Shell logic self-test
         # uninstall_client.sh 是升级路径（会停掉客户端再拉起来），出错时是
@@ -62,6 +63,12 @@ jobs:
         # 拼当前版本目录。写死 vX.Y.Z 的命令会在下次升级（旧版本目录被清）后 404 —— 
         # v26.10.76→77 就发生过一次。见 test/selfhost_base_test.sh。
         run: sh test/selfhost_base_test.sh
+
+      - name: Config duplicate-key / dedupe
+        # 配置文件里同一个键写两遍时只有最后一行生效 —— conf 模板曾经同时留了
+        # web_base_url=（空）和 web_base_url=/natpunch，导致新装面板全被挂到 /natpunch、
+        # 访问 / 直接 404。这里既查模板不许重复，也测 install_server.sh 的去重函数。
+        run: sh test/conf_dedupe_test.sh
 
       - name: Unit tests (exclude integration)
         run: go test ./...
