@@ -135,14 +135,14 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 							if err := file.GetDb().UpdateClient(task.Client); err != nil {
 								task.Client.RemoveIpWhite(ip)
 								logs.Warn("save ip whitelist: %v", err)
-								jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "保存失败"})
+								jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "保存失败"})
 							} else {
 								logs.Info("客户端IP白名单认证授权成功:task [%d] client [%d] ip [%s]", task.Id, clientID, ip)
-								jsonBytes, err = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+								jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
 							}
 						} else {
 							logs.Error("客户端IP白名单认证授权密码错误:task [%d] client [%d] ip [%s]", task.Id, clientID, ip)
-							jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
+							jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
 						}
 						response := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(jsonBytes), jsonBytes)
 						// 如果 src 是真实的客户端连接（net.Conn），直接写回客户端并关闭连接，避免走隧道转发
