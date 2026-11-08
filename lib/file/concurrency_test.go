@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -119,5 +120,40 @@ func TestLoadTaskWithNullClientDoesNotPanic(t *testing.T) {
 	}
 	if _, ok := db.Tasks.Load(3); ok {
 		t.Error("引用不存在客户端的条目应当被跳过")
+	}
+}
+
+func TestUpdateClientPersistsImmediately(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "conf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	db := &DbUtils{JsonDb: NewJsonDb(dir)}
+	c := NewClient("vkey-persist-1234", false, false)
+	c.Id = 1
+	c.Remark = "before"
+	db.JsonDb.Clients.Store(c.Id, c)
+
+	c.Lock()
+	c.Remark = "after"
+	c.Unlock()
+	if err := db.UpdateClient(c); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c.RLock()
+		rt := c.Rate
+		c.RUnlock()
+		if rt != nil {
+			rt.Stop()
+		}
+	})
+
+	b, err := os.ReadFile(db.JsonDb.ClientFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"Remark":"after"`) {
+		t.Fatalf("updated client was not persisted: %s", b)
 	}
 }

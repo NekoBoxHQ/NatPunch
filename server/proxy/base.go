@@ -98,6 +98,13 @@ func in(target string, str_array []string) bool {
 // 流量**永远是 0**，客户端流量上限也永远不生效。收成一处就不会再漏。
 func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
 	rb []byte, tp string, f func(), localProxy bool, task *file.Tunnel, host *file.Host) error {
+	client.RLock()
+	clientID := client.Id
+	verifyKey := client.VerifyKey
+	blackIPList := append([]string(nil), client.BlackIpList...)
+	cryptEnabled, compressEnabled := client.Cnf.Crypt, client.Cnf.Compress
+	clientRate, clientFlow := client.Rate, client.Flow
+	client.RUnlock()
 
 	// 全局连接数上限（阶段三 #4，max_global_conn=0 不限）
 	if !TryAcquireGlobalConn() {
@@ -113,7 +120,7 @@ func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
 	}
 
 	// 判断访问地址是否在黑名单内
-	if common.IsBlackIp(c.RemoteAddr().String(), client.VerifyKey, client.BlackIpList) {
+	if common.IsBlackIp(c.RemoteAddr().String(), verifyKey, blackIPList) {
 		c.Close()
 		return nil
 	}
@@ -123,16 +130,16 @@ func (s *BaseServer) DealClient(c *conn.Conn, client *file.Client, addr string,
 		protoVersion = task.ProtoVersion
 	}
 
-	link := conn.NewLink(tp, addr, client.Cnf.Crypt, client.Cnf.Compress, c.Conn.RemoteAddr().String(), localProxy, protoVersion)
-	if target, err := s.bridge.SendLinkInfo(client.Id, link, s.task); err != nil {
-		logs.Warn("get connection from client id %d  error %s", client.Id, err.Error())
+	link := conn.NewLink(tp, addr, cryptEnabled, compressEnabled, c.Conn.RemoteAddr().String(), localProxy, protoVersion)
+	if target, err := s.bridge.SendLinkInfo(clientID, link, s.task); err != nil {
+		logs.Warn("get connection from client id %d  error %s", clientID, err.Error())
 		c.Close()
 		return err
 	} else {
 		if f != nil {
 			f()
 		}
-		conn.CopyWaitGroup(target, c.Conn, link.Crypt, link.Compress, client.Rate, client.Flow, true, rb, task, host)
+		conn.CopyWaitGroup(target, c.Conn, link.Crypt, link.Compress, clientRate, clientFlow, true, rb, task, host)
 	}
 	return nil
 }

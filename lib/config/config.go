@@ -90,7 +90,7 @@ func dealCommon(s string) *CommonConfig {
 	c.Client = file.NewClient("", true, true)
 	c.Client.Cnf = new(file.Config)
 	for _, v := range splitStr(s) {
-		item := strings.Split(v, "=")
+		item := strings.SplitN(v, "=", 2)
 		if len(item) == 0 {
 			continue
 		} else if len(item) == 1 {
@@ -148,7 +148,7 @@ func dealHost(s string) *file.Host {
 	h.Scheme = "all"
 	var headerChange string
 	for _, v := range splitStr(s) {
-		item := strings.Split(v, "=")
+		item := strings.SplitN(v, "=", 2)
 		if len(item) == 0 {
 			continue
 		} else if len(item) == 1 {
@@ -178,7 +178,7 @@ func dealHost(s string) *file.Host {
 func dealHealth(s string) *file.Health {
 	h := &file.Health{}
 	for _, v := range splitStr(s) {
-		item := strings.Split(v, "=")
+		item := strings.SplitN(v, "=", 2)
 		if len(item) == 0 {
 			continue
 		} else if len(item) == 1 {
@@ -206,7 +206,7 @@ func dealTunnel(s string) *file.Tunnel {
 	t := &file.Tunnel{}
 	t.Target = new(file.Target)
 	for _, v := range splitStr(s) {
-		item := strings.Split(v, "=")
+		item := strings.SplitN(v, "=", 2)
 		if len(item) == 0 {
 			continue
 		} else if len(item) == 1 {
@@ -253,7 +253,7 @@ func dealTunnel(s string) *file.Tunnel {
 func dealMultiUser(s string) map[string]string {
 	multiUserMap := make(map[string]string)
 	for _, v := range splitStr(s) {
-		item := strings.Split(v, "=")
+		item := strings.SplitN(v, "=", 2)
 		if len(item) == 0 {
 			continue
 		} else if len(item) == 1 {

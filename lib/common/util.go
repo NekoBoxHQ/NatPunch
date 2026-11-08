@@ -11,7 +11,6 @@ import (
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 	"golang.org/x/crypto/bcrypt"
-	"html/template"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/crypt"
@@ -105,13 +105,17 @@ func ChangeHostAndHeader(r *http.Request, host string, header string, addr strin
 	if header != "" {
 		h := strings.Split(header, "\n")
 		for _, v := range h {
-			hd := strings.Split(v, ":")
+			hd := strings.SplitN(v, ":", 2)
 			if len(hd) == 2 {
-				r.Header.Set(hd[0], hd[1])
+				r.Header.Set(strings.TrimSpace(hd[0]), strings.TrimSpace(hd[1]))
 			}
 		}
 	}
-	addr = strings.Split(addr, ":")[0]
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	} else {
+		addr = strings.Trim(addr, "[]")
+	}
 	if prior, ok := r.Header["X-Forwarded-For"]; ok {
 		addr = strings.Join(prior, ", ") + ", " + addr
 	}
@@ -217,6 +221,17 @@ func InIntArr(arr []int, val int) bool {
 // format ports str to a int array
 func GetPorts(p string) []int {
 	var ps []int
+	seen := make(map[int]struct{}, 16)
+	add := func(port int) {
+		if len(seen) >= 65535 {
+			return
+		}
+		if _, ok := seen[port]; ok {
+			return
+		}
+		seen[port] = struct{}{}
+		ps = append(ps, port)
+	}
 	arr := strings.Split(p, ",")
 	for _, v := range arr {
 		fw := strings.Split(v, "-")
@@ -225,14 +240,17 @@ func GetPorts(p string) []int {
 				start, _ := strconv.Atoi(fw[0])
 				end, _ := strconv.Atoi(fw[1])
 				for i := start; i <= end; i++ {
-					ps = append(ps, i)
+					if len(seen) >= 65535 {
+						break
+					}
+					add(i)
 				}
 			} else {
 				continue
 			}
 		} else if IsPort(v) {
 			p, _ := strconv.Atoi(v)
-			ps = append(ps, p)
+			add(p)
 		}
 	}
 	return ps
@@ -244,7 +262,7 @@ func IsPort(p string) bool {
 	if err != nil {
 		return false
 	}
-	if pi > 65536 || pi < 1 {
+	if pi > 65535 || pi < 1 {
 		return false
 	}
 	return true
@@ -292,6 +310,14 @@ func ConstantTimeStrEq(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
+// MaskSecret 只保留有限前缀，用于日志中标识凭据而不泄露完整值。
+func MaskSecret(s string) string {
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:4] + "****"
+}
+
 // maxCertFileSize 证书 / 私钥文件的读取上限。正常 PEM 远小于此。
 const maxCertFileSize = 1 << 20
 
@@ -320,10 +346,10 @@ func ReadCertFile(path string) ([]byte, error) {
 }
 
 // 判断访问地址是否在黑名单内
-func IsBlackIp(ipPort, vkey string, blackIpList []string) bool {
+func IsBlackIp(ipPort, _ string, blackIpList []string) bool {
 	ip := GetIpByAddr(ipPort)
 	if in(ip, blackIpList) {
-		logs.Error("IP地址[" + ip + "]在隧道[" + vkey + "]黑名单列表内")
+		logs.Error("IP地址[" + ip + "]在客户端黑名单列表内")
 		return true
 	}
 
@@ -331,13 +357,13 @@ func IsBlackIp(ipPort, vkey string, blackIpList []string) bool {
 }
 
 // 判断访问地址是否在白名单内
-func IsAuthIp(ipPort, vkey string, authIpList []string) bool {
+func IsAuthIp(ipPort, _ string, authIpList []string) bool {
 	ip := GetIpByAddr(ipPort)
 
 	if in(ip, authIpList) {
 		return false
 	}
-	logs.Error("IP地址[" + ip + "]不在隧道[" + vkey + "]白名单列表内")
+	logs.Error("IP地址[" + ip + "]不在客户端白名单列表内")
 	return true
 }
 
@@ -390,7 +416,7 @@ func GetEnvMap() map[string]string {
 	m := make(map[string]string)
 	environ := os.Environ()
 	for i := range environ {
-		tmp := strings.Split(environ[i], "=")
+		tmp := strings.SplitN(environ[i], "=", 2)
 		if len(tmp) == 2 {
 			m[tmp[0]] = tmp[1]
 		}
@@ -455,12 +481,12 @@ func GeSynctMapLen(m *sync.Map) int {
 var externalIp string
 var externalIpOnce sync.Once
 
-// GetExternalIp 获取公网出口 IP：优先 HTTPS 源（阶段三 #16），失败回退 HTTP；
+// GetExternalIp 获取公网出口 IP：只使用 HTTPS 源，避免中间人伪造返回地址；
 // 结果由 sync.Once 缓存，避免无锁全局读写与重复外呼。
 func GetExternalIp() string {
 	externalIpOnce.Do(func() {
 		client := &http.Client{Timeout: 5 * time.Second}
-		for _, u := range []string{"https://api.ipify.org", "https://myexternalip.com/raw", "http://myexternalip.com/raw"} {
+		for _, u := range []string{"https://api.ipify.org", "https://myexternalip.com/raw"} {
 			resp, err := client.Get(u)
 			if err != nil {
 				continue
@@ -704,21 +730,31 @@ func IsPublicIP(IP net.IP) bool {
 	}
 	if ip4 := IP.To4(); ip4 != nil {
 		switch true {
+		case ip4[0] == 0:
+			return false
 		case ip4[0] == 10:
 			return false
+		case ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127:
+			return false // RFC 6598 运营商级 NAT
 		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
 			return false
 		case ip4[0] == 192 && ip4[1] == 168:
+			return false
+		case ip4[0] == 198 && (ip4[1] == 18 || ip4[1] == 19):
 			return false
 		default:
 			return true
 		}
 	}
-	return false
+	return IP.IsGlobalUnicast() && !IP.IsPrivate()
 }
 
 func GetServerIpByClientIp(clientIp net.IP) string {
 	if IsPublicIP(clientIp) {
+		if clientIp.To4() == nil {
+			// IPv6 客户端由 SOCKS5 回包逻辑回退到控制连接的实际本地地址。
+			return ""
+		}
 		return GetExternalIp()
 	}
 	_, ip := GetIntranetIp()

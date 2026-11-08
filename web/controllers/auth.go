@@ -113,14 +113,17 @@ func (s *AuthController) IpWhiteAuth() {
 		logs.Error("客户端IP白名单认证失败,密钥不存在:vkey [%s] ip [%s]", maskKey(vkey), ip)
 		return
 	}
-	if !c.IpWhite || !c.Status {
+	c.RLock()
+	ipWhite, status, ipWhitePass := c.IpWhite, c.Status, c.IpWhitePass
+	c.RUnlock()
+	if !ipWhite || !status {
 		s.Data["json"] = map[string]interface{}{"success": false, "message": "认证失败"}
 		s.ServeJSON()
 		return
 	}
 
 	// 恒定时间比较：共享口令不该有时序侧信道
-	if !common.ConstantTimeStrEq(c.IpWhitePass, password) {
+	if !common.ConstantTimeStrEq(ipWhitePass, password) {
 		ipWhiteFail(reqIP)
 		s.Data["json"] = map[string]interface{}{"success": false, "message": "认证失败"}
 		s.ServeJSON()
@@ -131,7 +134,12 @@ func (s *AuthController) IpWhiteAuth() {
 	// 去重 + 追加在 client 的写锁内完成（原来读一遍再 append 是 check-then-act，
 	// 并发两个授权请求会把同一个 IP 加两次；同时它与列表序列化也会撞）。
 	if c.AddIpWhite(ip) {
-		file.GetDb().UpdateClient(c)
+		if err := file.GetDb().UpdateClient(c); err != nil {
+			c.RemoveIpWhite(ip)
+			s.Data["json"] = map[string]interface{}{"success": false, "message": "保存失败"}
+			s.ServeJSON()
+			return
+		}
 	}
 
 	s.Data["json"] = map[string]interface{}{"success": true, "message": "授权成功"}

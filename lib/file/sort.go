@@ -46,55 +46,68 @@ func SortClients(list []*Client, sortField, order string) {
 	}
 	asc := order != "desc"
 	sort.SliceStable(list, func(i, j int) bool {
-		a, b := list[i], list[j]
+		a, b := clientSortSnapshot(list[i]), clientSortSnapshot(list[j])
 		switch sortField {
 		case "Id":
-			return lessInt(a.Id, b.Id, asc)
+			return lessInt(a.id, b.id, asc)
 		case "Remark":
-			return lessString(a.Remark, b.Remark, asc)
+			return lessString(a.remark, b.remark, asc)
 		case "Version":
-			return lessString(a.Version, b.Version, asc)
+			return lessString(a.version, b.version, asc)
 		case "VerifyKey":
-			return lessString(a.VerifyKey, b.VerifyKey, asc)
+			return lessString(a.verifyKey, b.verifyKey, asc)
 		case "Addr":
-			return lessString(a.Addr, b.Addr, asc)
+			return lessString(a.addr, b.addr, asc)
 		case "LocalAddr":
-			return lessString(a.LocalAddr, b.LocalAddr, asc)
+			return lessString(a.localAddr, b.localAddr, asc)
 		case "InletFlow":
-			return lessInt64(flowInlet(a), flowInlet(b), asc)
+			return lessInt64(a.inlet, b.inlet, asc)
 		case "ExportFlow":
-			return lessInt64(flowExport(a), flowExport(b), asc)
+			return lessInt64(a.outlet, b.outlet, asc)
 		case "NowRate":
-			return lessInt64(nowRate(a), nowRate(b), asc)
+			return lessInt64(a.rate, b.rate, asc)
 		case "Status":
-			return lessBool(a.Status, b.Status, asc)
+			return lessBool(a.status, b.status, asc)
 		case "IsConnect":
-			return lessBool(a.IsConnect, b.IsConnect, asc)
+			return lessBool(a.connected, b.connected, asc)
 		default:
-			return lessInt(a.Id, b.Id, true)
+			return lessInt(a.id, b.id, true)
 		}
 	})
 }
 
-func flowInlet(c *Client) int64 {
-	if c == nil || c.Flow == nil {
-		return 0
-	}
-	return c.Flow.InletFlow
+type clientSortValues struct {
+	id                                          int
+	rate                                        int64
+	inlet, outlet                               int64
+	remark, version, verifyKey, addr, localAddr string
+	status, connected                           bool
 }
 
-func flowExport(c *Client) int64 {
-	if c == nil || c.Flow == nil {
-		return 0
+func clientSortSnapshot(c *Client) clientSortValues {
+	if c == nil {
+		return clientSortValues{}
 	}
-	return c.Flow.ExportFlow
-}
-
-func nowRate(c *Client) int64 {
-	if c == nil || c.Rate == nil {
-		return 0
+	c.RLock()
+	v := clientSortValues{
+		id:        c.Id,
+		remark:    c.Remark,
+		version:   c.Version,
+		verifyKey: c.VerifyKey,
+		addr:      c.Addr,
+		localAddr: c.LocalAddr,
+		status:    c.Status,
+		connected: c.IsConnect,
 	}
-	return c.Rate.GetNowRate()
+	flow, rt := c.Flow, c.Rate
+	c.RUnlock()
+	if flow != nil {
+		_, v.inlet, v.outlet = flow.Snapshot()
+	}
+	if rt != nil {
+		v.rate = rt.GetNowRate()
+	}
+	return v
 }
 
 // SortTunnels sorts tunnels in-place by the given field.
@@ -103,79 +116,83 @@ func SortTunnels(list []*Tunnel, sortField, order string) {
 		if sortField == "" && len(list) > 1 {
 			// 默认：按客户端 ID 升序（同客户端排在一起），再按 Id 升序
 			sort.SliceStable(list, func(i, j int) bool {
-				ci, cj := 0, 0
-				if list[i].Client != nil {
-					ci = list[i].Client.Id
-				}
-				if list[j].Client != nil {
-					cj = list[j].Client.Id
-				}
+				a, b := tunnelSortSnapshot(list[i]), tunnelSortSnapshot(list[j])
+				ci, cj := a.clientID, b.clientID
 				if ci != cj {
 					return ci < cj
 				}
-				return list[i].Id < list[j].Id
+				return a.id < b.id
 			})
 		}
 		return
 	}
 	asc := order != "desc"
 	sort.SliceStable(list, func(i, j int) bool {
-		a, b := list[i], list[j]
+		a, b := tunnelSortSnapshot(list[i]), tunnelSortSnapshot(list[j])
 		switch sortField {
 		case "Id":
-			return lessInt(a.Id, b.Id, asc)
+			return lessInt(a.id, b.id, asc)
 		case "ClientId":
-			return lessInt(clientIdOfTunnel(a), clientIdOfTunnel(b), asc)
+			return lessInt(a.clientID, b.clientID, asc)
 		case "Remark":
-			return lessString(a.Remark, b.Remark, asc)
+			return lessString(a.remark, b.remark, asc)
 		case "Client.VerifyKey", "VerifyKey":
-			return lessString(clientVkeyOfTunnel(a), clientVkeyOfTunnel(b), asc)
+			return lessString(a.verifyKey, b.verifyKey, asc)
 		case "Mode":
-			return lessString(a.Mode, b.Mode, asc)
+			return lessString(a.mode, b.mode, asc)
 		case "Port":
-			return lessInt(a.Port, b.Port, asc)
+			return lessInt(a.port, b.port, asc)
 		case "Target":
-			return lessString(targetStrOfTunnel(a), targetStrOfTunnel(b), asc)
+			return lessString(a.target, b.target, asc)
 		case "Password":
-			return lessString(a.Password, b.Password, asc)
+			return lessString(a.password, b.password, asc)
 		case "Status":
-			return lessBool(a.Status, b.Status, asc)
+			return lessBool(a.status, b.status, asc)
 		case "RunStatus":
-			return lessBool(a.RunStatus, b.RunStatus, asc)
+			return lessBool(a.runStatus, b.runStatus, asc)
 		case "IsConnect", "Client.IsConnect":
-			return lessBool(clientConnectOfTunnel(a), clientConnectOfTunnel(b), asc)
+			return lessBool(a.connected, b.connected, asc)
 		default:
-			return lessInt(a.Id, b.Id, true)
+			return lessInt(a.id, b.id, true)
 		}
 	})
 }
 
-func clientIdOfTunnel(t *Tunnel) int {
-	if t == nil || t.Client == nil {
-		return 0
-	}
-	return t.Client.Id
+type tunnelSortValues struct {
+	id, clientID, port                        int
+	remark, verifyKey, mode, target, password string
+	status, runStatus, connected              bool
 }
 
-func clientVkeyOfTunnel(t *Tunnel) string {
-	if t == nil || t.Client == nil {
-		return ""
+func tunnelSortSnapshot(t *Tunnel) tunnelSortValues {
+	if t == nil {
+		return tunnelSortValues{}
 	}
-	return t.Client.VerifyKey
-}
-
-func clientConnectOfTunnel(t *Tunnel) bool {
-	if t == nil || t.Client == nil {
-		return false
+	t.RLock()
+	v := tunnelSortValues{
+		id:        t.Id,
+		remark:    t.Remark,
+		mode:      t.Mode,
+		port:      t.Port,
+		password:  t.Password,
+		status:    t.Status,
+		runStatus: t.RunStatus,
 	}
-	return t.Client.IsConnect
-}
-
-func targetStrOfTunnel(t *Tunnel) string {
-	if t == nil || t.Target == nil {
-		return ""
+	client, target := t.Client, t.Target
+	t.RUnlock()
+	if client != nil {
+		client.RLock()
+		v.clientID = client.Id
+		v.verifyKey = client.VerifyKey
+		v.connected = client.IsConnect
+		client.RUnlock()
 	}
-	return t.Target.TargetStr
+	if target != nil {
+		target.RLock()
+		v.target = target.TargetStr
+		target.RUnlock()
+	}
+	return v
 }
 
 // SortHosts sorts hosts in-place by the given field.
@@ -188,59 +205,68 @@ func SortHosts(list []*Host, sortField, order string) {
 	}
 	asc := order != "desc"
 	sort.SliceStable(list, func(i, j int) bool {
-		a, b := list[i], list[j]
+		a, b := hostSortSnapshot(list[i]), hostSortSnapshot(list[j])
 		switch sortField {
 		case "Id":
-			return lessInt(a.Id, b.Id, asc)
+			return lessInt(a.id, b.id, asc)
 		case "ClientId":
-			return lessInt(clientIdOfHost(a), clientIdOfHost(b), asc)
+			return lessInt(a.clientID, b.clientID, asc)
 		case "Remark":
-			return lessString(a.Remark, b.Remark, asc)
+			return lessString(a.remark, b.remark, asc)
 		case "Client.VerifyKey", "VerifyKey":
-			return lessString(clientVkeyOfHost(a), clientVkeyOfHost(b), asc)
+			return lessString(a.verifyKey, b.verifyKey, asc)
 		case "Host":
-			return lessString(a.Host, b.Host, asc)
+			return lessString(a.host, b.host, asc)
 		case "Scheme":
-			return lessString(a.Scheme, b.Scheme, asc)
+			return lessString(a.scheme, b.scheme, asc)
 		case "Target":
-			return lessString(targetStrOfHost(a), targetStrOfHost(b), asc)
+			return lessString(a.target, b.target, asc)
 		case "Location":
-			return lessString(a.Location, b.Location, asc)
+			return lessString(a.location, b.location, asc)
 		case "IsClose", "Status":
 			// IsClose: false=open, true=closed — sort by open status for "Status" display
-			return lessBool(a.IsClose, b.IsClose, asc)
+			return lessBool(a.closed, b.closed, asc)
 		case "IsConnect", "Client.IsConnect":
-			return lessBool(clientConnectOfHost(a), clientConnectOfHost(b), asc)
+			return lessBool(a.connected, b.connected, asc)
 		default:
-			return lessInt(a.Id, b.Id, true)
+			return lessInt(a.id, b.id, true)
 		}
 	})
 }
 
-func clientIdOfHost(h *Host) int {
-	if h == nil || h.Client == nil {
-		return 0
-	}
-	return h.Client.Id
+type hostSortValues struct {
+	id, clientID             int
+	remark, verifyKey, host  string
+	scheme, target, location string
+	closed, connected        bool
 }
 
-func clientVkeyOfHost(h *Host) string {
-	if h == nil || h.Client == nil {
-		return ""
+func hostSortSnapshot(h *Host) hostSortValues {
+	if h == nil {
+		return hostSortValues{}
 	}
-	return h.Client.VerifyKey
-}
-
-func clientConnectOfHost(h *Host) bool {
-	if h == nil || h.Client == nil {
-		return false
+	h.RLock()
+	v := hostSortValues{
+		id:       h.Id,
+		remark:   h.Remark,
+		host:     h.Host,
+		scheme:   h.Scheme,
+		location: h.Location,
+		closed:   h.IsClose,
 	}
-	return h.Client.IsConnect
-}
-
-func targetStrOfHost(h *Host) string {
-	if h == nil || h.Target == nil {
-		return ""
+	client, target := h.Client, h.Target
+	h.RUnlock()
+	if client != nil {
+		client.RLock()
+		v.clientID = client.Id
+		v.verifyKey = client.VerifyKey
+		v.connected = client.IsConnect
+		client.RUnlock()
 	}
-	return h.Target.TargetStr
+	if target != nil {
+		target.RLock()
+		v.target = target.TargetStr
+		target.RUnlock()
+	}
+	return v
 }

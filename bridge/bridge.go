@@ -49,6 +49,15 @@ func NewClient(t *natpunch_mux.Mux, s *conn.Conn, vs string) *Client {
 	}
 }
 
+func (c *Client) GetVersion() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Version
+}
+
 type Bridge struct {
 	TunnelPort     int //通信隧道端口
 	Client         sync.Map
@@ -94,13 +103,11 @@ func (s *Bridge) StartTunnel() error {
 		if RequireTLS {
 			logs.Info("bridge: plaintext listener disabled (bridge_require_tls), only tls_bridge_port is served")
 		} else {
+			listener, err := connection.GetBridgeListener(s.tunnelType)
+			if err != nil {
+				return fmt.Errorf("bridge listener start: %w", err)
+			}
 			go func() {
-				listener, err := connection.GetBridgeListener(s.tunnelType)
-				if err != nil {
-					// 库代码禁止 os.Exit：监听失败记录错误并退出本 goroutine（阶段三 #15）
-					logs.Error("bridge listener start error: %v", err)
-					return
-				}
 				conn.Accept(listener, func(c net.Conn) {
 					s.cliProcess(conn.NewConn(c))
 				})
@@ -109,17 +116,14 @@ func (s *Bridge) StartTunnel() error {
 
 		// tls
 		if ServerTlsEnable {
+			// 监听TLS 端口
+			tlsBridgePort := beego.AppConfig.DefaultInt("tls_bridge_port", 8025)
+			logs.Info("tls server start, the bridge type is %s, the tls bridge port is %d", "tcp", tlsBridgePort)
+			tlsListener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(beego.AppConfig.String("bridge_ip")), Port: tlsBridgePort})
+			if err != nil {
+				return fmt.Errorf("tls bridge listener start: %w", err)
+			}
 			go func() {
-				// 监听TLS 端口
-				tlsBridgePort := beego.AppConfig.DefaultInt("tls_bridge_port", 8025)
-
-				logs.Info("tls server start, the bridge type is %s, the tls bridge port is %d", "tcp", tlsBridgePort)
-				tlsListener, tlsErr := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(beego.AppConfig.String("bridge_ip")), Port: tlsBridgePort})
-				if tlsErr != nil {
-					// 库代码禁止 os.Exit：监听失败记录错误并退出本 goroutine（阶段三 #15）
-					logs.Error("tls bridge listener start error: %v", tlsErr)
-					return
-				}
 				conn.Accept(tlsListener, func(c net.Conn) {
 					s.cliProcess(conn.NewConn(tls.Server(c, crypt.BuildTlsServerConfig())))
 				})
@@ -168,62 +172,128 @@ func (s *Bridge) GetHealthFromClient(id int, c *conn.Conn) {
 			break
 		} else if !status { //the status is true , return target to the targetArr
 			file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
-				v := value.(*file.Tunnel)
-				if v.Client.Id == id && v.Mode == "tcp" && strings.Contains(v.Target.TargetStr, info) {
-					v.Lock()
-					if v.Target.TargetArr == nil || (len(v.Target.TargetArr) == 0 && len(v.HealthRemoveArr) == 0) {
-						v.Target.TargetArr = common.TrimArr(strings.Split(v.Target.TargetStr, "\n"))
-					}
-					v.Target.TargetArr = common.RemoveArrVal(v.Target.TargetArr, info)
-					if v.HealthRemoveArr == nil {
-						v.HealthRemoveArr = make([]string, 0)
-					}
-					v.HealthRemoveArr = append(v.HealthRemoveArr, info)
-					v.Unlock()
-				}
+				markTunnelUnhealthy(value.(*file.Tunnel), id, info)
 				return true
 			})
 			file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
-				v := value.(*file.Host)
-				if v.Client.Id == id && strings.Contains(v.Target.TargetStr, info) {
-					v.Lock()
-					if v.Target.TargetArr == nil || (len(v.Target.TargetArr) == 0 && len(v.HealthRemoveArr) == 0) {
-						v.Target.TargetArr = common.TrimArr(strings.Split(v.Target.TargetStr, "\n"))
-					}
-					v.Target.TargetArr = common.RemoveArrVal(v.Target.TargetArr, info)
-					if v.HealthRemoveArr == nil {
-						v.HealthRemoveArr = make([]string, 0)
-					}
-					v.HealthRemoveArr = append(v.HealthRemoveArr, info)
-					v.Unlock()
-				}
+				markHostUnhealthy(value.(*file.Host), id, info)
 				return true
 			})
 		} else { //the status is false,remove target from the targetArr
 			file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
-				v := value.(*file.Tunnel)
-				if v.Client.Id == id && v.Mode == "tcp" && common.IsArrContains(v.HealthRemoveArr, info) && !common.IsArrContains(v.Target.TargetArr, info) {
-					v.Lock()
-					v.Target.TargetArr = append(v.Target.TargetArr, info)
-					v.HealthRemoveArr = common.RemoveArrVal(v.HealthRemoveArr, info)
-					v.Unlock()
-				}
+				markTunnelHealthy(value.(*file.Tunnel), id, info)
 				return true
 			})
 
 			file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
-				v := value.(*file.Host)
-				if v.Client.Id == id && common.IsArrContains(v.HealthRemoveArr, info) && !common.IsArrContains(v.Target.TargetArr, info) {
-					v.Lock()
-					v.Target.TargetArr = append(v.Target.TargetArr, info)
-					v.HealthRemoveArr = common.RemoveArrVal(v.HealthRemoveArr, info)
-					v.Unlock()
-				}
+				markHostHealthy(value.(*file.Host), id, info)
 				return true
 			})
 		}
 	}
 	s.delClientIfCurrent(id, c)
+}
+
+func markTunnelUnhealthy(v *file.Tunnel, clientID int, targetAddr string) {
+	if v == nil {
+		return
+	}
+	v.Lock()
+	defer v.Unlock()
+	if v.Client == nil {
+		return
+	}
+	v.Client.RLock()
+	owner := v.Client.Id
+	v.Client.RUnlock()
+	if owner != clientID || v.Mode != "tcp" || v.Target == nil {
+		return
+	}
+	target := v.Target
+	target.Lock()
+	defer target.Unlock()
+	if target.TargetArr == nil {
+		target.TargetArr = common.TrimArr(strings.Split(target.TargetStr, "\n"))
+	}
+	target.TargetArr = common.RemoveArrVal(target.TargetArr, targetAddr)
+	if !common.IsArrContains(v.HealthRemoveArr, targetAddr) {
+		v.HealthRemoveArr = append(v.HealthRemoveArr, targetAddr)
+	}
+}
+
+func markTunnelHealthy(v *file.Tunnel, clientID int, targetAddr string) {
+	if v == nil {
+		return
+	}
+	v.Lock()
+	defer v.Unlock()
+	if v.Client == nil {
+		return
+	}
+	v.Client.RLock()
+	owner := v.Client.Id
+	v.Client.RUnlock()
+	if owner != clientID || v.Mode != "tcp" || v.Target == nil {
+		return
+	}
+	target := v.Target
+	target.Lock()
+	defer target.Unlock()
+	if common.IsArrContains(v.HealthRemoveArr, targetAddr) && !common.IsArrContains(target.TargetArr, targetAddr) {
+		target.TargetArr = append(target.TargetArr, targetAddr)
+		v.HealthRemoveArr = common.RemoveArrVal(v.HealthRemoveArr, targetAddr)
+	}
+}
+
+func markHostUnhealthy(v *file.Host, clientID int, targetAddr string) {
+	if v == nil {
+		return
+	}
+	v.Lock()
+	defer v.Unlock()
+	if v.Client == nil {
+		return
+	}
+	v.Client.RLock()
+	owner := v.Client.Id
+	v.Client.RUnlock()
+	if owner != clientID || v.Target == nil {
+		return
+	}
+	target := v.Target
+	target.Lock()
+	defer target.Unlock()
+	if target.TargetArr == nil {
+		target.TargetArr = common.TrimArr(strings.Split(target.TargetStr, "\n"))
+	}
+	target.TargetArr = common.RemoveArrVal(target.TargetArr, targetAddr)
+	if !common.IsArrContains(v.HealthRemoveArr, targetAddr) {
+		v.HealthRemoveArr = append(v.HealthRemoveArr, targetAddr)
+	}
+}
+
+func markHostHealthy(v *file.Host, clientID int, targetAddr string) {
+	if v == nil {
+		return
+	}
+	v.Lock()
+	defer v.Unlock()
+	if v.Client == nil {
+		return
+	}
+	v.Client.RLock()
+	owner := v.Client.Id
+	v.Client.RUnlock()
+	if owner != clientID || v.Target == nil {
+		return
+	}
+	target := v.Target
+	target.Lock()
+	defer target.Unlock()
+	if common.IsArrContains(v.HealthRemoveArr, targetAddr) && !common.IsArrContains(target.TargetArr, targetAddr) {
+		target.TargetArr = append(target.TargetArr, targetAddr)
+		v.HealthRemoveArr = common.RemoveArrVal(v.HealthRemoveArr, targetAddr)
+	}
 }
 
 // delClientIfCurrent 只在「这条连接仍是该客户端当前的 signal」时才真正回收。
@@ -551,14 +621,18 @@ loop:
 				//
 				// 规则：
 				//   - 用公共 vkey 认证的（合成条目，NoStore）是**新设备自注册** → 分配新 Id；
-				//   - 其他情况一律钉死成握手时 vkey 认证出的 id，只能更新自己的记录。
-				if authRec, aerr := file.GetDb().GetClient(authId); aerr == nil && authRec != nil && authRec.NoStore {
-					client.Id = 0
-				} else {
-					if client.Id != 0 && client.Id != authId {
-						logs.Warn("client id %d tried to register as id %d, forced to own id", authId, client.Id)
+				//   - 已有客户端只能更新自己的非管理字段；状态、配额、到期时间、黑白名单、
+				//     面板凭据与传输策略均由服务端管理，不能由客户端配置反向覆盖。
+				if authRec, aerr := file.GetDb().GetClient(authId); aerr == nil && authRec != nil {
+					if authRec.NoStore {
+						client.Id = 0
+					} else {
+						if client.Id != 0 && client.Id != authId {
+							logs.Warn("client id %d tried to register as id %d, forced to own id", authId, client.Id)
+						}
+						client.Id = authId
+						mergeManagedClientFields(authRec, client)
 					}
-					client.Id = authId
 				}
 				// 自报 vkey 还要过字符集/长度校验：它会被原样写回、也会出现在面板
 				// “一键部署”命令里（sh -s -- '<vkey>'），含引号/分号就是命令注入。
@@ -583,13 +657,8 @@ loop:
 				// 合成条目（public_vkey 那条，server.go 里 NewClient(vkey,true,true)）不走这里，
 				// 仍然是 NoStore —— 它每次开机重建，且从不建立连接，不会被这条路径删掉。
 				client.NoStore = false
-				// 注册上限校验（F1-8）：max_clients=0 表示不限（沿用存量语义）
-				if maxClients := beego.AppConfig.DefaultInt("max_clients", 0); maxClients > 0 && file.GetDb().GetClientCount() >= maxClients {
-					fail = true
-					c.WriteAddFail()
-					logs.Warn("register rejected: client count %d >= max_clients %d", file.GetDb().GetClientCount(), maxClients)
-					break loop
-				}
+				// 注册上限在 file.NewClient 内与 Id 分配/写入同一临界区校验；
+				// 这里不再先查一次，避免并发注册突破上限，也避免上限已满时误伤重连。
 				if err = file.GetDb().NewClient(client); err != nil {
 					fail = true
 					c.WriteAddFail()
@@ -677,7 +746,6 @@ loop:
 							tl.Target.TargetStr = strconv.Itoa(targets[i])
 						}
 					}
-					tl.Id = int(file.GetDb().JsonDb.GetTaskId())
 					tl.Status = true
 					tl.Flow = new(file.Flow)
 					tl.NoStore = true
@@ -701,6 +769,7 @@ loop:
 							break loop
 						}
 						if b := tool.TestServerPort(tl.Port, tl.Mode); !b {
+							_ = file.GetDb().DelTask(tl.Id)
 							fail = true
 							c.WriteAddFail()
 							break loop
@@ -717,4 +786,49 @@ loop:
 		s.DelClient(client.Id)
 	}
 	c.Close()
+}
+
+// mergeManagedClientFields 把服务端管理字段从现有记录合并到客户端上报的配置上。
+//
+// 配置注册只允许设备更新“它自己要暴露什么”（备注以及后续明确加入白名单的字段）；
+// 连接状态、限额、到期时间、黑白名单、面板凭据、vkey 与压缩/加密策略都必须以服务端
+// 记录为准。否则设备只要重连并提交一份 flow_limit=0 / expire_time= 的配置，就能
+// 清掉管理员设置的配额。
+func mergeManagedClientFields(existing, reported *file.Client) {
+	if existing == nil || reported == nil {
+		return
+	}
+	existing.RLock()
+	defer existing.RUnlock()
+
+	reported.VerifyKey = existing.VerifyKey
+	reported.Status = existing.Status
+	reported.IsConnect = existing.IsConnect
+	reported.Addr = existing.Addr
+	reported.LocalAddr = existing.LocalAddr
+	reported.RateLimit = existing.RateLimit
+	reported.Flow = existing.Flow
+	reported.Rate = existing.Rate
+	reported.NoDisplay = existing.NoDisplay
+	reported.MaxConn = existing.MaxConn
+	reported.WebUserName = existing.WebUserName
+	reported.WebPassword = existing.WebPassword
+	reported.ConfigConnAllow = existing.ConfigConnAllow
+	reported.MaxTunnelNum = existing.MaxTunnelNum
+	reported.BlackIpList = cloneStringSlice(existing.BlackIpList)
+	reported.CreateTime = existing.CreateTime
+	reported.LastOnlineTime = existing.LastOnlineTime
+	reported.IpWhite = existing.IpWhite
+	reported.IpWhitePass = existing.IpWhitePass
+	reported.IpWhiteList = cloneStringSlice(existing.IpWhiteList)
+	reported.ExpireTime = existing.ExpireTime
+	reported.Version = existing.Version
+	reported.Cnf = existing.Cnf
+}
+
+func cloneStringSlice(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	return append([]string(nil), in...)
 }

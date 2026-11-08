@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"html"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -156,6 +157,28 @@ func (s *BaseController) GetBoolNoErr(key string, def ...bool) bool {
 	return val
 }
 
+// requirePOST 拒绝带副作用的 GET/HEAD 等请求。AutoRouter 默认会把导出方法挂到
+// 多种 HTTP 方法上，若不显式检查，链接预览、爬虫或同源预取都可能触发启停/删除。
+func (s *BaseController) requirePOST() bool {
+	if s.Ctx.Request.Method == http.MethodPost {
+		return true
+	}
+	s.Ctx.Output.Header("Allow", "POST")
+	s.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+	return false
+}
+
+func (s *BaseController) requireGETorPOST() bool {
+	switch s.Ctx.Request.Method {
+	case http.MethodGet, http.MethodPost:
+		return true
+	default:
+		s.Ctx.Output.Header("Allow", "GET, POST")
+		s.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+		return false
+	}
+}
+
 // ajax正确返回
 func (s *BaseController) AjaxOk(str string) {
 	s.Data["json"] = ajax(str, 1)
@@ -274,10 +297,7 @@ func (s *BaseController) CheckUserAuth() {
 
 // maskKey 日志用脱敏：只保留前 4 位，避免完整连接凭据落进日志。
 func maskKey(s string) string {
-	if len(s) <= 4 {
-		return "****"
-	}
-	return s[:4] + "****"
+	return common.MaskSecret(s)
 }
 
 // deny 拒绝非授权请求：beego 1.12 的 StopRun 是 panic，会跳过 WriteHeader

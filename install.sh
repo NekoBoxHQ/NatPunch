@@ -112,9 +112,13 @@ fi
 case "$VKEY" in
     *[!A-Za-z0-9._-]*) die "VKEY 含非法字符";;
 esac
-# SERVER 只允许 host / IPv4 / IPv6 字面量，禁止 ':' 以免和 PORT 拼接歧义
+# SERVER 只允许 host / IPv4 / IPv6 字面量；IPv6 在拼 PORT 前统一加方括号。
 case "$SERVER" in
-    *[!A-Za-z0-9._-]*) die "SERVER 含非法字符（仅允许字母数字 . _ -）";;
+    *[!A-Za-z0-9._:\[\]-]*) die "SERVER 含非法字符（仅允许字母数字 . _ : [ ] -）";;
+esac
+case "$SERVER" in
+    \[*\]) ;;
+    *:*) SERVER="[$SERVER]" ;;
 esac
 # TLS_FLAG 允许带多个 flag（空格分隔），例如
 #   '-tls_enable=true -tls_fingerprint=<sha256>'

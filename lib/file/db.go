@@ -46,13 +46,17 @@ func (s *DbUtils) GetClientList(start, length int, search, sortField, order stri
 	all := make([]*Client, 0)
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if v.NoDisplay {
+		v.RLock()
+		noDisplay, id := v.NoDisplay, v.Id
+		verifyKey, remark, addr, localAddr := v.VerifyKey, v.Remark, v.Addr, v.LocalAddr
+		v.RUnlock()
+		if noDisplay {
 			return true
 		}
-		if clientId != 0 && clientId != v.Id {
+		if clientId != 0 && clientId != id {
 			return true
 		}
-		if search != "" && !(v.Id == common.GetIntNoErrByStr(search) || strings.Contains(v.VerifyKey, search) || strings.Contains(v.Remark, search) || strings.Contains(v.Addr, search) || strings.Contains(v.LocalAddr, search)) {
+		if search != "" && !(id == common.GetIntNoErrByStr(search) || strings.Contains(verifyKey, search) || strings.Contains(remark, search) || strings.Contains(addr, search) || strings.Contains(localAddr, search)) {
 			return true
 		}
 		all = append(all, v)
@@ -84,10 +88,19 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if common.ConstantTimeStrEq(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
+		v.RLock()
+		verifyKey := v.VerifyKey
+		v.RUnlock()
+		if common.ConstantTimeStrEq(common.Getverifyval(verifyKey), vKey) {
+			v.Lock()
+			if !v.Status {
+				v.Unlock()
+				return true
+			}
 			v.Addr = common.GetIpByAddr(addr)
 			id = v.Id
 			exist = true
+			v.Unlock()
 			return false
 		}
 		return true
@@ -99,24 +112,40 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 }
 
 func (s *DbUtils) NewTask(t *Tunnel) (err error) {
+	if t == nil || t.Client == nil {
+		return errors.New("task or client is nil")
+	}
+	taskCreateLock.Lock()
+	defer taskCreateLock.Unlock()
 	// 每客户端隧道数上限（数据层统一校验，所有入口生效；0=不限）
 	if MaxTunnelsPerClient > 0 && t.Client != nil && s.GetTaskCountByClient(t.Client.Id) >= MaxTunnelsPerClient {
 		return errors.New(fmt.Sprintf("client %d task count >= max_tunnels_per_client %d", t.Client.Id, MaxTunnelsPerClient))
 	}
-	if err != nil {
-		return
+	if t.Id == 0 {
+		t.Id = int(s.JsonDb.GetTaskId())
 	}
 	t.Flow = new(Flow)
 	s.JsonDb.Tasks.Store(t.Id, t)
-	return s.JsonDb.StoreTasksToJsonFile()
+	if err := s.JsonDb.StoreTasksToJsonFile(); err != nil {
+		s.JsonDb.Tasks.Delete(t.Id)
+		return err
+	}
+	return nil
 }
 
 func (s *DbUtils) UpdateTask(t *Tunnel) error {
+	if t == nil {
+		return errors.New("task is nil")
+	}
+	taskCreateLock.Lock()
+	defer taskCreateLock.Unlock()
 	s.JsonDb.Tasks.Store(t.Id, t)
 	return s.JsonDb.StoreTasksToJsonFile()
 }
 
 func (s *DbUtils) DelTask(id int) error {
+	taskCreateLock.Lock()
+	defer taskCreateLock.Unlock()
 	s.JsonDb.Tasks.Delete(id)
 	return s.JsonDb.StoreTasksToJsonFile()
 }
@@ -132,6 +161,8 @@ func (s *DbUtils) GetTask(id int) (t *Tunnel, err error) {
 }
 
 func (s *DbUtils) DelHost(id int) error {
+	hostCreateLock.Lock()
+	defer hostCreateLock.Unlock()
 	s.JsonDb.Hosts.Delete(id)
 	return s.JsonDb.StoreHostToJsonFile()
 }
@@ -150,6 +181,11 @@ func (s *DbUtils) IsHostExist(h *Host) bool {
 }
 
 func (s *DbUtils) NewHost(t *Host) error {
+	if t == nil || t.Client == nil {
+		return errors.New("host or client is nil")
+	}
+	hostCreateLock.Lock()
+	defer hostCreateLock.Unlock()
 	if t.Location == "" {
 		t.Location = "/"
 	}
@@ -158,7 +194,10 @@ func (s *DbUtils) NewHost(t *Host) error {
 	}
 	t.Flow = new(Flow)
 	s.JsonDb.Hosts.Store(t.Id, t)
-	s.JsonDb.StoreHostToJsonFile()
+	if err := s.JsonDb.StoreHostToJsonFile(); err != nil {
+		s.JsonDb.Hosts.Delete(t.Id)
+		return err
+	}
 	return nil
 }
 
@@ -204,6 +243,8 @@ func paginateHosts(all []*Host, start, length int) ([]*Host, int) {
 }
 
 func (s *DbUtils) DelClient(id int) error {
+	clientCreateLock.Lock()
+	defer clientCreateLock.Unlock()
 	s.JsonDb.Clients.Delete(id)
 	return s.JsonDb.StoreClientsToJsonFile()
 }
@@ -228,8 +269,18 @@ func (s *DbUtils) GetClientCount() int {
 func (s *DbUtils) GetTaskCountByClient(clientId int) int {
 	cnt := 0
 	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
-		if v, ok := value.(*Tunnel); ok && v.Client != nil && v.Client.Id == clientId {
-			cnt++
+		if v, ok := value.(*Tunnel); ok {
+			v.RLock()
+			client := v.Client
+			v.RUnlock()
+			if client != nil {
+				client.RLock()
+				id := client.Id
+				client.RUnlock()
+				if id == clientId {
+					cnt++
+				}
+			}
 		}
 		return true
 	})
@@ -243,7 +294,9 @@ func (s *DbUtils) GetTaskCountByClient(clientId int) int {
 func NewClientRate(c *Client) *rate.Rate {
 	r := rate.NewRate(rateLimitAddSize(c.RateLimit))
 	r.SetFlowSource(func() int64 {
+		c.RLock()
 		f := c.Flow
+		c.RUnlock()
 		if f == nil {
 			return 0
 		}
@@ -274,9 +327,17 @@ func rateLimitAddSize(limit int) int64 {
 //     往旧对象里记数，而面板读的是新对象 —— 表现是"网速一直是 0，可明明在跑"；
 //   - 旧对象的采样 ticker 永远不停，于是客户端每上报一次配置就泄漏一个 goroutine。
 func syncClientRate(existing *Client, c *Client) {
-	if existing != nil && existing.Rate != nil {
-		c.RateLimit = existing.RateLimit
-		c.Rate = existing.Rate
+	if existing != nil && existing != c {
+		existing.RLock()
+		rateLimit, clientRate := existing.RateLimit, existing.Rate
+		existing.RUnlock()
+		if clientRate != nil {
+			c.RateLimit = rateLimit
+			c.Rate = clientRate
+			return
+		}
+	}
+	if existing == c && c.Rate != nil {
 		return
 	}
 	c.Rate = NewClientRate(c)
@@ -304,10 +365,8 @@ func ValidVerifyKey(k string) bool {
 }
 
 func (s *DbUtils) NewClient(c *Client) error {
-	// 客户端注册上限（数据层统一校验，所有入口生效；0=不限）
-	// 合成条目（NoStore：内置公共 vkey 客户端）不计入配额，也不受配额限制（复评🟠2）
-	if MaxClients > 0 && !c.NoStore && s.GetClientCount() >= MaxClients {
-		return errors.New(fmt.Sprintf("client count %d >= max_clients %d", s.GetClientCount(), MaxClients))
+	if c == nil {
+		return errors.New("client is nil")
 	}
 	var isNotSet bool
 	// 客户端 web 密码统一哈希：bridge 的 pub 模式注册会将客户端配置里的明文
@@ -320,6 +379,17 @@ func (s *DbUtils) NewClient(c *Client) error {
 		}
 		c.WebPassword = h
 	}
+
+	// 配额检查、唯一性检查、Id 分配与写入必须作为一个注册事务串行完成。
+	// 否则并发 NEW_CONF / 面板注册会同时看到“还有一个名额”，最终突破 max_clients。
+	clientCreateLock.Lock()
+	defer clientCreateLock.Unlock()
+
+	existing, _ := s.GetClient(c.Id)
+	isNew := existing == nil
+	if MaxClients > 0 && !c.NoStore && isNew && s.GetClientCount() >= MaxClients {
+		return errors.New(fmt.Sprintf("client count %d >= max_clients %d", s.GetClientCount(), MaxClients))
+	}
 	if c.WebUserName != "" && !s.VerifyUserName(c.WebUserName, c.Id) {
 		return errors.New("web login username duplicate, please reset")
 	}
@@ -328,7 +398,6 @@ reset:
 		isNotSet = true
 		c.VerifyKey = crypt.GetVkey()
 	}
-	existing, _ := s.GetClient(c.Id)
 	syncClientRate(existing, c)
 	c.Rate.Start()
 	if !s.VerifyVkey(c.VerifyKey, c.Id) {
@@ -349,14 +418,25 @@ reset:
 	s.JsonDb.Clients.Store(c.Id, c)
 	clientIdLock.Unlock()
 	// 落盘失败必须冒泡：调用方（面板/桥接注册）以为保存成功，重启后这条记录就没了。
-	return s.JsonDb.StoreClientsToJsonFile()
+	if err := s.JsonDb.StoreClientsToJsonFile(); err != nil {
+		if existing != nil {
+			s.JsonDb.Clients.Store(existing.Id, existing)
+		} else {
+			s.JsonDb.Clients.Delete(c.Id)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
 	res = true
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if v.VerifyKey == vkey && v.Id != id {
+		v.RLock()
+		existingKey, existingID := v.VerifyKey, v.Id
+		v.RUnlock()
+		if existingKey == vkey && existingID != id {
 			res = false
 			return false
 		}
@@ -369,7 +449,10 @@ func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
 	res = true
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if v.WebUserName == username && v.Id != id {
+		v.RLock()
+		existingName, existingID := v.WebUserName, v.Id
+		v.RUnlock()
+		if existingName == username && existingID != id {
 			res = false
 			return false
 		}
@@ -379,43 +462,61 @@ func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
 }
 
 func (s *DbUtils) UpdateClient(t *Client) error {
+	if t == nil {
+		return errors.New("client is nil")
+	}
+	clientCreateLock.Lock()
+	defer clientCreateLock.Unlock()
 	// 先取旧条目：既要比较 RateLimit 变化，也要停掉被替换对象的限速器
 	var old *Client
 	if v, ok := s.JsonDb.Clients.Load(t.Id); ok {
 		old = v.(*Client)
 	}
 	oldRateLimit := -1
-	if old != nil {
+	var oldRate *rate.Rate
+	if old != nil && old != t {
+		old.RLock()
 		oldRateLimit = old.RateLimit
+		oldRate = old.Rate
+		old.RUnlock()
 	}
 
+	t.Lock()
+	if old == t {
+		oldRateLimit = t.RateLimit
+		oldRate = t.Rate
+	}
 	// web 密码防呆：与 NewClient 同口径，避免经编辑接口写入明文（复评🟡）
 	if t.WebPassword != "" && !strings.HasPrefix(t.WebPassword, "$2") {
 		h, herr := common.HashPassword(t.WebPassword)
 		if herr != nil {
+			t.Unlock()
 			return herr
 		}
 		t.WebPassword = h
 	}
 
 	s.JsonDb.Clients.Store(t.Id, t)
-
-	// 旧对象被替换时停掉其限速器，避免 ticker 泄漏
-	if old != nil && old != t && old.Rate != nil {
-		old.Rate.Stop()
-	}
+	var newRate *rate.Rate
 
 	// 仅在限速值变化或新对象尚未持有限速器时重建。
 	// 原实现只在 RateLimit==0 时重建，导致「从不限速改为限速」不生效（复评🟡）。
 	if oldRateLimit != t.RateLimit || t.Rate == nil {
-		if t.Rate != nil {
-			t.Rate.Stop()
-			t.Rate = nil
-		}
-		t.Rate = NewClientRate(t)
-		t.Rate.Start()
+		newRate = NewClientRate(t)
+		t.Rate = newRate
 	}
-	return nil
+	t.Unlock()
+
+	// 服务端主动轮换限速器时停掉旧采样器，避免 ticker 泄漏。
+	if newRate != nil {
+		if oldRate != nil && oldRate != newRate {
+			oldRate.Stop()
+		}
+		newRate.Start()
+	}
+	// UpdateClient 是“写入并持久化”的统一入口。只改内存却返回 nil 会让调用方
+	//（IP 白名单授权等）误以为已经保存；flow_store_interval=0 时甚至永远不会落盘。
+	return s.JsonDb.StoreClientsToJsonFile()
 }
 
 func (s *DbUtils) IsPubClient(id int) bool {
@@ -440,13 +541,13 @@ func (s *DbUtils) GetGlobal() (c *Glob) {
 }
 
 // SaveQuickCmds 持久化快捷命令（面板服务器存储）
-func (s *DbUtils) SaveQuickCmds(q *QuickCmds) {
+func (s *DbUtils) SaveQuickCmds(q *QuickCmds) error {
 	// Quick 是**裸指针**字段：原来的写法在并发「保存」与「读取」之间是数据竞争
 	// （两个管理员同时点保存、或保存的同时有人在开终端页）。用一个锁把指针换手护住。
 	s.JsonDb.quickMu.Lock()
 	s.JsonDb.Quick = q
 	s.JsonDb.quickMu.Unlock()
-	s.JsonDb.StoreQuickCmdsToJsonFile()
+	return s.JsonDb.StoreQuickCmdsToJsonFile()
 }
 
 func (s *DbUtils) GetQuickCmds() *QuickCmds {
@@ -462,7 +563,10 @@ func (s *DbUtils) GetClientIdByVkey(vkey string) (id int, err error) {
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if common.ConstantTimeStrEq(crypt.Md5(v.VerifyKey), vkey) {
+		v.RLock()
+		verifyKey := v.VerifyKey
+		v.RUnlock()
+		if common.ConstantTimeStrEq(crypt.Md5(verifyKey), vkey) {
 			exist = true
 			id = v.Id
 			return false
@@ -480,9 +584,12 @@ func (s *DbUtils) GetClientByVkey(vkey string) (c *Client, err error) {
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
+		v.RLock()
+		verifyKey := v.VerifyKey
+		v.RUnlock()
 		// 与 GetClientIdByVkey 同口径：vkey 是连接凭据，比较走恒定时间，
 		// 别让响应时间泄露"前缀对了几位"。
-		if common.ConstantTimeStrEq(fmt.Sprintf("%x", md5.Sum([]byte(v.VerifyKey))), vkey) {
+		if common.ConstantTimeStrEq(fmt.Sprintf("%x", md5.Sum([]byte(verifyKey))), vkey) {
 			exist = true
 			c = v
 			return false
@@ -515,6 +622,12 @@ func (c *Client) AddIpWhite(ip string) bool {
 	}
 	c.IpWhiteList = append(c.IpWhiteList, ip)
 	return true
+}
+
+func (c *Client) RemoveIpWhite(ip string) {
+	c.Lock()
+	defer c.Unlock()
+	c.IpWhiteList = common.RemoveArrVal(c.IpWhiteList, ip)
 }
 
 func (s *DbUtils) GetHostById(id int) (h *Host, err error) {

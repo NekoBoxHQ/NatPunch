@@ -42,8 +42,11 @@ func InitFromCsv() {
 	//Add a public password
 	if vkey := beego.AppConfig.String("public_vkey"); vkey != "" {
 		c := file.NewClient(vkey, true, true)
-		file.GetDb().NewClient(c)
-		RunList.Store(c.Id, nil)
+		if err := file.GetDb().NewClient(c); err != nil {
+			logs.Error("initialize public vkey client: %v", err)
+		} else {
+			RunList.Store(c.Id, nil)
+		}
 		//RunList[c.Id] = nil
 	}
 	//Initialize services in server-side files
@@ -93,18 +96,30 @@ func StartNewServer(bridgePort int, cnf *file.Tunnel, bridgeType string, bridgeD
 	tool.StartIORateCollector()
 	// 启动公网 IPv4 定时刷新（30 分钟自动重查，失败保留旧值）
 	startPublicIPRefresher()
-	go func() {
-		if err := Bridge.StartTunnel(); err != nil {
-			logs.Error("start server bridge error", err)
-			os.Exit(0)
-		}
-	}()
+	if bridgeType == "kcp" {
+		// KCP 的 Accept 循环会阻塞到监听关闭，必须留在独立 goroutine。
+		go func() {
+			if err := Bridge.StartTunnel(); err != nil {
+				logs.Error("start server bridge error", err)
+				os.Exit(1)
+			}
+		}()
+	} else if err := Bridge.StartTunnel(); err != nil {
+		// TCP 桥接监听同步绑定；端口冲突时立即让服务管理器记录明确错误，
+		// 而不是留下一个“进程活着、客户端全连不上”的半启动状态。
+		logs.Error("start server bridge error", err)
+		os.Exit(1)
+	}
 	go DealBridgeTask()
 	go dealClientFlow()
 	go dealClientExpire()
 	if svr := NewMode(Bridge, cnf); svr != nil {
 		if err := svr.Start(); err != nil {
 			logs.Error(err)
+			if cnf.Mode == "webServer" {
+				os.Exit(1)
+			}
+			return
 		}
 		RunList.Store(cnf.Id, svr)
 		//RunList[cnf.Id] = svr
@@ -147,10 +162,13 @@ func checkClientExpire() {
 		if !ok || v == nil {
 			return true
 		}
-		if v.ExpireTime == "" || !v.Status {
+		v.RLock()
+		expireTime, enabled, remark := v.ExpireTime, v.Status, v.Remark
+		v.RUnlock()
+		if expireTime == "" || !enabled {
 			return true
 		}
-		t, err := time.ParseInLocation("2006-01-02 15:04:05", v.ExpireTime, time.Local)
+		t, err := time.ParseInLocation("2006-01-02 15:04:05", expireTime, time.Local)
 		if err != nil {
 			return true
 		}
@@ -161,7 +179,7 @@ func checkClientExpire() {
 		v.Status = false
 		v.Unlock()
 		changed = true
-		logs.Info("client id %d (remark: %s) expired at %s, auto paused", v.Id, v.Remark, v.ExpireTime)
+		logs.Info("client id %d (remark: %s) expired at %s, auto paused", v.Id, remark, expireTime)
 		DelClientConnect(v.Id)
 		return true
 	})
@@ -286,9 +304,17 @@ func StopServer(id int) error {
 		}
 		RunList.Delete(id)
 		if t, err := file.GetDb().GetTask(id); err == nil {
+			t.Lock()
 			t.Status = false
-			logs.Info("close port %d,remark %s,client id %d,task id %d", t.Port, t.Remark, t.Client.Id, t.Id)
-			file.GetDb().UpdateTask(t)
+			t.Unlock()
+			t.RLock()
+			port, remark, clientID, taskID := t.Port, t.Remark, 0, t.Id
+			if t.Client != nil {
+				clientID = t.Client.Id
+			}
+			t.RUnlock()
+			logs.Info("close port %d,remark %s,client id %d,task id %d", port, remark, clientID, taskID)
+			return file.GetDb().UpdateTask(t)
 		}
 		return nil
 	}
@@ -297,6 +323,9 @@ func StopServer(id int) error {
 
 // add task
 func AddTask(t *file.Tunnel) error {
+	if t == nil || (t.Mode != "httpHostServer" && t.Client == nil) {
+		return errors.New("task or client is nil")
+	}
 	if t.Mode == "shadowsocks" {
 		// 归一化密钥，顺手**治好存量**：t 就是库里那个对象，这里改完立刻落盘，
 		// 所以启动时那条"建出来了但 RunStatus=false"的记录会在下次重启自愈。
@@ -304,9 +333,16 @@ func AddTask(t *file.Tunnel) error {
 		// **唯一漏斗** —— 开机自启动、面板、桥下发的 start 全走它。库里的值可能是
 		// 别的入口写进去的、也可能是这功能刚上线时面板还没做校验存下来的口令，
 		// 在这里收口，就再没有"密钥不合法导致隧道静默起不来"这条路了。
-		if fixed := crypt.NormalizeShadowsocksPSK(t.Password); fixed != t.Password {
+		t.RLock()
+		currentPassword := t.Password
+		t.RUnlock()
+		if fixed := crypt.NormalizeShadowsocksPSK(currentPassword); fixed != currentPassword {
+			t.Lock()
 			t.Password = fixed
-			file.GetDb().UpdateTask(t)
+			t.Unlock()
+			if err := file.GetDb().UpdateTask(t); err != nil {
+				return err
+			}
 		}
 	}
 	if t.Mode != "httpHostServer" {
@@ -325,9 +361,13 @@ func AddTask(t *file.Tunnel) error {
 		logs.Info("tunnel task %s start mode：%s port %d", t.Remark, t.Mode, t.Port)
 		//RunList[t.Id] = svr
 		RunList.Store(t.Id, svr)
+		clientID := 0
+		if t.Client != nil {
+			clientID = t.Client.Id
+		}
 		go func() {
 			if err := svr.Start(); err != nil {
-				logs.Error("clientId %d taskId %d start error %s", t.Client.Id, t.Id, err)
+				logs.Error("clientId %d taskId %d start error %s", clientID, t.Id, err)
 				//delete(RunList, t.Id)
 				RunList.Delete(t.Id)
 				return
@@ -351,7 +391,10 @@ func StartTask(id int) error {
 	t.Lock()
 	t.Status = true
 	t.Unlock()
-	file.GetDb().UpdateTask(t)
+	if err := file.GetDb().UpdateTask(t); err != nil {
+		_ = StopServer(id)
+		return err
+	}
 	return nil
 }
 
@@ -372,18 +415,29 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 	// collect + fill runtime fields before sort/paginate
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*file.Tunnel)
+		v.RLock()
+		tunnelID, tunnelPort := v.Id, v.Port
+		tunnelMode, tunnelPassword, tunnelRemark := v.Mode, v.Password, v.Remark
+		client, target := v.Client, v.Target
+		v.RUnlock()
+		clientID := 0
+		if client != nil {
+			client.RLock()
+			clientID = client.Id
+			client.RUnlock()
+		}
 		if typeVal == "tcp+udp" {
 			// 隧道管理页：库里存的双端隧道 Mode 就是 "tcp+udp"，单协议 tcp / udp 已弃用
-			if v.Mode != "tcp+udp" {
+			if tunnelMode != "tcp+udp" {
 				return true
 			}
 			// 本分支原来完全不看 clientId：非管理员只要把 type 传成 "tcp+udp"
 			// 就能列出全部客户端的 tcp/udp 隧道，而每一行都内嵌完整 Client
 			// （含明文 VerifyKey 与 WebPassword 哈希）。这里补齐归属过滤。
-			if clientId != 0 && (v.Client == nil || v.Client.Id != clientId) {
+			if clientId != 0 && clientID != clientId {
 				return true
 			}
-		} else if (typeVal != "" && v.Mode != typeVal) || (clientId != 0 && (v.Client == nil || v.Client.Id != clientId)) {
+		} else if (typeVal != "" && tunnelMode != typeVal) || (clientId != 0 && clientID != clientId) {
 			// 归一到「按类型过滤」+「按归属过滤」两件事。
 			// 原来还多挂了一条 `|| (typeVal == "" && clientId != v.Client.Id)`：
 			// 只要 type 是空的（例如 /index/all 没带 client_id），管理员也会被
@@ -392,23 +446,25 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string, s
 		}
 		if search != "" {
 			targetStr := ""
-			if v.Target != nil {
-				targetStr = v.Target.TargetStr
+			if target != nil {
+				target.RLock()
+				targetStr = target.TargetStr
+				target.RUnlock()
 			}
-			if !(v.Id == common.GetIntNoErrByStr(search) || v.Port == common.GetIntNoErrByStr(search) || strings.Contains(v.Password, search) || strings.Contains(v.Remark, search) || strings.Contains(targetStr, search)) {
+			if !(tunnelID == common.GetIntNoErrByStr(search) || tunnelPort == common.GetIntNoErrByStr(search) || strings.Contains(tunnelPassword, search) || strings.Contains(tunnelRemark, search) || strings.Contains(targetStr, search)) {
 				return true
 			}
 		}
 		// 运行时字段原本是在这读路径里裸写的，而同一对象会被另一个 goroutine
 		// 序列化（列表接口 / tasks.json 落盘）—— 写 string/bool 与读并发。
 		// 这里统一走各自的写锁；锁只覆盖赋值，不覆盖后面的序列化（会自锁）。
-		if v.Client != nil {
-			_, connected := Bridge.Client.Load(v.Client.Id)
-			v.Client.Lock()
-			v.Client.IsConnect = connected
-			v.Client.Unlock()
+		if client != nil {
+			_, connected := Bridge.Client.Load(clientID)
+			client.Lock()
+			client.IsConnect = connected
+			client.Unlock()
 		}
-		_, running := RunList.Load(v.Id)
+		_, running := RunList.Load(tunnelID)
 		v.Lock()
 		v.RunStatus = running
 		v.Unlock()
@@ -448,7 +504,7 @@ func dealClientData() {
 		if ok {
 			v.IsConnect = true
 			v.LastOnlineTime = time.Now().Format("2006-01-02 15:04:05")
-			v.Version = vv.(*bridge.Client).Version
+			v.Version = vv.(*bridge.Client).GetVersion()
 		} else {
 			v.IsConnect = false
 		}
@@ -462,11 +518,20 @@ func DelTunnelAndHostByClientId(clientId int, justDelNoStore bool) {
 	var ids []int
 	file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*file.Tunnel)
-		if justDelNoStore && !v.NoStore {
+		v.RLock()
+		noStore, client := v.NoStore, v.Client
+		id := v.Id
+		v.RUnlock()
+		if justDelNoStore && !noStore {
 			return true
 		}
-		if v.Client.Id == clientId {
-			ids = append(ids, v.Id)
+		if client != nil {
+			client.RLock()
+			ownerID := client.Id
+			client.RUnlock()
+			if ownerID == clientId {
+				ids = append(ids, id)
+			}
 		}
 		return true
 	})
@@ -476,11 +541,20 @@ func DelTunnelAndHostByClientId(clientId int, justDelNoStore bool) {
 	ids = ids[:0]
 	file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
 		v := value.(*file.Host)
-		if justDelNoStore && !v.NoStore {
+		v.RLock()
+		noStore, client := v.NoStore, v.Client
+		id := v.Id
+		v.RUnlock()
+		if justDelNoStore && !noStore {
 			return true
 		}
-		if v.Client.Id == clientId {
-			ids = append(ids, v.Id)
+		if client != nil {
+			client.RLock()
+			ownerID := client.Id
+			client.RUnlock()
+			if ownerID == clientId {
+				ids = append(ids, id)
+			}
 		}
 		return true
 	})
@@ -525,16 +599,23 @@ func GetDashboardData(clientId int) map[string]interface{} {
 	var in, out int64
 	file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*file.Client)
-		if ownOnly && v.Id != clientId {
+		v.RLock()
+		clientID := v.Id
+		connected := v.IsConnect
+		flow := v.Flow
+		v.RUnlock()
+		if ownOnly && clientID != clientId {
 			return true
 		}
-		if v.IsConnect {
+		if connected {
 			c += 1
 		}
-		limit, fi, fo := v.Flow.Snapshot()
-		_ = limit
-		in += fi
-		out += fo
+		if flow != nil {
+			limit, fi, fo := flow.Snapshot()
+			_ = limit
+			in += fi
+			out += fo
+		}
 		return true
 	})
 	data["clientOnlineCount"] = c
@@ -614,7 +695,14 @@ func GetDashboardData(clientId int) map[string]interface{} {
 	tcpCount := 0
 
 	file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
-		tcpCount += int(value.(*file.Client).NowConn)
+		client := value.(*file.Client)
+		client.RLock()
+		id := client.Id
+		client.RUnlock()
+		if ownOnly && id != clientId {
+			return true
+		}
+		tcpCount += int(atomic.LoadInt32(&client.NowConn))
 		return true
 	})
 	data["tcpCount"] = tcpCount
@@ -624,8 +712,16 @@ func GetDashboardData(clientId int) map[string]interface{} {
 		cpuAll += v
 	}
 	loads, _ := load.Avg()
-	data["load"] = loads.String()
-	data["cpu"] = math.Round(cpuAll / float64(len(cpuPercet)))
+	if loads != nil {
+		data["load"] = loads.String()
+	} else {
+		data["load"] = "0.00 0.00 0.00"
+	}
+	if len(cpuPercet) > 0 {
+		data["cpu"] = math.Round(cpuAll / float64(len(cpuPercet)))
+	} else {
+		data["cpu"] = float64(0)
+	}
 	swap, _ := mem.SwapMemory()
 	data["swap_mem"] = math.Round(swap.UsedPercent)
 	vir, _ := mem.VirtualMemory()
@@ -681,16 +777,8 @@ func isPrivateIP(ip string) bool {
 	if ip == "" {
 		return true
 	}
-	return strings.HasPrefix(ip, "10.") ||
-		strings.HasPrefix(ip, "172.16.") ||
-		strings.HasPrefix(ip, "172.17.") ||
-		strings.HasPrefix(ip, "172.18.") ||
-		strings.HasPrefix(ip, "172.19.") ||
-		strings.HasPrefix(ip, "172.2") ||
-		strings.HasPrefix(ip, "172.30.") ||
-		strings.HasPrefix(ip, "172.31.") ||
-		strings.HasPrefix(ip, "192.168.") ||
-		strings.HasPrefix(ip, "127.")
+	parsed := stdnet.ParseIP(ip)
+	return parsed == nil || parsed.IsPrivate() || parsed.IsLoopback()
 }
 
 // publicIPCache 缓存公网 IPv4（atomic.Value：页面请求无锁读，后台定期刷新，永不阻塞面板）

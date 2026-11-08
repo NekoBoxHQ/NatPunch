@@ -112,9 +112,13 @@ func (s *Mux) NewConn() (*conn, error) {
 	select {
 	case <-conn.connStatusOkCh:
 		return conn, nil
+	case <-conn.connStatusFailCh:
+		_ = conn.Close()
+		return nil, errors.New("create connection fail，the peer closed the connection")
 	case <-timer.C:
+		_ = conn.Close()
+		return nil, errors.New("create connection fail，the peer did not respond in time")
 	}
-	return nil, errors.New("create connection fail，the server refused the connection")
 }
 
 func (s *Mux) Accept() (net.Conn, error) {
@@ -344,6 +348,12 @@ func (s *Mux) readSession() {
 				case muxConnClose: //close the connection
 					connection.closingFlag.Store(true)
 					connection.receiveWindow.Stop() // close signal to receive window
+					// 对端在 NewConn 等待期间就拒绝/关闭时，必须立即唤醒等待者；
+					// 否则调用方会白等两分钟，连接还会一直留在 connMap 里。
+					select {
+					case connection.connStatusFailCh <- struct{}{}:
+					default:
+					}
 					continue
 				}
 			} else if pack.flag == muxConnClose {

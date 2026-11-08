@@ -117,9 +117,13 @@ func run() {
 	if *verifyKey != "" && *serverAddr != "" && *configPath == "" {
 		client.SetTlsEnable(*tlsEnable)
 		client.SetTlsFingerprint(*tlsFingerprint)
+		if *tlsEnable && *connType != "tcp" {
+			logs.Error("tls_enable 仅支持 tcp 桥接；kcp 模式请关闭 tls_enable")
+			os.Exit(1)
+		}
 		if *tlsEnable && *tlsStrict && *tlsFingerprint == "" {
 			logs.Error("tls_strict=true 但未配置 tls_fingerprint，拒绝启动（F2-2）")
-			os.Exit(0)
+			os.Exit(1)
 		}
 		logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), client.GetTlsEnable())
 
@@ -128,7 +132,7 @@ func run() {
 			key := key
 			go func() {
 				for {
-					logs.Info("start vkey:" + key)
+					logs.Info("start vkey:%s", common.MaskSecret(key))
 					client.NewRPClient(*serverAddr, key, *connType, *proxyUrl, nil, *disconnectTime).Start()
 					logs.Info("Client closed! It will be reconnected in five seconds")
 					time.Sleep(time.Second * 5)

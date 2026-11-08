@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ import (
 //
 // 面板原有的两条登录路径（natpunch.conf 里的单管理员账号、clients.json 里的客户端账号）
 // 都只认本地口令，且都是"先验证本地凭据、再写会话"。GitHub 登录是**新增的第三条入口**，
-// 不改动前两条的任何行为：只有 GitHub 用户名命中 github_admin_login 白名单的账号才放行，
+// 不改动前两条的任何行为：只有 GitHub 数字 ID 命中 github_admin_ids 白名单的账号才放行，
 // 且只能拿到管理员会话（不做客户端账号映射，客户端账号仍走本地口令）。
 //
 // 下面四个键**缺任意一个即视为未启用**（fail-closed）。宁可登录按钮不出现，
@@ -31,7 +32,7 @@ import (
 //	github_oauth_enable = true
 //	github_client_id    = <OAuth App 的 Client ID>
 //	github_client_secret= <OAuth App 的 Client Secret>
-//	github_admin_login  = <允许登录的 GitHub 用户名，逗号分隔>
+//	github_admin_ids    = <允许登录的 GitHub 数字用户 ID，逗号分隔>
 const (
 	githubAuthorizeURL = "https://github.com/login/oauth/authorize"
 	githubTokenURL     = "https://github.com/login/oauth/access_token"
@@ -67,26 +68,32 @@ type githubUser struct {
 }
 
 // githubOAuthConf 读取并校验 GitHub 登录配置。
-// enabled 为 false 时其余返回值无意义；adminLogins 已统一小写、去空白。
-func githubOAuthConf() (enabled bool, clientId, clientSecret, callbackURL string, adminLogins []string) {
+// enabled 为 false 时其余返回值无意义；adminIDs 只保留解析成功的正整数。
+func githubOAuthConf() (enabled bool, clientId, clientSecret, callbackURL string, adminIDs []int64) {
 	if b, err := beego.AppConfig.Bool("github_oauth_enable"); err != nil || !b {
 		return false, "", "", "", nil
 	}
 	clientId = strings.TrimSpace(beego.AppConfig.String("github_client_id"))
 	clientSecret = strings.TrimSpace(beego.AppConfig.String("github_client_secret"))
 	callbackURL = strings.TrimSpace(beego.AppConfig.String("github_callback_url"))
-	for _, v := range strings.FieldsFunc(beego.AppConfig.String("github_admin_login"), func(r rune) bool {
-		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
-	}) {
-		if v = strings.ToLower(strings.TrimSpace(v)); v != "" {
-			adminLogins = append(adminLogins, v)
-		}
-	}
-	if clientId == "" || clientSecret == "" || len(adminLogins) == 0 {
+	adminIDs = parseGithubAdminIDs(beego.AppConfig.String("github_admin_ids"))
+	if clientId == "" || clientSecret == "" || len(adminIDs) == 0 {
 		warnGithubOAuthIncomplete()
 		return false, "", "", "", nil
 	}
-	return true, clientId, clientSecret, callbackURL, adminLogins
+	return true, clientId, clientSecret, callbackURL, adminIDs
+}
+
+func parseGithubAdminIDs(raw string) (adminIDs []int64) {
+	for _, v := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		id, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err == nil && id > 0 {
+			adminIDs = append(adminIDs, id)
+		}
+	}
+	return adminIDs
 }
 
 var githubOAuthWarnOnce sync.Once
@@ -96,7 +103,7 @@ var githubOAuthWarnOnce sync.Once
 // 所以必须给个线索；sync.Once 保证只吼一次，不会刷爆日志。
 func warnGithubOAuthIncomplete() {
 	githubOAuthWarnOnce.Do(func() {
-		logs.Warn("GitHub OAuth 开关已打开（github_oauth_enable=true），但 github_client_id / github_client_secret / github_admin_login 有未填项，该功能不会生效")
+		logs.Warn("GitHub OAuth 开关已打开（github_oauth_enable=true），但 github_client_id / github_client_secret / github_admin_ids 有未填项，该功能不会生效")
 	})
 }
 
@@ -124,7 +131,9 @@ func (self *LoginController) githubRequestScheme() string {
 		return "https"
 	}
 	if proto := self.Ctx.Request.Header.Get("X-Forwarded-Proto"); proto != "" {
-		return proto
+		if strings.EqualFold(strings.TrimSpace(proto), "https") {
+			return "https"
+		}
 	}
 	return "http"
 }
@@ -200,7 +209,7 @@ func (self *LoginController) GithubLogin() {
 // GithubCallback GET /login/github/callback：校验 state → code 换 token → 读用户 → 白名单放行。
 func (self *LoginController) GithubCallback() {
 	webBaseUrl := beego.AppConfig.String("web_base_url")
-	enabled, clientId, clientSecret, configuredCallback, adminLogins := githubOAuthConf()
+	enabled, clientId, clientSecret, configuredCallback, adminIDs := githubOAuthConf()
 	if !enabled {
 		self.Redirect(webBaseUrl+"/login/index", 302)
 		return
@@ -253,9 +262,9 @@ func (self *LoginController) GithubCallback() {
 		return
 	}
 
-	if !githubIsAdmin(user.Login, adminLogins) {
+	if !githubIsAdmin(user.Id, adminIDs) {
 		self.recordLoginFailure(ip, true)
-		logs.Warn("GitHub 登录：账号 [%s] (id %d) 不在管理员白名单，拒绝，客户端 IP [%s]", user.Login, user.Id, ip)
+		logs.Warn("GitHub 登录：账号 [%s] (id %d) 不在管理员 ID 白名单，拒绝，客户端 IP [%s]", user.Login, user.Id, ip)
 		self.failGithubLogin("notadmin")
 		return
 	}
@@ -382,14 +391,14 @@ func githubFetchUser(token string) (githubUser, error) {
 	return u, nil
 }
 
-// githubIsAdmin GitHub 用户名是否在白名单内（不区分大小写）。
-func githubIsAdmin(login string, adminLogins []string) bool {
-	login = strings.ToLower(strings.TrimSpace(login))
-	if login == "" {
+// githubIsAdmin 只按不可变的 GitHub 数字 ID 授权。用户名可修改且旧名字可能被
+// 他人重新注册，不能作为长期管理员身份。
+func githubIsAdmin(id int64, adminIDs []int64) bool {
+	if id <= 0 {
 		return false
 	}
-	for _, a := range adminLogins {
-		if a == login {
+	for _, allowed := range adminIDs {
+		if allowed == id {
 			return true
 		}
 	}

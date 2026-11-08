@@ -113,6 +113,7 @@ func (s *httpServer) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	host, err = file.GetDb().GetInfoByHost(r.Host, r)
 	if err != nil {
 		logs.Debug("the url %s %s %s can't be parsed!", r.URL.Scheme, r.Host, r.RequestURI)
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
@@ -205,14 +206,27 @@ reset:
 		c.Close()
 		return
 	}
+	hostClient := host.Client
+	hostClient.RLock()
+	clientID := hostClient.Id
+	authUser, authPassword := hostClient.Cnf.U, hostClient.Cnf.P
+	ipWhite, ipWhitePass := hostClient.IpWhite, hostClient.IpWhitePass
+	verifyKey := hostClient.VerifyKey
+	whiteList := append([]string(nil), hostClient.IpWhiteList...)
+	blackIPList := append([]string(nil), hostClient.BlackIpList...)
+	clientFlow, clientRate := hostClient.Flow, hostClient.Rate
+	hostClient.RUnlock()
+	host.RLock()
+	hostFlow := host.Flow
+	host.RUnlock()
 
-	if err := s.CheckFlowAndConnNum(host.Client); err != nil {
-		logs.Warn("client id %d, host id %d, error %s, when https connection", host.Client.Id, host.Id, err.Error())
+	if err := s.CheckFlowAndConnNum(hostClient); err != nil {
+		logs.Warn("client id %d, host id %d, error %s, when https connection", clientID, host.Id, err.Error())
 		c.Close()
 		return
 	}
-	countedClient = host.Client // 登记占用，由 releaseCounted 统一释放（阶段三 #7）
-	if err = s.auth(r, c, host.Client.Cnf.U, host.Client.Cnf.P); err != nil {
+	countedClient = hostClient // 登记占用，由 releaseCounted 统一释放（阶段三 #7）
+	if err = s.auth(r, c, authUser, authPassword); err != nil {
 		logs.Warn("auth error", err, r.RemoteAddr)
 		return
 	}
@@ -221,12 +235,8 @@ reset:
 		return
 	}
 
-	if host.Client.IpWhite && host.Client.IpWhitePass != "" {
-		// IpWhiteList 会被授权成功路径并发 append，这里在锁下取快照再用
-		host.Client.RLock()
-		whiteList := host.Client.IpWhiteList
-		host.Client.RUnlock()
-		if common.IsAuthIp(c.RemoteAddr().String(), host.Client.VerifyKey, whiteList) {
+	if ipWhite && ipWhitePass != "" {
+		if common.IsAuthIp(c.RemoteAddr().String(), verifyKey, whiteList) {
 
 			if r.URL.Path == "/authIp" {
 				var jsonBytes []byte
@@ -236,19 +246,24 @@ reset:
 				pass := r.URL.Query().Get("pass")
 
 				if pass == "" {
-					logs.Error("客户端IP白名单认证授权参数错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
+					logs.Error("客户端IP白名单认证授权参数错误:host [%d] client [%d] ip [%s]", host.Id, clientID, ip)
 					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "参数错误"})
-				} else if common.ConstantTimeStrEq(pass, host.Client.IpWhitePass) {
+				} else if common.ConstantTimeStrEq(pass, ipWhitePass) {
 					// copy-on-write：不要原地改已经发布出去的切片（读者正持有它）
-					host.Client.Lock()
-					host.Client.IpWhiteList = append(append([]string(nil), host.Client.IpWhiteList...), ip)
-					host.Client.Unlock()
-					file.GetDb().UpdateClient(host.Client)
-					logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
-					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+					hostClient.Lock()
+					hostClient.IpWhiteList = append(append([]string(nil), hostClient.IpWhiteList...), ip)
+					hostClient.Unlock()
+					if err := file.GetDb().UpdateClient(hostClient); err != nil {
+						logs.Warn("save ip whitelist: %v", err)
+						hostClient.RemoveIpWhite(ip)
+						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "保存失败"})
+					} else {
+						logs.Info("客户端IP白名单认证授权成功:host [%d] client [%d] ip [%s]", host.Id, clientID, ip)
+						jsonBytes, _ = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+					}
 				} else {
 					// 不打印密码（阶段三 #18 日志脱敏）
-					logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s]", host.Client.VerifyKey, ip)
+					logs.Error("客户端IP白名单认证授权密码错误:host [%d] client [%d] ip [%s]", host.Id, clientID, ip)
 					jsonBytes, _ = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
 				}
 				// 直接把响应写给这个连接。原来写进 s.errorContent 由 defer 里的
@@ -270,27 +285,31 @@ reset:
 	}
 
 	// 判断访问地址是否在黑名单内
-	if common.IsBlackIp(c.RemoteAddr().String(), host.Client.VerifyKey, host.Client.BlackIpList) {
+	if common.IsBlackIp(c.RemoteAddr().String(), verifyKey, blackIPList) {
 		c.Close()
 		return
 	}
 
-	lk = conn.NewLink("http", targetAddr, host.Client.Cnf.Crypt, host.Client.Cnf.Compress, r.RemoteAddr, host.Target.LocalProxy, "")
-	if target, err = s.bridge.SendLinkInfo(host.Client.Id, lk, nil); err != nil {
+	_, localProxy := host.Target.SnapshotTarget()
+	hostClient.RLock()
+	cryptEnabled, compressEnabled := hostClient.Cnf.Crypt, hostClient.Cnf.Compress
+	hostClient.RUnlock()
+	lk = conn.NewLink("http", targetAddr, cryptEnabled, compressEnabled, r.RemoteAddr, localProxy, "")
+	if target, err = s.bridge.SendLinkInfo(clientID, lk, nil); err != nil {
 		logs.Notice("connect to target %s error %s", lk.Host, err)
 		return
 	}
 	// 本代连接的句柄显式传进 goroutine。原来闭包直接引用外层的 connClient / host，
 	// 而它们在 keep-alive 换 host 时会被重新赋值 —— 旧 goroutine 退出时的
 	// defer connClient.Close() 关掉的其实是**新**连接。
-	cc := conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
+	cc := conn.GetConn(target, lk.Crypt, lk.Compress, clientRate, true)
 	connClient = cc
 	rf := &atomic.Bool{}
 	resetFlag = rf
 
 	//read from inc-client
 	wg.Add(1)
-	go func(cc io.ReadWriteCloser, h *file.Host, rf *atomic.Bool) {
+	go func(cc io.ReadWriteCloser, h *file.Host, flow *file.Flow, rf *atomic.Bool) {
 		defer cc.Close()
 		defer func() {
 			wg.Done()
@@ -299,10 +318,10 @@ reset:
 			}
 		}()
 
-		if err1 := goroutine.CopyBuffer(c, cc, h.Client.Flow, nil, h, "", goroutine.DirToPublic); err1 != nil {
+		if err1 := goroutine.CopyBuffer(c, cc, flow, nil, h, "", goroutine.DirToPublic); err1 != nil {
 			return
 		}
-	}(cc, host, rf)
+	}(cc, host, clientFlow, rf)
 
 	for {
 		//if the cache start and the request is in the cache list, return the cache
@@ -314,8 +333,8 @@ reset:
 				}
 				logs.Trace("%s request, method %s, host %s, url %s, remote address %s, return cache", r.URL.Scheme, r.Method, r.Host, r.URL.Path, c.RemoteAddr().String())
 				// 服务端 -> 公网用户 = 下载
-				host.Client.Flow.Add(0, int64(n))
-				host.Flow.Add(0, int64(n))
+				clientFlow.Add(0, int64(n))
+				hostFlow.Add(0, int64(n))
 				//if return cache and does not create a new conn with client and Connection is not set or close, close the connection.
 				if strings.ToLower(r.Header.Get("Connection")) == "close" || strings.ToLower(r.Header.Get("Connection")) == "" {
 					break
@@ -345,8 +364,8 @@ reset:
 		}
 		firstReq = false
 		// 公网请求 -> 隧道(客户端) = 上传
-		host.Client.Flow.Add(int64(lenConn.Len), 0)
-		host.Flow.Add(int64(lenConn.Len), 0)
+		clientFlow.Add(int64(lenConn.Len), 0)
+		hostFlow.Add(int64(lenConn.Len), 0)
 
 	readReq:
 		//read req from connection
@@ -524,7 +543,7 @@ func (s *httpServer) NewServerWithTls(port int, scheme string, l net.Listener, c
 	var certFileByte = []byte(certFile)
 	var keyFileByte = []byte(keyFile)
 
-	config := &tls.Config{}
+	config := &tls.Config{MinVersion: tls.VersionTLS12}
 	config.Certificates = make([]tls.Certificate, 1)
 
 	var err error
@@ -539,10 +558,31 @@ func (s *httpServer) NewServerWithTls(port int, scheme string, l net.Listener, c
 			r.URL.Scheme = scheme
 			s.handleTunneling(w, r)
 		}),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		// Disable HTTP/2.
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		TLSConfig:    config,
 	}
 
-	return s2.ServeTLS(l, "", "")
+	return s2.ServeTLS(withHandshakeTimeout(l, 10*time.Second), "", "")
+}
+
+type handshakeTimeoutListener struct {
+	net.Listener
+	timeout time.Duration
+}
+
+func withHandshakeTimeout(l net.Listener, timeout time.Duration) net.Listener {
+	return &handshakeTimeoutListener{Listener: l, timeout: timeout}
+}
+
+func (l *handshakeTimeoutListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	_ = c.SetReadDeadline(time.Now().Add(l.timeout))
+	return c, nil
 }

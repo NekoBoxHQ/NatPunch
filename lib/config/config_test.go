@@ -67,6 +67,16 @@ vkey=123`
 	}
 }
 
+func TestDealCommonPreservesEqualsInValues(t *testing.T) {
+	c := dealCommon("basic_username=user\nbasic_password=p=a==\nproxy_url=socks5://u:p@127.0.0.1:1080")
+	if c.Client.Cnf.P != "p=a==" {
+		t.Fatalf("basic_password truncated at '=': got %q", c.Client.Cnf.P)
+	}
+	if c.ProxyUrl != "socks5://u:p@127.0.0.1:1080" {
+		t.Fatalf("proxy_url truncated at '=': got %q", c.ProxyUrl)
+	}
+}
+
 func TestGetTitleContent(t *testing.T) {
 	s := "[common]"
 	if getTitleContent(s) != "common" {

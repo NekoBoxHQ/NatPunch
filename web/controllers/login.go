@@ -4,6 +4,7 @@ import (
 	"github.com/astaxie/beego/cache"
 	"github.com/astaxie/beego/utils/captcha"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ type LoginController struct {
 }
 
 var ipRecord sync.Map
+var ipRecordMu sync.Mutex
 var cpt *captcha.Captcha
 
 type record struct {
@@ -56,6 +58,11 @@ func (self *LoginController) Index() {
 }
 
 func (self *LoginController) Verify() {
+	if self.Ctx.Request.Method != http.MethodPost {
+		self.Ctx.Output.Header("Allow", "POST")
+		self.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+		return
+	}
 	username := self.GetString("username")
 	password := self.GetString("password")
 	captchaOpen, _ := beego.AppConfig.Bool("open_captcha")
@@ -89,7 +96,9 @@ func (self *LoginController) establishAdminSession() {
 func (self *LoginController) finishLogin(ip string) {
 	self.SessionRegenerateID()
 	self.SetSession("auth", true)
+	ipRecordMu.Lock()
 	ipRecord.Delete(ip)
+	ipRecordMu.Unlock()
 }
 
 // loginIP 登录请求的来源 IP（失败限流以它为键）。
@@ -100,6 +109,8 @@ func (self *LoginController) loginIP() string {
 
 // loginBlocked 该 IP 是否已达失败次数上限（10 次/分钟，F2-1）。
 func (self *LoginController) loginBlocked(ip string) bool {
+	ipRecordMu.Lock()
+	defer ipRecordMu.Unlock()
 	v, ok := ipRecord.Load(ip)
 	if !ok {
 		return false
@@ -118,11 +129,12 @@ func (self *LoginController) recordLoginFailure(ip string, explicit bool) {
 	// 不能只依赖 doLogin 开头那次调用：GitHub OAuth 回调也走这里记账，
 	// 若服务端只被 OAuth 失败访问过，ipRecord 就没人清理、无限增长。
 	startIprecordCleaner()
+	ipRecordMu.Lock()
+	defer ipRecordMu.Unlock()
 	if v, load := ipRecord.LoadOrStore(ip, &record{hasLoginFailTimes: 1, lastLoginTime: time.Now()}); load && explicit {
 		vv := v.(*record)
 		vv.lastLoginTime = time.Now()
 		vv.hasLoginFailTimes += 1
-		ipRecord.Store(ip, vv)
 	}
 }
 
@@ -154,38 +166,55 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 	}
 	b, err := beego.AppConfig.Bool("allow_user_login")
 	if err == nil && b && !auth {
+		var matchedClientID int
+		var matched bool
+		var matchedUserName string
 		file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
 			v := value.(*file.Client)
-			if !v.Status || v.NoDisplay {
+			v.RLock()
+			status, noDisplay := v.Status, v.NoDisplay
+			webUserName, webPassword, verifyKey, clientID := v.WebUserName, v.WebPassword, v.VerifyKey, v.Id
+			v.RUnlock()
+			if !status || noDisplay {
 				return true
 			}
-			if v.WebUserName == "" && v.WebPassword == "" {
-				if username != "user" || v.VerifyKey != password {
+			if webUserName == "" && webPassword == "" {
+				if username != "user" || verifyKey != password {
 					return true
 				} else {
 					auth = true
 				}
 			}
 			// 先比用户名再做 bcrypt：bcrypt 很贵，不能对每个客户端都算一遍。
-			if !auth && v.WebUserName == username && common.VerifyPassword(v.WebPassword, password) {
+			if !auth && webUserName == username && common.VerifyPassword(webPassword, password) {
 				auth = true
 				// 存量明文客户端密码：首次成功登录后原地迁移为 bcrypt（F2-3）
-				if !strings.HasPrefix(v.WebPassword, "$2") {
+				if !strings.HasPrefix(webPassword, "$2") {
 					if h, err := common.HashPassword(password); err == nil {
-						v.WebPassword = h
-						file.GetDb().JsonDb.Clients.Store(v.Id, v)
-						file.GetDb().JsonDb.StoreClientsToJsonFile()
+						v.Lock()
+						if v.WebPassword == webPassword {
+							v.WebPassword = h
+						}
+						v.Unlock()
+						if err := file.GetDb().UpdateClient(v); err != nil {
+							logs.Warn("client password migration: persist failed: %v", err)
+						}
 					}
 				}
 			}
 			if auth {
-				self.SetSession("isAdmin", false)
-				self.SetSession("clientId", v.Id)
-				self.SetSession("username", v.WebUserName)
+				matched = true
+				matchedClientID = clientID
+				matchedUserName = webUserName
 				return false
 			}
 			return true
 		})
+		if auth && matched {
+			self.SetSession("isAdmin", false)
+			self.SetSession("clientId", matchedClientID)
+			self.SetSession("username", matchedUserName)
+		}
 	}
 	if auth {
 		self.finishLogin(ip)
@@ -195,6 +224,11 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 	return false
 }
 func (self *LoginController) Register() {
+	if self.Ctx.Request.Method != http.MethodGet && self.Ctx.Request.Method != http.MethodPost {
+		self.Ctx.Output.Header("Allow", "GET, POST")
+		self.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+		return
+	}
 	if self.Ctx.Request.Method == "GET" {
 		self.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
 		self.Data["version"] = version.VERSION
@@ -211,7 +245,7 @@ func (self *LoginController) Register() {
 			return
 		}
 		t := &file.Client{
-			Id:          int(file.GetDb().JsonDb.GetClientId()),
+			Id:          0,
 			Status:      true,
 			Cnf:         &file.Config{},
 			WebUserName: self.GetString("username"),
@@ -283,6 +317,7 @@ func startIprecordCleaner() {
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			for range ticker.C {
+				ipRecordMu.Lock()
 				ipRecord.Range(func(key, value interface{}) bool {
 					v := value.(*record)
 					if time.Now().Unix()-v.lastLoginTime.Unix() >= 60 {
@@ -290,6 +325,7 @@ func startIprecordCleaner() {
 					}
 					return true
 				})
+				ipRecordMu.Unlock()
 			}
 		}()
 	})

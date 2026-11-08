@@ -96,6 +96,11 @@ func main() {
 	// 桥接是否启用 TLS。面板的「TLS 一键命令」也用这个值判断要不要下发证书指纹
 	// （web/controllers/base.go 的 useTls），漏掉这行会让 TLS 桥接静默失效。
 	bridge.ServerTlsEnable = beego.AppConfig.DefaultBool("tls_enable", false)
+	if bridge.ServerTlsEnable && beego.AppConfig.DefaultString("bridge_type", "tcp") != "tcp" {
+		logs.Warn("tls_enable 仅支持 tcp 桥接；bridge_type=%s 时已关闭桥接 TLS（KCP 不提供该 TLS 端点）",
+			beego.AppConfig.DefaultString("bridge_type", "tcp"))
+		bridge.ServerTlsEnable = false
+	}
 
 	// 是否只提供 TLS 桥接（不再监听明文端口）。
 	//   auto（默认）：面板装了证书 + tls_enable=1 → 只留 TLS 口
@@ -157,7 +162,7 @@ func run() {
 	bridgePort, err := beego.AppConfig.Int("bridge_port")
 	if err != nil {
 		logs.Error("Getting bridge_port error", err)
-		os.Exit(0)
+		os.Exit(1)
 	}
 
 	logs.Info("日志路径：" + *natpunchLogPath)
@@ -277,7 +282,7 @@ github_oauth_enable=false
 github_client_id=
 github_client_secret=
 github_callback_url=
-github_admin_login=
+github_admin_ids=
 
 tls_enable=true
 tls_bridge_port=8025

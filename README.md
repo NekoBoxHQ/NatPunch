@@ -285,8 +285,12 @@ uclient-fetch -qO- https://panel.example.com/static/dl/uninstall_client.sh \
 客户端常用启动参数：
 
 ```shell
-natpunch-client -server=<面板域名> -vkey=<VKEY> -type=tcp|kcp \
+# TCP 桥接可启用 TLS
+natpunch-client -server=<面板域名> -vkey=<VKEY> -type=tcp \
                 -tls_enable=true -tls_fingerprint=<SHA256> -tls_strict=true
+
+# KCP 桥接不使用 TLS 端口
+natpunch-client -server=<面板域名> -vkey=<VKEY> -type=kcp
 ```
 
 ---

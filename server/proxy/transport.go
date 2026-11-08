@@ -20,7 +20,8 @@ func HandleTrans(c *conn.Conn, s *TunnelModeServer) error {
 	if addr, err := getAddress(c.Conn); err != nil {
 		return err
 	} else {
-		return s.DealClient(c, s.task.Client, addr, nil, common.CONN_TCP, nil, s.task.Target.LocalProxy, s.task, nil)
+		_, localProxy := s.task.Target.SnapshotTarget()
+		return s.DealClient(c, s.task.Client, addr, nil, common.CONN_TCP, nil, localProxy, s.task, nil)
 	}
 }
 

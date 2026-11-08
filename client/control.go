@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
@@ -117,20 +118,24 @@ func StartFromFile(path string) {
 	cnf, err := config.NewConfig(path)
 	if err != nil {
 		logs.Error("Config file %s loading error %s", path, err.Error())
-		os.Exit(0)
+		os.Exit(1)
 	}
 	// G5：err == nil 但缺 [common] 段时不得解引用 err（阶段三）
 	if cnf.CommonConfig == nil {
 		logs.Error("Config file %s: missing [common] section", path)
-		os.Exit(0)
+		os.Exit(1)
 	}
 	logs.Info("Loading configuration file %s successfully", path)
 
 	SetTlsEnable(cnf.CommonConfig.TlsEnable)
 	SetTlsFingerprint(cnf.CommonConfig.TlsFingerprint)
+	if cnf.CommonConfig.TlsEnable && cnf.CommonConfig.Tp != "tcp" {
+		logs.Error("tls_enable 仅支持 tcp 桥接；kcp 模式请关闭 tls_enable")
+		os.Exit(1)
+	}
 	if cnf.CommonConfig.TlsEnable && cnf.CommonConfig.TlsStrict && cnf.CommonConfig.TlsFingerprint == "" {
 		logs.Error("tls_strict=true 但未配置 tls_fingerprint，拒绝启动（F2-2）")
-		os.Exit(0)
+		os.Exit(1)
 	}
 	logs.Info("the version of client is %s, the core version of client is %s,tls enable is %t", version.VERSION, version.GetVersion(), GetTlsEnable())
 	var c *conn.Conn // 在 re 标签前声明：重连循环各处 goto re 时按需关闭旧连接（阶段三 #5）
@@ -227,9 +232,9 @@ re:
 
 	c.Close()
 	if cnf.CommonConfig.Client.WebUserName == "" || cnf.CommonConfig.Client.WebPassword == "" {
-		logs.Notice("web access login username:user password:%s", vkey)
+		logs.Notice("web access login username:user password:已配置（使用客户端 vkey）")
 	} else {
-		logs.Notice("web access login username:%s password:%s", cnf.CommonConfig.Client.WebUserName, cnf.CommonConfig.Client.WebPassword)
+		logs.Notice("web access login username:%s password:已配置", cnf.CommonConfig.Client.WebUserName)
 	}
 	NewRPClient(cnf.CommonConfig.Server, vkey, cnf.CommonConfig.Tp, cnf.CommonConfig.ProxyUrl, cnf, cnf.CommonConfig.DisconnectTime).Start()
 	goto re
@@ -276,18 +281,18 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 				connection, err = NewHttpProxyConn(u, server)
 			}
 		} else {
-			if GetTlsEnable() {
-				// tls 流量加密（F2-2 三态：配置指纹则严格校验，否则沿用旧行为并告警）
-				if crypt.GetTlsFingerprint() == "" {
-					logs.Warn("TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，不防中间人；建议配置服务端指纹（F2-2）")
-				}
-				// DialWithDialer：TCP 连接与 TLS 握手都受 connectTimeout 约束
-				connection, err = tls.DialWithDialer(bridgeDialer, "tcp", server, crypt.TlsDialConfig())
-			} else {
-				connection, err = bridgeDialer.Dial("tcp", server)
-			}
+			connection, err = bridgeDialer.Dial("tcp", server)
+		}
+		// TLS 必须包在“最终拨号结果”上，代理链路也不例外。否则配置了
+		// proxy_url 时 tls_enable / tls_fingerprint 会静默失效，vkey 握手和隧道
+		// 流量都会以明文穿过代理。
+		if err == nil && GetTlsEnable() {
+			connection, err = wrapClientTLS(connection)
 		}
 	} else {
+		if GetTlsEnable() {
+			return nil, errTLSRequiresTCP
+		}
 		sess, err = kcp.DialWithOptions(server, nil, 10, 3)
 		if err == nil {
 			conn.SetUdpSession(sess)
@@ -324,7 +329,7 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 	if s, err := c.ReadFlag(); err != nil {
 		return nil, err
 	} else if s == common.VERIFY_EER {
-		return nil, errors.New(fmt.Sprintf("Validation key %s incorrect", vkey))
+		return nil, fmt.Errorf("validation key %s incorrect", common.MaskSecret(vkey))
 	}
 	if _, err := c.Write([]byte(connType)); err != nil {
 		return nil, err
@@ -332,6 +337,25 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 	c.SetAlive(tp)
 
 	return c, nil
+}
+
+var errTLSRequiresTCP = errors.New("tls_enable 仅支持 tcp 桥接；kcp 请使用 bridge_type=kcp 并关闭 tls_enable")
+
+func wrapClientTLS(connection net.Conn) (net.Conn, error) {
+	if connection == nil {
+		return nil, errors.New("nil connection")
+	}
+	if crypt.GetTlsFingerprint() == "" {
+		logs.Warn("TLS 已启用但未配置 tls_fingerprint：仅防被动窃听，不防中间人；建议配置服务端指纹（F2-2）")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancel()
+	tlsConn := tls.Client(connection, crypt.TlsDialConfig())
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	return tlsConn, nil
 }
 
 // http proxy connection

@@ -39,6 +39,7 @@
 - 变更操作一律 POST + 会话鉴权（GET 只做渲染，见 D11）。
 - 终端 SSH：仅管理员或本人客户端可开 shell；WebSocket Origin 白名单；**每次开 shell 记录审计日志** `TERMINAL AUDIT: user [x] opened shell on client id [y] ...`。
 - 客户端 VKEY 为 128bit（crypto/rand）。**存量 40bit vkey**（旧版生成，如 `3060aada57`）：面板无自动轮换入口（`ResetVkey` 已移除，避免运维误操作导致批量掉线）。手动轮换：面板删除旧客户端 → 重新添加（vkey 留空自动生成 32 位长 key）→ 客户端统一重配新 vkey。**注意：升级服务端不会改变已有 vkey，vkey 只由客户端注册时生成**。
+- GitHub OAuth 管理员白名单使用不可变的数字用户 ID（`github_admin_ids`），不再按可改名、可被重新注册的 GitHub 用户名授权。升级后启用了 OAuth 的部署必须补齐该配置，否则 OAuth 入口会 fail-closed 停用。
 
 ## 3. 资源上限（防滥用/耗尽）
 

@@ -34,9 +34,15 @@ const (
 type udpSession struct {
 	target     io.ReadWriteCloser // 用于 Read/Write 的封装层（可能含加密/压缩）
 	rawConn    net.Conn           // 底层 mux conn，用于 SetReadDeadline
-	lastActive int64              // 最近活跃时间（unix nano，原子读写）
-	ready      chan struct{}      // 会话就绪后关闭；建立失败时也关闭
-	err        error              // 建立失败时设置；ready 关闭后才允许读
+	client     *file.Client
+	clientID   int
+	clientFlow *file.Flow
+	taskFlow   *file.Flow
+	crypt      bool
+	compress   bool
+	lastActive int64         // 最近活跃时间（unix nano，原子读写）
+	ready      chan struct{} // 会话就绪后关闭；建立失败时也关闭
+	err        error         // 建立失败时设置；ready 关闭后才允许读
 }
 
 func (u *udpSession) touch() {
@@ -49,7 +55,8 @@ func flowExceeded(client *file.Client) bool {
 	if client == nil || client.Flow == nil {
 		return false
 	}
-	return client.Flow.FlowLimit > 0 && (client.Flow.FlowLimit<<20) < (client.Flow.ExportFlow+client.Flow.InletFlow)
+	limit, in, out := client.Flow.Snapshot()
+	return limit > 0 && (limit<<20) < (in+out)
 }
 
 type UdpModeServer struct {
@@ -138,6 +145,16 @@ func (s *UdpModeServer) process(addr *net.UDPAddr, buf []byte, n int) {
 
 	// 慢路径：尝试成为该 key 的"会话建立者"
 	placeholder := &udpSession{ready: make(chan struct{})}
+	s.task.RLock()
+	placeholder.client = s.task.Client
+	placeholder.taskFlow = s.task.Flow
+	s.task.RUnlock()
+	placeholder.client.RLock()
+	placeholder.clientID = placeholder.client.Id
+	placeholder.clientFlow = placeholder.client.Flow
+	placeholder.crypt = placeholder.client.Cnf.Crypt
+	placeholder.compress = placeholder.client.Cnf.Compress
+	placeholder.client.RUnlock()
 	placeholder.touch()
 	if existing, loaded := s.addrMap.LoadOrStore(key, placeholder); loaded {
 		// 输了占位竞争，等赢家把会话建好后复用
@@ -173,11 +190,11 @@ func (s *UdpModeServer) dispatch(key string, sess *udpSession, data []byte, n in
 	}
 	sess.touch()
 	// 公网 UDP 数据 -> 隧道(客户端) = 上传
-	s.task.Client.Flow.Add(int64(n), 0)
-	s.task.Flow.Add(int64(n), 0)
+	sess.clientFlow.Add(int64(n), 0)
+	sess.taskFlow.Add(int64(n), 0)
 	// 数据面复查流量上限（阶段三 #10）
-	if flowExceeded(s.task.Client) {
-		logs.Warn("udp client id %d flow exceeded, close session %s", s.task.Client.Id, key)
+	if flowExceeded(sess.client) {
+		logs.Warn("udp client id %d flow exceeded, close session %s", sess.clientID, key)
 		s.removeSession(key, sess)
 	}
 }
@@ -195,22 +212,29 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 		common.BufPoolUdp.Put(buf)
 	}
 
-	if err := s.CheckFlowAndConnNum(s.task.Client); err != nil {
-		logs.Warn("client id %d, task id %d,error %s, when udp connection", s.task.Client.Id, s.task.Id, err.Error())
+	if err := s.CheckFlowAndConnNum(sess.client); err != nil {
+		logs.Warn("client id %d,error %s, when udp connection", sess.clientID, err.Error())
 		failBuild(err)
 		return
 	}
 	// 只有赢家消耗 NowConn 配额，函数返回时释放。
-	defer s.task.Client.AddConn()
+	defer sess.client.AddConn()
 
-	link := conn.NewLink(common.CONN_UDP, s.task.Target.TargetStr, s.task.Client.Cnf.Crypt, s.task.Client.Cnf.Compress, addr.String(), s.task.Target.LocalProxy, "")
-	clientConn, err := s.bridge.SendLinkInfo(s.task.Client.Id, link, s.task)
+	s.task.RLock()
+	taskTarget := s.task.Target
+	s.task.RUnlock()
+	targetAddr, localProxy := taskTarget.SnapshotTarget()
+	link := conn.NewLink(common.CONN_UDP, targetAddr, sess.crypt, sess.compress, addr.String(), localProxy, "")
+	clientConn, err := s.bridge.SendLinkInfo(sess.clientID, link, s.task)
 	if err != nil {
 		failBuild(err)
 		return
 	}
 
-	target := conn.GetConn(clientConn, s.task.Client.Cnf.Crypt, s.task.Client.Cnf.Compress, nil, true)
+	sess.client.RLock()
+	clientRate := sess.client.Rate
+	sess.client.RUnlock()
+	target := conn.GetConn(clientConn, sess.crypt, sess.compress, clientRate, true)
 	sess.target = target
 	sess.rawConn = clientConn
 	sess.touch()
@@ -218,7 +242,7 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 
 	defer s.removeSession(key, sess)
 
-	logs.Trace("New udp connection,client %d,remote address %s", s.task.Client.Id, addr)
+	logs.Trace("New udp connection,client %d,remote address %s", sess.clientID, addr)
 
 	if _, err := target.Write(data); err != nil {
 		logs.Warn(err)
@@ -227,11 +251,11 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 	}
 	common.BufPoolUdp.Put(buf)
 	// 公网 UDP 首包 -> 隧道(客户端) = 上传
-	s.task.Client.Flow.Add(int64(n), 0)
-	s.task.Flow.Add(int64(n), 0)
+	sess.clientFlow.Add(int64(n), 0)
+	sess.taskFlow.Add(int64(n), 0)
 	// 数据面复查流量上限（阶段三 #10）
-	if flowExceeded(s.task.Client) {
-		logs.Warn("udp client id %d flow exceeded, close session %s", s.task.Client.Id, key)
+	if flowExceeded(sess.client) {
+		logs.Warn("udp client id %d flow exceeded, close session %s", sess.clientID, key)
 		return
 	}
 
@@ -254,11 +278,11 @@ func (s *UdpModeServer) runSession(addr *net.UDPAddr, key string, sess *udpSessi
 			return
 		}
 		// 隧道(客户端)数据 -> 公网 UDP 用户 = 下载
-		s.task.Client.Flow.Add(0, int64(rn))
-		s.task.Flow.Add(0, int64(rn))
+		sess.clientFlow.Add(0, int64(rn))
+		sess.taskFlow.Add(0, int64(rn))
 		// 数据面复查流量上限（阶段三 #10）
-		if flowExceeded(s.task.Client) {
-			logs.Warn("udp client id %d flow exceeded, stop session %s", s.task.Client.Id, key)
+		if flowExceeded(sess.client) {
+			logs.Warn("udp client id %d flow exceeded, stop session %s", sess.clientID, key)
 			return
 		}
 	}

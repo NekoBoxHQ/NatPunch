@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"net/netip"
@@ -112,8 +113,8 @@ func (s *ShadowsocksModeServer) Start() error {
 			c.Close()
 			return
 		}
-		s.task.Client.AddConn()
 		go func() {
+			defer s.task.Client.AddConn()
 			err := s.service.NewConnection(context.Background(), c, ssMetadata{Source: M.SocksaddrFromNet(c.RemoteAddr())})
 			if err != nil {
 				// 握手失败最常见的原因是密钥不对 / 对面在扫端口，降级成 Warn
@@ -198,8 +199,9 @@ func (h *ssHandler) NewConnection(ctx context.Context, raw net.Conn, metadata ss
 	guard := newSSConnGuard(raw)
 	defer guard.Close()
 	// 跟 socks5.doConnect 最后那一步完全一样：目标地址交给隧道，客户端去拨。
+	_, localProxy := s.task.Target.SnapshotTarget()
 	s.DealClient(conn.NewConn(guard), s.task.Client, target, nil, common.CONN_TCP, nil,
-		s.task.Target.LocalProxy, s.task, nil)
+		localProxy, s.task, nil)
 	return nil
 }
 
@@ -263,14 +265,35 @@ func (c *ssConnGuard) Close() error {
 func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, metadata ssMetadata) error {
 	s := h.server
 	defer pc.Close()
-
-	link := conn.NewLink("udp5", "", s.task.Client.Cnf.Crypt, s.task.Client.Cnf.Compress, metadata.Source.String(), false, "")
-	target, err := s.bridge.SendLinkInfo(s.task.Client.Id, link, s.task)
-	if err != nil {
-		logs.Warn("shadowsocks udp: get connection from client id %d error %s", s.task.Client.Id, err.Error())
+	s.task.RLock()
+	client := s.task.Client
+	taskFlow := s.task.Flow
+	taskID := s.task.Id
+	s.task.RUnlock()
+	client.RLock()
+	clientID := client.Id
+	clientFlow := client.Flow
+	clientRate := client.Rate
+	cryptEnabled, compressEnabled := client.Cnf.Crypt, client.Cnf.Compress
+	client.RUnlock()
+	if err := s.CheckFlowAndConnNum(client); err != nil {
+		logs.Warn("shadowsocks udp client id %d, task id %d: %v", clientID, taskID, err)
 		return err
 	}
-	defer target.Close()
+	defer client.AddConn()
+	if !TryAcquireGlobalConn() {
+		return errors.New("global connections exceed the global limit")
+	}
+	defer ReleaseGlobalConn()
+
+	link := conn.NewLink("udp5", "", cryptEnabled, compressEnabled, metadata.Source.String(), false, "")
+	rawTarget, err := s.bridge.SendLinkInfo(clientID, link, s.task)
+	if err != nil {
+		logs.Warn("shadowsocks udp: get connection from client id %d error %s", clientID, err.Error())
+		return err
+	}
+	defer rawTarget.Close()
+	target := conn.GetConn(rawTarget, false, false, clientRate, true)
 
 	// 上行：SS 数据报 → 隧道
 	go func() {
@@ -292,12 +315,12 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 				return
 			}
 			// 公网(SS 客户端) → 隧道 = 上传；口径与 udp.go 一致
-			s.task.Client.Flow.Add(int64(len(d.Data)), 0)
-			s.task.Flow.Add(int64(len(d.Data)), 0)
+			clientFlow.Add(int64(len(d.Data)), 0)
+			taskFlow.Add(int64(len(d.Data)), 0)
 			b.Release()
 			// 数据面复查流量上限（同 udp.go）
-			if flowExceeded(s.task.Client) {
-				logs.Warn("shadowsocks udp client id %d flow exceeded", s.task.Client.Id)
+			if flowExceeded(client) {
+				logs.Warn("shadowsocks udp client id %d flow exceeded", clientID)
 				return
 			}
 		}
@@ -347,11 +370,11 @@ func (h *ssHandler) NewPacketConnection(ctx context.Context, pc N.PacketConn, me
 			return nil
 		}
 		// 隧道(客户端) → 公网(SS 客户端) = 下载；口径同 udp.go
-		s.task.Client.Flow.Add(0, int64(len(d.Data)))
-		s.task.Flow.Add(0, int64(len(d.Data)))
+		clientFlow.Add(0, int64(len(d.Data)))
+		taskFlow.Add(0, int64(len(d.Data)))
 		// 数据面复查流量上限（同 udp.go）
-		if flowExceeded(s.task.Client) {
-			logs.Warn("shadowsocks udp client id %d flow exceeded", s.task.Client.Id)
+		if flowExceeded(client) {
+			logs.Warn("shadowsocks udp client id %d flow exceeded", clientID)
 			return nil
 		}
 	}

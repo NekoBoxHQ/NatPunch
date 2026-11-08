@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -89,13 +90,16 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 		nr, er := src.Read(buf)
 
 		if task != nil {
-			if task.Client.IpWhite && task.Client.IpWhitePass != "" {
+			task.Client.RLock()
+			clientID := task.Client.Id
+			ipWhiteEnabled, ipWhitePass := task.Client.IpWhite, task.Client.IpWhitePass
+			verifyKey := task.Client.VerifyKey
+			whiteList := append([]string(nil), task.Client.IpWhiteList...)
+			task.Client.RUnlock()
+			if ipWhiteEnabled && ipWhitePass != "" {
 
 				// IpWhiteList 会被授权成功路径并发 append，这里在锁下取快照再用
-				task.Client.RLock()
-				whiteList := task.Client.IpWhiteList
-				task.Client.RUnlock()
-				if common.IsAuthIp(remote, task.Client.VerifyKey, whiteList) {
+				if common.IsAuthIp(remote, verifyKey, whiteList) {
 					ip := common.GetIpByAddr(remote)
 					var jsonBytes []byte
 
@@ -119,20 +123,25 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 						parts := strings.Split(firstLine, " ")
 						if len(parts) > 1 {
 							path := parts[1]
-							if strings.Contains(path, "/authIp?pass=") {
-								pass = strings.ReplaceAll(path, "/authIp?pass=", "")
+							if u, perr := url.ParseRequestURI(path); perr == nil {
+								pass = u.Query().Get("pass")
 							}
 						}
-						if pass == task.Client.IpWhitePass {
+						if pass != "" && common.ConstantTimeStrEq(pass, ipWhitePass) {
 							// copy-on-write：不要原地改已经发布出去的切片（读者正持有它）
 							task.Client.Lock()
 							task.Client.IpWhiteList = append(append([]string(nil), task.Client.IpWhiteList...), ip)
 							task.Client.Unlock()
-							file.GetDb().UpdateClient(task.Client)
-							logs.Info("客户端IP白名单认证授权成功:vkey [%s] ip [%s] password [%s]", task.Client.VerifyKey, ip, pass)
-							jsonBytes, err = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+							if err := file.GetDb().UpdateClient(task.Client); err != nil {
+								task.Client.RemoveIpWhite(ip)
+								logs.Warn("save ip whitelist: %v", err)
+								jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "保存失败"})
+							} else {
+								logs.Info("客户端IP白名单认证授权成功:task [%d] client [%d] ip [%s]", task.Id, clientID, ip)
+								jsonBytes, err = json.Marshal(map[string]interface{}{"success": true, "message": "授权成功"})
+							}
 						} else {
-							logs.Error("客户端IP白名单认证授权密码错误:vkey [%s] ip [%s] password [%s]", task.Client.VerifyKey, ip, pass)
+							logs.Error("客户端IP白名单认证授权密码错误:task [%d] client [%d] ip [%s]", task.Id, clientID, ip)
 							jsonBytes, err = json.Marshal(map[string]interface{}{"success": false, "message": "密码错误"})
 						}
 						response := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(jsonBytes), jsonBytes)
@@ -175,7 +184,7 @@ func CopyBuffer(dst io.Writer, src io.Reader, flow *file.Flow, task *file.Tunnel
 					if limit > 0 && (limit<<20) < (outFlow+inFlow) {
 						// task 可能为 nil（httpProxy/socks5/transport 路径），不可直接解引用（F1-6）
 						if task != nil {
-							logs.Error("隧道[%s]流量已经超出", task.Client.VerifyKey)
+							logs.Error("隧道 [%d] 流量已经超出（client [%d]）", task.Id, task.Client.Id)
 						} else {
 							logs.Error("流量已经超出")
 						}

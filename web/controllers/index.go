@@ -165,6 +165,9 @@ func (s *IndexController) localProxyAllowed() bool {
 }
 
 func (s *IndexController) Add() {
+	if !s.requireGETorPOST() {
+		return
+	}
 	if s.Ctx.Request.Method == "GET" {
 		addMode := normalizeTunnelMode(s.getEscapeString("type"))
 		s.Data["type"] = addMode
@@ -198,13 +201,12 @@ func (s *IndexController) Add() {
 
 		// 创建单条隧道；type=tcp+udp 时按 tcp / udp 各建一条（同端口双协议监听）
 		createOne := func(m string, remark string) (int, error) {
-			id := int(file.GetDb().JsonDb.GetTaskId())
 			t := &file.Tunnel{
 				Port:         s.GetIntNoErr("port"),
 				ServerIp:     s.getEscapeString("server_ip"),
 				Mode:         m,
 				Target:       &file.Target{TargetStr: s.getEscapeString("target"), LocalProxy: s.localProxyAllowed() && s.GetBoolNoErr("local_proxy")},
-				Id:           id,
+				Id:           0,
 				Status:       true,
 				Remark:       remark,
 				Password:     s.GetString("password"),
@@ -225,11 +227,14 @@ func (s *IndexController) Add() {
 			if t.Client, err = file.GetDb().GetClient(clientId); err != nil {
 				return 0, err
 			}
-			if t.Client.MaxTunnelNum != 0 && t.Client.GetTunnelNum() >= t.Client.MaxTunnelNum {
+			t.Client.RLock()
+			maxTunnelNum := t.Client.MaxTunnelNum
+			t.Client.RUnlock()
+			if maxTunnelNum != 0 && t.Client.GetTunnelNum() >= maxTunnelNum {
 				return 0, errors.New("The number of tunnels exceeds the limit")
 			}
 			// HTTP / SOCKS5 代理：隧道级账号密码（MultiAccount）
-			if (m == "httpProxy" || m == "socks5") && username != "" && password != "" {
+			if (m == "httpProxy" || m == "socks5") && (username != "" || password != "") {
 				t.MultiAccount = &file.MultiAccount{AccountMap: map[string]string{username: password}}
 			}
 			// Shadowsocks：密码框里装的就是 PSK（BaseServer 从 t.Password 取它）。
@@ -244,10 +249,10 @@ func (s *IndexController) Add() {
 				return 0, err
 			}
 			if err := server.AddTask(t); err != nil {
-				file.GetDb().DelTask(id)
+				file.GetDb().DelTask(t.Id)
 				return 0, err
 			}
-			return id, nil
+			return t.Id, nil
 		}
 
 		// tcp+udp 为单条隧道（server 层同时监听 TCP/UDP）
@@ -262,6 +267,9 @@ func (s *IndexController) Add() {
 }
 
 func (s *IndexController) Edit() {
+	if !s.requireGETorPOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if s.Ctx.Request.Method == "GET" {
 		if t, err := file.GetDb().GetTask(id); err != nil {
@@ -292,54 +300,55 @@ func (s *IndexController) Edit() {
 					editClientId = 0
 				}
 			}
-			if client, err := file.GetDb().GetClient(editClientId); err != nil {
+			client, err := file.GetDb().GetClient(editClientId)
+			if err != nil {
 				s.AjaxErr("modified error,the client is not exist")
 				return
-			} else {
-				t.Client = client
 			}
-			if s.GetIntNoErr("port") != t.Port {
-				t.Port = s.GetIntNoErr("port")
-
-				if t.Port <= 0 {
-					t.Port = tool.GenerateServerPort(t.Mode)
-				}
-
-				if !tool.TestServerPort(t.Port, t.Mode) {
-					s.AjaxErr("The port cannot be opened because it may has been occupied or is no longer allowed.")
-					return
-				}
-			}
-			t.ServerIp = s.getEscapeString("server_ip")
-			t.Mode = normalizeTunnelMode(s.getEscapeString("type"))
+			newMode := normalizeTunnelMode(s.getEscapeString("type"))
 			// 同 Add：不允许把隧道改成服务端内部模式（webServer 会触发递归）
-			if !validTunnelMode(t.Mode) {
+			if !validTunnelMode(newMode) {
 				s.AjaxErr("invalid tunnel type")
 				return
 			}
-			// 注意 t 是库里那个对象的指针，赋值就是改原值 —— 新的 PSK 想"留空保留"
-			// 的话必须先把旧的存下来。
-			oldPassword := t.Password
-			t.Password = s.GetString("password")
-			// HTTP / SOCKS5 代理账号密码
-			u := s.GetString("username")
-			p := s.GetString("password")
-			if (t.Mode == "httpProxy" || t.Mode == "socks5") && u != "" && p != "" {
-				t.MultiAccount = &file.MultiAccount{AccountMap: map[string]string{u: p}}
-			} else {
-				t.MultiAccount = nil
+			t.RLock()
+			oldPort, oldMode, oldPassword := t.Port, t.Mode, t.Password
+			target := t.Target
+			t.RUnlock()
+			newPort := s.GetIntNoErr("port")
+			if newPort <= 0 {
+				newPort = tool.GenerateServerPort(newMode)
 			}
-			// Shadowsocks：密码框里是 PSK。
-			//   留空     → 不动原密钥（编辑页不回填它，列表里的 ss:// 链接随时能取；
-			//              当成"清空"的话，用户改个备注就会把密钥抹掉、客户端全失联）
-			//   填了东西 → 一律归一化成能用的 PSK（口令也行，见 NormalizeShadowsocksPSK）
-			if t.Mode == "shadowsocks" {
-				if strings.TrimSpace(t.Password) == "" {
-					t.Password = oldPassword
+			if (newPort != oldPort || newMode != oldMode) && !tool.TestServerPort(newPort, newMode) {
+				s.AjaxErr("The port cannot be opened because it may has been occupied or is no longer allowed.")
+				return
+			}
+			newPassword := s.GetString("password")
+			if newMode == "shadowsocks" {
+				if strings.TrimSpace(newPassword) == "" {
+					newPassword = oldPassword
 				} else {
-					t.Password = crypt.NormalizeShadowsocksPSK(t.Password)
+					newPassword = crypt.NormalizeShadowsocksPSK(newPassword)
 				}
 			}
+			u := s.GetString("username")
+			p := s.GetString("password")
+			var multiAccount *file.MultiAccount
+			if (newMode == "httpProxy" || newMode == "socks5") && (u != "" || p != "") {
+				multiAccount = &file.MultiAccount{AccountMap: map[string]string{u: p}}
+			}
+			targetStr := s.getEscapeString("target")
+			localProxy := s.localProxyAllowed() && s.GetBoolNoErr("local_proxy")
+
+			// 注意 t 是库里那个对象的指针，赋值就是改原值 —— 新的 PSK 想"留空保留"
+			// 的话必须先把旧的存下来。
+			t.Lock()
+			t.Client = client
+			t.ServerIp = s.getEscapeString("server_ip")
+			t.Mode = newMode
+			t.Port = newPort
+			t.Password = newPassword
+			t.MultiAccount = multiAccount
 			t.Id = id
 			t.LocalPath = s.getEscapeString("local_path")
 			t.ProtoVersion = s.getEscapeString("proto_version")
@@ -347,13 +356,15 @@ func (s *IndexController) Edit() {
 			t.AccessPath = normAccessPath(s.getEscapeString("access_path"))
 			t.Https = s.GetBoolNoErr("https")
 			t.Remark = s.GetString("remark")
-			// 目标地址：这里原来漏了 —— 编辑页提交了 target，但后端只更新 LocalProxy，
-			// 于是"改目标"永远不生效（表现为隧道只能删了重建）。
-			t.Target.TargetStr = s.getEscapeString("target")
-			// GetRandomTarget 会把 TargetStr 拆进 TargetArr 并缓存；改了字符串必须让缓存失效，
-			// 否则会继续用旧目标（负载均衡列表尤其明显）。
-			t.Target.TargetArr = nil
-			t.Target.LocalProxy = s.localProxyAllowed() && s.GetBoolNoErr("local_proxy")
+			t.Unlock()
+
+			if target != nil {
+				target.Lock()
+				target.TargetStr = targetStr
+				target.TargetArr = nil
+				target.LocalProxy = localProxy
+				target.Unlock()
+			}
 			// 流量计数只允许管理员改写：普通用户提交 flow_inlet/flow_export 就能
 			// 把自己的用量清零，绕过管理员配的 flow_limit。
 			if isAdmin, _ := s.GetSession("isAdmin").(bool); isAdmin {
@@ -368,7 +379,10 @@ func (s *IndexController) Edit() {
 					t.Flow.SetFlows(in, out)
 				}
 			}
-			file.GetDb().UpdateTask(t)
+			if err := file.GetDb().UpdateTask(t); err != nil {
+				s.AjaxErr("save failed: " + err.Error())
+				return
+			}
 			if err := server.StopServer(t.Id); err != nil {
 				s.AjaxErr("已保存，但停止旧隧道失败: " + err.Error())
 				return
@@ -385,6 +399,9 @@ func (s *IndexController) Edit() {
 }
 
 func (s *IndexController) Stop() {
+	if !s.requirePOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if err := server.StopServer(id); err != nil {
 		s.AjaxErr("stop error")
@@ -393,6 +410,9 @@ func (s *IndexController) Stop() {
 }
 
 func (s *IndexController) Del() {
+	if !s.requirePOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if err := server.DelTask(id); err != nil {
 		s.AjaxErr("delete error")
@@ -401,6 +421,9 @@ func (s *IndexController) Del() {
 }
 
 func (s *IndexController) Start() {
+	if !s.requirePOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if err := server.StartTask(id); err != nil {
 		s.AjaxErr("start error")

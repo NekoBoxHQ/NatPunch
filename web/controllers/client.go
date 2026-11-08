@@ -77,12 +77,14 @@ func (s *ClientController) List() {
 
 // 添加客户端
 func (s *ClientController) Add() {
+	if !s.requireGETorPOST() {
+		return
+	}
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "client"
 		s.SetInfo("add client")
 		s.display()
 	} else {
-		id := int(file.GetDb().JsonDb.GetClientId())
 		rl, rlErr := s.parseRateLimit()
 		if rlErr != "" {
 			s.AjaxErr(rlErr)
@@ -118,7 +120,7 @@ func (s *ClientController) Add() {
 		}
 		t := &file.Client{
 			VerifyKey: vkey,
-			Id:        id,
+			Id:        0,
 			Status:    true,
 			Remark:    s.GetString("remark"),
 			Cnf: &file.Config{
@@ -148,7 +150,7 @@ func (s *ClientController) Add() {
 		if err := file.GetDb().NewClient(t); err != nil {
 			s.AjaxErr(err.Error())
 		}
-		s.AjaxOkWithId("add success", id)
+		s.AjaxOkWithId("add success", t.Id)
 	}
 }
 func (s *ClientController) GetClient() {
@@ -163,6 +165,7 @@ func (s *ClientController) GetClient() {
 			// 对非管理员隐藏（管理员编辑页需要展示/下发）。
 			// 显式字段映射，避免整体拷贝内嵌 sync.RWMutex 触发 lock copy 告警。
 			admin, _ := s.GetSession("isAdmin").(bool)
+			c.RLock()
 			vkey := c.VerifyKey
 			ipWhitePass := c.IpWhitePass
 			if !admin {
@@ -186,13 +189,14 @@ func (s *ClientController) GetClient() {
 				"MaxConn":         c.MaxConn,
 				"MaxTunnelNum":    c.MaxTunnelNum,
 				"Version":         c.Version,
-				"BlackIpList":     c.BlackIpList,
+				"BlackIpList":     append([]string(nil), c.BlackIpList...),
 				"CreateTime":      c.CreateTime,
 				"LastOnlineTime":  c.LastOnlineTime,
 				"IpWhite":         c.IpWhite,
 				"IpWhitePass":     ipWhitePass,
-				"IpWhiteList":     c.IpWhiteList,
+				"IpWhiteList":     append([]string(nil), c.IpWhiteList...),
 			}
+			c.RUnlock()
 		}
 		s.Data["json"] = data
 		s.ServeJSON()
@@ -201,6 +205,9 @@ func (s *ClientController) GetClient() {
 
 // 修改客户端
 func (s *ClientController) Edit() {
+	if !s.requireGETorPOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "client"
@@ -239,6 +246,19 @@ func (s *ClientController) Edit() {
 					return
 				}
 			}
+			c.Lock()
+			clientLocked := true
+			defer func() {
+				if clientLocked {
+					c.Unlock()
+				}
+			}()
+			if c.Flow == nil {
+				c.Flow = &file.Flow{}
+			}
+			if c.Cnf == nil {
+				c.Cnf = &file.Config{}
+			}
 			if s.GetSession("isAdmin").(bool) {
 				// vkey 防呆：留空 = 保持原值（绝不因编辑覆盖成空/变短导致客户端掉线）
 				nv := s.GetString("vkey")
@@ -258,7 +278,7 @@ func (s *ClientController) Edit() {
 					s.AjaxErr(flErr)
 					return
 				}
-				c.Flow.FlowLimit = fl
+				c.Flow.SetLimit(fl)
 				rl, rlErr := s.parseRateLimit()
 				if rlErr != "" {
 					s.AjaxErr(rlErr)
@@ -304,11 +324,17 @@ func (s *ClientController) Edit() {
 			if c.Rate != nil {
 				c.Rate.Stop()
 			}
-			c.Rate = file.NewClientRate(c)
-			c.Rate.Start()
+			newRate := file.NewClientRate(c)
+			c.Rate = newRate
 
 			c.BlackIpList = RemoveRepeatedElement(strings.Split(s.getEscapeString("blackiplist"), "\r\n"))
-			file.GetDb().JsonDb.StoreClientsToJsonFile()
+			c.Unlock()
+			clientLocked = false
+			newRate.Start()
+			if err := file.GetDb().UpdateClient(c); err != nil {
+				s.AjaxErr("save failed: " + err.Error())
+				return
+			}
 		}
 		s.AjaxOk("save success")
 	}
@@ -370,12 +396,19 @@ func normalizeExpireTime(s string) string {
 
 // 更改状态
 func (s *ClientController) ChangeStatus() {
+	if !s.requirePOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if client, err := file.GetDb().GetClient(id); err == nil {
 		status := s.GetBoolNoErr("status")
 		client.SetStatus(status) // 持写锁，别和列表序列化/落盘抢同一个字段
 		if !status {
 			server.DelClientConnect(client.Id)
+		}
+		if err := file.GetDb().UpdateClient(client); err != nil {
+			s.AjaxErr("modified fail: " + err.Error())
+			return
 		}
 		s.AjaxOk("modified success")
 	}
@@ -384,6 +417,9 @@ func (s *ClientController) ChangeStatus() {
 
 // 删除客户端
 func (s *ClientController) Del() {
+	if !s.requirePOST() {
+		return
+	}
 	id := s.GetIntNoErr("id")
 	if err := file.GetDb().DelClient(id); err != nil {
 		s.AjaxErr("delete error")

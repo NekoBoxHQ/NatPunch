@@ -108,10 +108,6 @@ func NewClient(vKey string, noStore bool, noDisplay bool) *Client {
 	}
 }
 
-func (s *Client) CutConn() {
-	atomic.AddInt32(&s.NowConn, 1)
-}
-
 func (s *Client) AddConn() {
 	atomic.AddInt32(&s.NowConn, -1)
 }
@@ -119,9 +115,12 @@ func (s *Client) AddConn() {
 // GetConn 尝试占用一个连接名额；check-then-increment 改为原子 CAS，
 // 避免并发下突破 MaxConn 上限（阶段三 #4）
 func (s *Client) GetConn() bool {
+	s.RLock()
+	maxConn := s.MaxConn
+	s.RUnlock()
 	for {
 		cur := atomic.LoadInt32(&s.NowConn)
-		if s.MaxConn != 0 && int(cur) >= s.MaxConn {
+		if maxConn != 0 && int(cur) >= maxConn {
 			return false
 		}
 		if atomic.CompareAndSwapInt32(&s.NowConn, cur, cur+1) {
@@ -133,7 +132,19 @@ func (s *Client) GetConn() bool {
 func (s *Client) HasTunnel(t *Tunnel) (exist bool) {
 	GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*Tunnel)
-		if v.Client.Id == s.Id && v.Port == t.Port && t.Port != 0 {
+		v.RLock()
+		client, port := v.Client, v.Port
+		v.RUnlock()
+		t.RLock()
+		targetPort := t.Port
+		t.RUnlock()
+		if client == nil || targetPort == 0 {
+			return true
+		}
+		client.RLock()
+		clientID := client.Id
+		client.RUnlock()
+		if clientID == s.Id && port == targetPort {
 			exist = true
 			return false
 		}
@@ -145,7 +156,16 @@ func (s *Client) HasTunnel(t *Tunnel) (exist bool) {
 func (s *Client) GetTunnelNum() (num int) {
 	GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 		v := value.(*Tunnel)
-		if v.Client.Id == s.Id {
+		v.RLock()
+		client := v.Client
+		v.RUnlock()
+		if client == nil {
+			return true
+		}
+		client.RLock()
+		clientID := client.Id
+		client.RUnlock()
+		if clientID == s.Id {
 			num++
 		}
 		return true
@@ -153,7 +173,16 @@ func (s *Client) GetTunnelNum() (num int) {
 
 	GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
 		v := value.(*Host)
-		if v.Client.Id == s.Id {
+		v.RLock()
+		client := v.Client
+		v.RUnlock()
+		if client == nil {
+			return true
+		}
+		client.RLock()
+		clientID := client.Id
+		client.RUnlock()
+		if clientID == s.Id {
 			num++
 		}
 		return true
@@ -165,7 +194,19 @@ func (s *Client) HasHost(h *Host) bool {
 	var has bool
 	GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
 		v := value.(*Host)
-		if v.Client.Id == s.Id && v.Host == h.Host && h.Location == v.Location {
+		v.RLock()
+		client, hostName, location := v.Client, v.Host, v.Location
+		v.RUnlock()
+		h.RLock()
+		targetHost, targetLocation := h.Host, h.Location
+		h.RUnlock()
+		if client == nil {
+			return true
+		}
+		client.RLock()
+		clientID := client.Id
+		client.RUnlock()
+		if clientID == s.Id && targetHost == hostName && targetLocation == location {
 			has = true
 			return false
 		}
@@ -268,6 +309,15 @@ func (s *Target) GetRandomTarget() (string, error) {
 	addr := s.TargetArr[s.nowIndex]
 	s.Unlock()
 	return addr, nil
+}
+
+func (s *Target) SnapshotTarget() (target string, localProxy bool) {
+	if s == nil {
+		return "", false
+	}
+	s.RLock()
+	defer s.RUnlock()
+	return s.TargetStr, s.LocalProxy
 }
 
 type Glob struct {

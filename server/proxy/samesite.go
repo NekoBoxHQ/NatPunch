@@ -21,6 +21,12 @@ type sameSiteWriter struct {
 // newSameSiteHandler 包装面板 HTTP handler，为会话 Cookie 加固
 func newSameSiteHandler(h http.Handler, secure bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		if secure {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		h.ServeHTTP(&sameSiteWriter{ResponseWriter: w, secure: secure}, r)
 	})
 }

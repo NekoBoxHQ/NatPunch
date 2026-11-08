@@ -34,6 +34,7 @@ const (
 type HttpReverseProxy struct {
 	proxy                 *ReverseProxy
 	responseHeaderTimeout time.Duration
+	owner                 *httpServer
 }
 type flowConn struct {
 	io.ReadWriteCloser
@@ -52,7 +53,10 @@ func (rp *HttpReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request)
 		rw.Write([]byte(req.Host + " not found"))
 		return
 	}
-	if host.Client.Cnf.U != "" && host.Client.Cnf.P != "" && !common.CheckAuth(req, host.Client.Cnf.U, host.Client.Cnf.P) {
+	host.Client.RLock()
+	authUser, authPassword := host.Client.Cnf.U, host.Client.Cnf.P
+	host.Client.RUnlock()
+	if (authUser != "" || authPassword != "") && !common.CheckAuth(req, authUser, authPassword) {
 		rw.WriteHeader(http.StatusUnauthorized)
 		rw.Write([]byte("Unauthorized"))
 		return
@@ -62,15 +66,26 @@ func (rp *HttpReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request)
 		rw.Write([]byte("502 Bad Gateway"))
 		return
 	}
-	host.Client.CutConn()
+	if rp.owner == nil {
+		rw.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if err := rp.owner.CheckFlowAndConnNum(host.Client); err != nil {
+		rw.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	defer host.Client.AddConn()
+	if !TryAcquireGlobalConn() {
+		rw.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	defer ReleaseGlobalConn()
 
 	req = req.WithContext(context.WithValue(req.Context(), ctxKeyHost, host))
 	req = req.WithContext(context.WithValue(req.Context(), ctxKeyTarget, targetAddr))
 	req = req.WithContext(context.WithValue(req.Context(), ctxKeyReq, req))
 
 	rp.proxy.ServeHTTP(rw, req, host)
-
-	defer host.Client.AddConn()
 }
 
 func (c *flowConn) Read(p []byte) (n int, err error) {
@@ -100,6 +115,7 @@ func (*flowConn) SetWriteDeadline(t time.Time) error { return nil }
 func NewHttpReverseProxy(s *httpServer) *HttpReverseProxy {
 	rp := &HttpReverseProxy{
 		responseHeaderTimeout: 30 * time.Second,
+		owner:                 s,
 	}
 	local, _ := net.ResolveTCPAddr("tcp", "127.0.0.1")
 	proxy := NewReverseProxy(&httputil.ReverseProxy{
@@ -124,12 +140,17 @@ func NewHttpReverseProxy(s *httpServer) *HttpReverseProxy {
 				host = ctx.Value(ctxKeyHost).(*file.Host)
 				targetAddr = ctx.Value(ctxKeyTarget).(string)
 
-				lk = conn.NewLink("http", targetAddr, host.Client.Cnf.Crypt, host.Client.Cnf.Compress, r.RemoteAddr, host.Target.LocalProxy, "")
+				_, localProxy := host.Target.SnapshotTarget()
+				host.Client.RLock()
+				cryptEnabled, compressEnabled := host.Client.Cnf.Crypt, host.Client.Cnf.Compress
+				clientRate := host.Client.Rate
+				host.Client.RUnlock()
+				lk = conn.NewLink("http", targetAddr, cryptEnabled, compressEnabled, r.RemoteAddr, localProxy, "")
 				if target, err = s.bridge.SendLinkInfo(host.Client.Id, lk, nil); err != nil {
 					logs.Notice("connect to target %s error %s", lk.Host, err)
 					return nil, NewHTTPError(http.StatusBadGateway, "Cannot connect to the server")
 				}
-				connClient = conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
+				connClient = conn.GetConn(target, lk.Crypt, lk.Compress, clientRate, true)
 				return &flowConn{
 					ReadWriteCloser: connClient,
 					fakeAddr:        local,
@@ -155,12 +176,17 @@ func NewHttpReverseProxy(s *httpServer) *HttpReverseProxy {
 		host = ctx.Value(ctxKeyHost).(*file.Host)
 		targetAddr = ctx.Value(ctxKeyTarget).(string)
 
-		lk = conn.NewLink("tcp", targetAddr, host.Client.Cnf.Crypt, host.Client.Cnf.Compress, r.RemoteAddr, host.Target.LocalProxy, "")
+		_, localProxy := host.Target.SnapshotTarget()
+		host.Client.RLock()
+		cryptEnabled, compressEnabled := host.Client.Cnf.Crypt, host.Client.Cnf.Compress
+		clientRate := host.Client.Rate
+		host.Client.RUnlock()
+		lk = conn.NewLink("tcp", targetAddr, cryptEnabled, compressEnabled, r.RemoteAddr, localProxy, "")
 		if target, err = s.bridge.SendLinkInfo(host.Client.Id, lk, nil); err != nil {
 			logs.Notice("connect to target %s error %s", lk.Host, err)
 			return nil, NewHTTPError(http.StatusBadGateway, "Cannot connect to the target")
 		}
-		connClient = conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
+		connClient = conn.GetConn(target, lk.Crypt, lk.Compress, clientRate, true)
 		return &flowConn{
 			ReadWriteCloser: connClient,
 			fakeAddr:        local,

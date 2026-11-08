@@ -1,6 +1,8 @@
 package file
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/NekoBoxHQ/NatPunch/lib/rate"
@@ -58,4 +60,42 @@ func TestNewClientRateReadsFlow(t *testing.T) {
 	r.Stop()
 	r.Start() // 幂等 + Stop 后可重启
 	r.Stop()
+}
+
+func TestNewClientQuotaOnlyAppliesToNewRecords(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "conf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	db := &DbUtils{JsonDb: NewJsonDb(dir)}
+	oldMax := MaxClients
+	MaxClients = 1
+	t.Cleanup(func() {
+		MaxClients = oldMax
+	})
+
+	first := NewClient("vkey-quota-1234", false, false)
+	if err := db.NewClient(first); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		first.RLock()
+		rt := first.Rate
+		first.RUnlock()
+		if rt != nil {
+			rt.Stop()
+		}
+	})
+
+	update := NewClient(first.VerifyKey, false, false)
+	update.Id = first.Id
+	update.Remark = "updated"
+	if err := db.NewClient(update); err != nil {
+		t.Fatalf("updating an existing client must not consume another quota slot: %v", err)
+	}
+
+	second := NewClient("vkey-quota-5678", false, false)
+	if err := db.NewClient(second); err == nil {
+		t.Fatal("new client exceeded MaxClients")
+	}
 }

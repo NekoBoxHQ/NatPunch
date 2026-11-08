@@ -5,36 +5,43 @@ import (
 	"testing"
 )
 
-// 白名单匹配是 GitHub 登录唯一的授权闸门：一旦退化成"前缀匹配 / contains / 忽略空值"，
-// 就等于把面板管理员权限交给任意 GitHub 账号。用例里同时钉住"不能放宽"和"该放宽的放宽"。
+// 白名单必须使用不可变的 GitHub 数字 ID；用户名只用于日志展示。
 func TestGithubIsAdminIsExactMatchOnly(t *testing.T) {
-	// githubOAuthConf 解析后已统一小写
-	admins := []string{"alice", "bob-2"}
+	admins := []int64{1001, 2002}
 
 	cases := []struct {
-		login string
-		want  bool
-		why   string
+		id   int64
+		want bool
+		why  string
 	}{
-		{"alice", true, "精确命中"},
-		{"ALICE", true, "GitHub 用户名大小写不敏感，服务端应统一小写后比对"},
-		{"Alice", true, "同上（混合大小写）"},
-		{" alice ", true, "配置里手滑留的空格不应导致登录失败"},
-		{"bob-2", true, "带连字符的用户名要能命中"},
-		{"alice2", false, "前缀匹配必须不成立"},
-		{"bob", false, "前缀匹配必须不成立"},
-		{"xalice", false, "后缀匹配必须不成立"},
-		{"", false, "空用户名不能命中任何白名单"},
-		{"admin", false, "不在名单里就是不在"},
+		{1001, true, "精确命中"},
+		{2002, true, "第二个 ID 也应命中"},
+		{100, false, "前缀匹配必须不成立"},
+		{10010, false, "扩展 ID 必须不成立"},
+		{0, false, "零值不能命中"},
+		{-1, false, "负数不能命中"},
 	}
 	for _, c := range cases {
-		if got := githubIsAdmin(c.login, admins); got != c.want {
-			t.Errorf("githubIsAdmin(%q) = %v, want %v —— %s", c.login, got, c.want, c.why)
+		if got := githubIsAdmin(c.id, admins); got != c.want {
+			t.Errorf("githubIsAdmin(%d) = %v, want %v —— %s", c.id, got, c.want, c.why)
 		}
 	}
 
-	if githubIsAdmin("alice", nil) {
+	if githubIsAdmin(1001, nil) {
 		t.Error("白名单为空时不得放行任何账号（否则配置漏填 = 人人都是管理员）")
+	}
+}
+
+func TestParseGithubAdminIDsRejectsInvalidValues(t *testing.T) {
+	got := parseGithubAdminIDs(" 1001, 2002; bogus, -1, 0, 3003 ")
+	want := []int64{1001, 2002, 3003}
+	if len(got) != len(want) {
+		t.Fatalf("parseGithubAdminIDs() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parseGithubAdminIDs()[%d] = %d, want %d", i, got[i], want[i])
+		}
 	}
 }
 

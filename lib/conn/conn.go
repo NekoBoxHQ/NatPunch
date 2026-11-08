@@ -227,7 +227,6 @@ func (s *Conn) GetTaskInfo() (t *file.Tunnel, err error) {
 	if t == nil {
 		return nil, errors.New("empty task info")
 	}
-	t.Id = int(file.GetDb().JsonDb.GetTaskId())
 	t.NoStore = true
 	t.Flow = new(file.Flow)
 	return

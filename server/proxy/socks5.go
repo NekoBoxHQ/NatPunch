@@ -67,6 +67,11 @@ func (s *Sock5ModeServer) handleRequest(c net.Conn) {
 		c.Close()
 		return
 	}
+	if header[0] != 5 || header[2] != 0 {
+		s.sendReply(c, serverFailure)
+		c.Close()
+		return
+	}
 
 	switch header[1] {
 	case connectMethod:
@@ -83,23 +88,29 @@ func (s *Sock5ModeServer) handleRequest(c net.Conn) {
 
 // reply
 func (s *Sock5ModeServer) sendReply(c net.Conn, rep uint8) {
-	reply := []byte{
-		5,
-		rep,
-		0,
-		1,
-	}
-
 	localAddr := c.LocalAddr().String()
 	localHost, localPort, _ := net.SplitHostPort(localAddr)
-	ipBytes := net.ParseIP(localHost).To4()
 	nPort, _ := strconv.Atoi(localPort)
-	reply = append(reply, ipBytes...)
-	portBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(portBytes, uint16(nPort))
-	reply = append(reply, portBytes...)
+	reply := socks5Reply(rep, net.ParseIP(localHost), nPort)
+	_, _ = c.Write(reply)
+}
 
-	c.Write(reply)
+func socks5Reply(rep uint8, ip net.IP, port int) []byte {
+	reply := []byte{5, rep, 0}
+	if ip4 := ip.To4(); ip4 != nil {
+		reply = append(reply, ipV4)
+		reply = append(reply, ip4...)
+	} else if ip16 := ip.To16(); ip16 != nil {
+		reply = append(reply, ipV6)
+		reply = append(reply, ip16...)
+	} else {
+		// 无法确定服务端地址时按 RFC 1928 返回未指定 IPv4 地址；客户端应回退到
+		// 控制连接的服务端地址。
+		reply = append(reply, ipV4, 0, 0, 0, 0)
+	}
+	portBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(portBytes, uint16(port))
+	return append(reply, portBytes...)
 }
 
 // do conn
@@ -168,9 +179,10 @@ func (s *Sock5ModeServer) doConnect(c net.Conn, command uint8) {
 	} else {
 		ltype = common.CONN_TCP
 	}
+	_, localProxy := s.task.Target.SnapshotTarget()
 	s.DealClient(conn.NewConn(c), s.task.Client, addr, nil, ltype, func() {
 		s.sendReply(c, succeeded)
-	}, s.task.Target.LocalProxy, s.task, nil)
+	}, localProxy, s.task, nil)
 	return
 }
 
@@ -187,26 +199,37 @@ func (s *Sock5ModeServer) handleBind(c net.Conn) {
 	c.Close()
 }
 func (s *Sock5ModeServer) sendUdpReply(writeConn net.Conn, c net.Conn, rep uint8, serverIp string) {
-	reply := []byte{
-		5,
-		rep,
-		0,
-		1,
+	localHost, localPort, _ := net.SplitHostPort(c.LocalAddr().String())
+	ip := net.ParseIP(serverIp)
+	if ip == nil || ip.IsUnspecified() {
+		ip = net.ParseIP(localHost)
 	}
-	_, localPort, _ := net.SplitHostPort(c.LocalAddr().String())
-	localHost := serverIp
-	ipBytes := net.ParseIP(localHost).To4()
+	if ip == nil || ip.IsUnspecified() {
+		host, _, _ := net.SplitHostPort(writeConn.LocalAddr().String())
+		ip = net.ParseIP(host)
+	}
 	nPort, _ := strconv.Atoi(localPort)
-	reply = append(reply, ipBytes...)
-	portBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(portBytes, uint16(nPort))
-	reply = append(reply, portBytes...)
-	writeConn.Write(reply)
-
+	_, _ = writeConn.Write(socks5Reply(rep, ip, nPort))
 }
 
 func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 	defer c.Close()
+	s.task.RLock()
+	client := s.task.Client
+	taskFlow := s.task.Flow
+	serverIP := s.task.ServerIp
+	s.task.RUnlock()
+	client.RLock()
+	clientID := client.Id
+	clientFlow := client.Flow
+	clientRate := client.Rate
+	cryptEnabled, compressEnabled := client.Cnf.Crypt, client.Cnf.Compress
+	client.RUnlock()
+	if !TryAcquireGlobalConn() {
+		s.sendReply(c, serverFailure)
+		return
+	}
+	defer ReleaseGlobalConn()
 	addrType := make([]byte, 1)
 	if _, err := io.ReadFull(c, addrType); err != nil {
 		logs.Warn("read addr type error", err)
@@ -260,7 +283,7 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 		return
 	}
 	logs.Warn(host, strconv.Itoa(int(port)))
-	replyAddr, err := net.ResolveUDPAddr("udp", s.task.ServerIp+":0")
+	replyAddr, err := net.ResolveUDPAddr("udp", serverIP+":0")
 	if err != nil {
 		logs.Error("build local reply addr error", err)
 		return
@@ -275,12 +298,14 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 	s.sendUdpReply(c, reply, succeeded, common.GetServerIpByClientIp(c.RemoteAddr().(*net.TCPAddr).IP))
 	defer reply.Close()
 	// new a tunnel to client
-	link := conn.NewLink("udp5", "", s.task.Client.Cnf.Crypt, s.task.Client.Cnf.Compress, c.RemoteAddr().String(), false, "")
-	target, err := s.bridge.SendLinkInfo(s.task.Client.Id, link, s.task)
+	link := conn.NewLink("udp5", "", cryptEnabled, compressEnabled, c.RemoteAddr().String(), false, "")
+	rawTarget, err := s.bridge.SendLinkInfo(clientID, link, s.task)
 	if err != nil {
-		logs.Warn("get connection from client id %d  error %s", s.task.Client.Id, err.Error())
+		logs.Warn("get connection from client id %d  error %s", clientID, err.Error())
 		return
 	}
+	defer rawTarget.Close()
+	target := conn.GetConn(rawTarget, false, false, clientRate, true)
 
 	// clientAddr 由下面的上行 goroutine 写、下行 goroutine 读。原实现是裸变量，
 	// 两个 goroutine 并发读写接口值属于数据竞争（-race 可复现），还可能读到撕裂的地址。
@@ -306,8 +331,12 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 			}
 			// 公网 → 隧道 = 上传（口径与 udp.go 一致；这两条是 SOCKS5 的 UDP ASSOCIATE，
 			// 走的不是 DealClient，所以要自己记）
-			s.task.Client.Flow.Add(int64(n), 0)
-			s.task.Flow.Add(int64(n), 0)
+			clientFlow.Add(int64(n), 0)
+			taskFlow.Add(int64(n), 0)
+			if flowExceeded(client) {
+				logs.Warn("socks5 udp client id %d flow exceeded", clientID)
+				return
+			}
 		}
 	}()
 
@@ -339,14 +368,17 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 				return
 			}
 			// 隧道 → 公网 = 下载
-			s.task.Client.Flow.Add(0, int64(l))
-			s.task.Flow.Add(0, int64(l))
+			clientFlow.Add(0, int64(l))
+			taskFlow.Add(0, int64(l))
+			if flowExceeded(client) {
+				logs.Warn("socks5 udp client id %d flow exceeded", clientID)
+				return
+			}
 		}
 	}()
 
 	b := common.BufPoolUdp.Get().([]byte)
 	defer common.BufPoolUdp.Put(b)
-	defer target.Close()
 	for {
 		_, err := c.Read(b)
 		if err != nil {
@@ -390,8 +422,18 @@ func (s *Sock5ModeServer) handleConn(c net.Conn) {
 		return
 	}
 
-	needAuth := (s.task.Client.Cnf.U != "" && s.task.Client.Cnf.P != "") ||
-		(s.task.MultiAccount != nil && len(s.task.MultiAccount.AccountMap) > 0)
+	client := s.task.Client
+	client.RLock()
+	authUser, authPassword := client.Cnf.U, client.Cnf.P
+	client.RUnlock()
+	s.task.RLock()
+	multiAccount := s.task.MultiAccount
+	s.task.RUnlock()
+	var accounts map[string]string
+	if multiAccount != nil {
+		accounts = multiAccount.AccountMap
+	}
+	needAuth := authUser != "" || authPassword != "" || len(accounts) > 0
 
 	if needAuth {
 		if !methodOffered(methods, UserPassAuth) {
@@ -405,7 +447,7 @@ func (s *Sock5ModeServer) handleConn(c net.Conn) {
 			c.Close()
 			return
 		}
-		if err := s.Auth(c); err != nil {
+		if err := s.Auth(c, authUser, authPassword, accounts); err != nil {
 			c.Close()
 			logs.Warn("Validation failed: %v, remote %s", err, c.RemoteAddr())
 			return
@@ -429,7 +471,7 @@ func methodOffered(methods []byte, method byte) bool {
 }
 
 // socks5 auth (RFC 1929 username/password)
-func (s *Sock5ModeServer) Auth(c net.Conn) error {
+func (s *Sock5ModeServer) Auth(c net.Conn, expectedUser, expectedPassword string, accounts map[string]string) error {
 	header := make([]byte, 2)
 	if _, err := io.ReadFull(c, header); err != nil {
 		return err
@@ -457,14 +499,14 @@ func (s *Sock5ModeServer) Auth(c net.Conn) error {
 	}
 
 	ok := false
-	if s.task.MultiAccount != nil && len(s.task.MultiAccount.AccountMap) > 0 {
+	if len(accounts) > 0 {
 		// multi-user auth
-		if expected, found := s.task.MultiAccount.AccountMap[string(user)]; found && common.ConstantTimeStrEq(string(pass), expected) {
+		if expected, found := accounts[string(user)]; found && common.ConstantTimeStrEq(string(pass), expected) {
 			ok = true
 		}
 	} else {
-		ok = common.ConstantTimeStrEq(string(user), s.task.Client.Cnf.U) &&
-			common.ConstantTimeStrEq(string(pass), s.task.Client.Cnf.P)
+		ok = common.ConstantTimeStrEq(string(user), expectedUser) &&
+			common.ConstantTimeStrEq(string(pass), expectedPassword)
 	}
 
 	if ok {
@@ -487,9 +529,9 @@ func (s *Sock5ModeServer) Start() error {
 			c.Close()
 			return
 		}
+		defer s.task.Client.AddConn()
 		logs.Trace("New socks5 connection,client %d,remote address %s", s.task.Client.Id, c.RemoteAddr())
 		s.handleConn(c)
-		s.task.Client.AddConn()
 	}, &s.listener)
 }
 

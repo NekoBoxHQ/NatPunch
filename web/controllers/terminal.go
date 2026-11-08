@@ -95,6 +95,9 @@ func (s *TerminalController) GetCmds() {
 // 而点一下就会把命令发进目标机器的 root shell。所以只允许管理员改：
 // 否则任意普通账号都能给管理员"种"一条命令，管理员点一下即执行。
 func (s *TerminalController) SaveCmds() {
+	if !s.requirePOST() {
+		return
+	}
 	if admin, _ := s.GetSession("isAdmin").(bool); !admin {
 		s.Ctx.Output.SetStatus(403)
 		s.Data["json"] = map[string]interface{}{"code": 0, "msg": "forbidden"}
@@ -120,7 +123,11 @@ func (s *TerminalController) SaveCmds() {
 	if q.Hidden == nil {
 		q.Hidden = []string{}
 	}
-	file.GetDb().SaveQuickCmds(&q)
+	if err := file.GetDb().SaveQuickCmds(&q); err != nil {
+		s.Data["json"] = map[string]interface{}{"code": 0, "msg": "save failed"}
+		s.ServeJSON()
+		return
+	}
 	s.Data["json"] = map[string]interface{}{"code": 1}
 	s.ServeJSON()
 }

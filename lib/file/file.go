@@ -203,39 +203,51 @@ func (s *JsonDb) StoreGlobalToJsonFile() error {
 
 var quickCmdsLock sync.Mutex
 
-func (s *JsonDb) StoreQuickCmdsToJsonFile() {
+func (s *JsonDb) StoreQuickCmdsToJsonFile() error {
 	quickCmdsLock.Lock()
 	defer quickCmdsLock.Unlock()
 	s.quickMu.Lock()
 	q := s.Quick
 	s.quickMu.Unlock()
 	if q == nil {
-		return
+		return errors.New("quick cmds is nil")
 	}
 	b, err := json.Marshal(q)
 	if err != nil {
-		return
+		return err
 	}
 	// 0600：与 clients.json / hosts.json 的写入口径一致（原 os.Create 为 0644，见复评🟡）
 	file, err := os.OpenFile(s.QuickCmdsFilePath+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		logs.Error("store quick cmds: create tmp file error: %v", err)
-		return
+		return err
 	}
+	defer os.Remove(s.QuickCmdsFilePath + ".tmp")
 	if _, err := file.Write(b); err != nil {
 		logs.Error("store quick cmds: write error: %v", err)
-		file.Close()
-		os.Remove(s.QuickCmdsFilePath + ".tmp")
-		return
+		_ = file.Close()
+		return err
 	}
-	_ = file.Sync()
-	_ = file.Close()
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
 	if err := os.Rename(s.QuickCmdsFilePath+".tmp", s.QuickCmdsFilePath); err != nil {
 		logs.Error(err, "store quick cmds err, data will lost")
+		return err
 	}
+	return nil
 }
 
-var clientIdLock sync.Mutex
+var (
+	clientIdLock     sync.Mutex
+	clientCreateLock sync.Mutex
+	hostCreateLock   sync.Mutex
+	taskCreateLock   sync.Mutex
+)
 
 // nextClientIdLocked 调用方必须已持有 clientIdLock。
 // 「分配」与「写入 map」必须在同一把锁内完成 —— 否则两个并发注册会拿到同一个空号，
@@ -353,7 +365,9 @@ func storeSyncMapToFile(m *sync.Map, filePath string) error {
 			return true
 		}
 		if err != nil {
-			return true
+			logs.Error("store to file: marshal error: %v", err)
+			writeErr = true
+			return false
 		}
 		_, err = file.Write(b)
 		if err != nil {
@@ -372,8 +386,12 @@ func storeSyncMapToFile(m *sync.Map, filePath string) error {
 	if writeErr {
 		return errors.New("store to file: write error")
 	}
-	_ = file.Sync()
-	_ = file.Close()
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
 	err = os.Rename(filePath+".tmp", filePath)
 	if err != nil {
 		logs.Error(err, "store to file err, data will lost")
@@ -406,8 +424,12 @@ func storeGlobalToFile(m *Glob, filePath string) error {
 		logs.Error("store global to file: write error: %v", err)
 		return err
 	}
-	_ = file.Sync()
-	_ = file.Close()
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
 	err = os.Rename(filePath+".tmp", filePath)
 	if err != nil {
 		logs.Error(err, "store to file err, data will lost")

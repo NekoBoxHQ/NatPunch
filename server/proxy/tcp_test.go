@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"io"
 	"net"
 	"net/http"
@@ -178,6 +179,60 @@ func TestProcessHttpConnectAuthBeforeTunnel(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("ProcessHttp did not exit after auth failure")
+	}
+}
+
+func TestProcessHttpHalfConfiguredAuthStillRequired(t *testing.T) {
+	setupProxyTestConf(t)
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	targetClient, targetServer := net.Pipe()
+	defer targetClient.Close()
+	defer targetServer.Close()
+
+	server := newHTTPProxyServer(t, "user", "", targetServer)
+	done := make(chan error, 1)
+	go func() {
+		done <- ProcessHttp(conn.NewConn(serverConn), server)
+	}()
+
+	req := "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n"
+	if _, err := clientConn.Write([]byte(req)); err != nil {
+		t.Fatal(err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(clientConn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Fatalf("half-configured proxy must require auth, got %d", resp.StatusCode)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected auth error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ProcessHttp did not exit after auth failure")
+	}
+}
+
+func TestSocks5ReplySupportsIPv6(t *testing.T) {
+	reply := socks5Reply(succeeded, net.ParseIP("2001:db8::1"), 1080)
+	if len(reply) != 4+net.IPv6len+2 {
+		t.Fatalf("unexpected SOCKS5 IPv6 reply length: %d", len(reply))
+	}
+	if reply[3] != ipV6 {
+		t.Fatalf("expected ATYP=IPv6, got %d", reply[3])
+	}
+	if got := binary.BigEndian.Uint16(reply[len(reply)-2:]); got != 1080 {
+		t.Fatalf("reply port = %d", got)
 	}
 }
 

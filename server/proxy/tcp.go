@@ -63,9 +63,9 @@ func (s *TunnelModeServer) Start() error {
 			c.Close()
 			return
 		}
+		defer s.task.Client.AddConn()
 		logs.Trace("new tcp connection,local port %d,client %d,remote address %s", s.task.Port, s.task.Client.Id, c.RemoteAddr())
 		s.process(conn.NewConn(c), s)
-		s.task.Client.AddConn()
 	})
 	return nil
 }
@@ -105,12 +105,18 @@ func (s *WebServer) Start() error {
 	if l, err = connection.GetWebManagerListener(); err == nil {
 		beego.InitBeforeHTTPRun()
 		secure := beego.AppConfig.String("web_open_ssl") == "true"
+		srv := &http.Server{
+			Handler:           newSameSiteHandler(beego.BeeApp.Handlers, secure),
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    64 << 10,
+		}
 		if secure {
 			keyPath := beego.AppConfig.String("web_key_file")
 			certPath := beego.AppConfig.String("web_cert_file")
-			err = http.ServeTLS(l, newSameSiteHandler(beego.BeeApp.Handlers, true), certPath, keyPath)
+			err = srv.ServeTLS(withHandshakeTimeout(l, 10*time.Second), certPath, keyPath)
 		} else {
-			err = http.Serve(l, newSameSiteHandler(beego.BeeApp.Handlers, false))
+			err = srv.Serve(l)
 		}
 	} else {
 		logs.Error(err)
@@ -139,7 +145,8 @@ func ProcessTunnel(c *conn.Conn, s *TunnelModeServer) error {
 		logs.Warn("tcp port %d ,client id %d,task id %d connect error %s", s.task.Port, s.task.Client.Id, s.task.Id, err.Error())
 		return err
 	}
-	return s.DealClient(c, s.task.Client, targetAddr, nil, common.CONN_TCP, nil, s.task.Target.LocalProxy, s.task, nil)
+	_, localProxy := s.task.Target.SnapshotTarget()
+	return s.DealClient(c, s.task.Client, targetAddr, nil, common.CONN_TCP, nil, localProxy, s.task, nil)
 }
 
 // http proxy
@@ -158,9 +165,14 @@ func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
 	}
 	// Authenticate before establishing CONNECT tunnel (fixes auth-after-200 bug).
 	// 优先使用隧道级账号（MultiAccount），未配置则回退客户端级账号
+	s.task.Client.RLock()
 	u, p := s.task.Client.Cnf.U, s.task.Client.Cnf.P
-	if s.task.MultiAccount != nil && len(s.task.MultiAccount.AccountMap) > 0 {
-		for k, v := range s.task.MultiAccount.AccountMap {
+	s.task.Client.RUnlock()
+	s.task.RLock()
+	multiAccount := s.task.MultiAccount
+	s.task.RUnlock()
+	if multiAccount != nil && len(multiAccount.AccountMap) > 0 {
+		for k, v := range multiAccount.AccountMap {
 			u, p = k, v
 			break
 		}
@@ -177,5 +189,6 @@ func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
 		rb = nil
 	}
 	logs.Info("http proxy request, method %s, host %s, client %d, remote %s", r.Method, addr, s.task.Client.Id, c.Conn.RemoteAddr())
-	return s.DealClient(c, s.task.Client, addr, rb, common.CONN_TCP, nil, s.task.Target.LocalProxy, s.task, nil)
+	_, localProxy := s.task.Target.SnapshotTarget()
+	return s.DealClient(c, s.task.Client, addr, rb, common.CONN_TCP, nil, localProxy, s.task, nil)
 }

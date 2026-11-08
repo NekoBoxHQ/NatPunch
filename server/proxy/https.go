@@ -207,7 +207,10 @@ func (https *HttpsServer) handleHttps2(c net.Conn, hostName string, rb []byte, r
 		return
 	}
 	defer host.Client.AddConn()
-	if err = https.auth(r, conn.NewConn(c), host.Client.Cnf.U, host.Client.Cnf.P); err != nil {
+	host.Client.RLock()
+	authUser, authPassword := host.Client.Cnf.U, host.Client.Cnf.P
+	host.Client.RUnlock()
+	if err = https.auth(r, conn.NewConn(c), authUser, authPassword); err != nil {
 		logs.Warn("auth error", err, r.RemoteAddr)
 		return
 	}
@@ -219,7 +222,8 @@ func (https *HttpsServer) handleHttps2(c net.Conn, hostName string, rb []byte, r
 		return
 	}
 	logs.Info("new https connection,clientId %d,host %s,remote address %s", host.Client.Id, r.Host, c.RemoteAddr().String())
-	https.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, host.Target.LocalProxy, nil, host)
+	_, localProxy := host.Target.SnapshotTarget()
+	https.DealClient(conn.NewConn(c), host.Client, targetAddr, rb, common.CONN_TCP, nil, localProxy, nil, host)
 }
 
 // close
@@ -256,6 +260,8 @@ func (httpsListener *HttpsListener) Accept() (net.Conn, error) {
 		if httpsConn == nil {
 			return nil, errors.New("get connection error")
 		}
+		// TLS 握手也必须有上限；握手完成后 net/http 会按 ReadHeaderTimeout 重设请求头期限。
+		_ = httpsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		return httpsConn, nil
 	case <-httpsListener.closeCh:
 		return nil, errors.New("https listener closed")
