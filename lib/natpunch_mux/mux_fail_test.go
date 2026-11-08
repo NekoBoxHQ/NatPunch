@@ -17,7 +17,7 @@ func TestNewConnReturnsWhenPeerClosesDuringSetup(t *testing.T) {
 	})
 
 	type result struct {
-		c   net.Conn
+		c   *conn
 		err error
 	}
 	done := make(chan result, 1)
