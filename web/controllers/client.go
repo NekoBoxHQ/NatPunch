@@ -246,24 +246,26 @@ func (s *ClientController) Edit() {
 					return
 				}
 			}
-			c.Lock()
-			clientLocked := true
-			defer func() {
-				if clientLocked {
-					c.Unlock()
-				}
-			}()
-			if c.Flow == nil {
-				c.Flow = &file.Flow{}
-			}
-			if c.Cnf == nil {
-				c.Cnf = &file.Config{}
-			}
-			if s.GetSession("isAdmin").(bool) {
+			isAdmin, _ := s.GetSession("isAdmin").(bool)
+			var (
+				newVerifyKey  string
+				newFlowLimit  int64
+				newRateLimit  int
+				newMaxConn    int
+				newMaxTunnel  int
+				newConfigConn bool
+				newExpireTime string
+			)
+			if isAdmin {
+				// 跨客户端校验会读取当前 client 自身；必须在写锁之前完成，
+				// 否则 VerifyVkey/VerifyUserName 会对同一 RWMutex 再次求读锁并永久阻塞。
+				c.RLock()
+				newVerifyKey = c.VerifyKey
+				c.RUnlock()
 				// vkey 防呆：留空 = 保持原值（绝不因编辑覆盖成空/变短导致客户端掉线）
 				nv := s.GetString("vkey")
 				if nv == "" {
-					nv = c.VerifyKey
+					nv = newVerifyKey
 				} else if !file.ValidVerifyKey(nv) {
 					s.AjaxErr("验证密钥只能包含字母、数字和 . _ -，长度 8~64（留空保持原值）")
 					return
@@ -272,23 +274,39 @@ func (s *ClientController) Edit() {
 					s.AjaxErr("Vkey duplicate, please reset")
 					return
 				}
-				c.VerifyKey = nv
+				newVerifyKey = nv
 				fl, flErr := s.parseFlowLimit()
 				if flErr != "" {
 					s.AjaxErr(flErr)
 					return
 				}
-				c.Flow.SetLimit(fl)
+				newFlowLimit = fl
 				rl, rlErr := s.parseRateLimit()
 				if rlErr != "" {
 					s.AjaxErr(rlErr)
 					return
 				}
-				c.RateLimit = rl
-				c.MaxConn = s.GetIntNoErr("max_conn")
-				c.MaxTunnelNum = s.GetIntNoErr("max_tunnel")
+				newRateLimit = rl
+				newMaxConn = s.GetIntNoErr("max_conn")
+				newMaxTunnel = s.GetIntNoErr("max_tunnel")
+				newConfigConn = s.GetBoolNoErr("config_conn_allow")
+				newExpireTime = normalizeExpireTime(s.getEscapeString("expire_time"))
 			}
-			isAdmin, _ := s.GetSession("isAdmin").(bool)
+
+			c.Lock()
+			if c.Flow == nil {
+				c.Flow = &file.Flow{}
+			}
+			if c.Cnf == nil {
+				c.Cnf = &file.Config{}
+			}
+			if isAdmin {
+				c.VerifyKey = newVerifyKey
+				c.Flow.SetLimit(newFlowLimit)
+				c.RateLimit = newRateLimit
+				c.MaxConn = newMaxConn
+				c.MaxTunnelNum = newMaxTunnel
+			}
 			if isAdmin {
 				// 用量/到期/配置注册开关都只允许管理员改。普通用户编辑自己那条时，
 				// 请求里塞 flow_inlet=0&flow_export=0 就能把管理员设的配额清零，
@@ -303,8 +321,8 @@ func (s *ClientController) Edit() {
 					}
 					c.Flow.SetFlows(in, out)
 				}
-				c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
-				c.ExpireTime = normalizeExpireTime(s.getEscapeString("expire_time"))
+				c.ConfigConnAllow = newConfigConn
+				c.ExpireTime = newExpireTime
 			}
 			c.Remark = s.GetString("remark")
 			c.Cnf.U = s.GetString("u")
@@ -329,7 +347,6 @@ func (s *ClientController) Edit() {
 
 			c.BlackIpList = RemoveRepeatedElement(strings.Split(s.getEscapeString("blackiplist"), "\r\n"))
 			c.Unlock()
-			clientLocked = false
 			newRate.Start()
 			if err := file.GetDb().UpdateClient(c); err != nil {
 				s.AjaxErr("save failed: " + err.Error())

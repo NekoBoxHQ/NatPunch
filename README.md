@@ -177,7 +177,7 @@ wget -qO- https://raw.githubusercontent.com/NekoBoxHQ/NatPunch/master/uninstall_
 ```
 /opt/natpunch/web/static/dl/
 ├── install.sh  uninstall_client.sh  install_server.sh   # 稳定入口
-└── v26.10.81/                                            # 当前版本
+└── v26.10.82/                                            # 当前版本
     ├── linux_{amd64,arm64,arm,mipsle}_client.tar.gz
     ├── linux_{amd64,arm64,arm,mipsle}_server.tar.gz
     ├── minisign-check-linux-{amd64,arm64,arm,mipsle}
@@ -212,8 +212,8 @@ wget -qO- https://panel.example.com/static/dl/uninstall_client.sh \
 
 | 变量 | 作用 | 示例 |
 |---|---|---|
-| `NATPUNCH_BASE_URL` | 直接指定发布目录（含版本），完全不访问 GitHub | `https://panel.example.com/static/dl/v26.10.81` |
-| `NATPUNCH_VERSION` | 只覆盖版本号，仍按官方地址拼 | `v26.10.81` |
+| `NATPUNCH_BASE_URL` | 直接指定发布目录（含版本），完全不访问 GitHub | `https://panel.example.com/static/dl/v26.10.82` |
+| `NATPUNCH_VERSION` | 只覆盖版本号，仍按官方地址拼 | `v26.10.82` |
 | `NATPUNCH_MIRROR` | 镜像前缀，拼在官方地址前面 | `https://ghfast.top` |
 
 例子：
@@ -221,7 +221,7 @@ wget -qO- https://panel.example.com/static/dl/uninstall_client.sh \
 ```shell
 # 从面板升级客户端（当前版本目录要写全）
 uclient-fetch -qO- https://panel.example.com/static/dl/uninstall_client.sh \
-  | NATPUNCH_BASE_URL=https://panel.example.com/static/dl/v26.10.81 sh -s update
+  | NATPUNCH_BASE_URL=https://panel.example.com/static/dl/v26.10.82 sh -s update
 ```
 
 > 面板 `dl/` 目录下的旧版本会在下次升级时被替换，只保留当前版本；如果需要回退到旧版，从 GitHub Release 取对应版本包。
