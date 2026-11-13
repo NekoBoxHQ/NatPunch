@@ -1036,6 +1036,17 @@ get_web_port() {
     [ -n "${P:-}" ] && echo "$P" && return 0
     echo "8080"
 }
+# 面板访问地址：协议看 web_open_ssl；主机优先用 web_domain。
+# 客户端安装命令是按这个地址生成的，所以只要面板或客户端 TLS 任一配了域名就必须给域名，
+# 两边都没配才退回本机 IP。
+panel_url() {
+    _pu_port="$(get_web_port)"
+    _pu_scheme="http"
+    grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && _pu_scheme="https"
+    _pu_host="$(get_kv web_domain 2>/dev/null)"
+    [ -n "${_pu_host:-}" ] || _pu_host="$(get_ip)"
+    printf '%s://%s:%s' "$_pu_scheme" "$_pu_host" "$_pu_port"
+}
 # ================= 菜单 =================
 show_menu() {
     echo ""
@@ -1068,10 +1079,15 @@ do_install() {
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
         if [ "$NEW_PANEL_SSL" = "true" ]; then
-            kv "面板地址" "https://$NEW_DOMAIN:$NEW_PORT"
+            _new_scheme="https"
         else
-            kv "面板地址" "http://$(get_ip):$NEW_PORT"
+            _new_scheme="http"
         fi
+        # 主机跟着「有没有配域名」走：面板/客户端 TLS 任一填了域名就用域名，
+        # 因为客户端的安装命令是拿这个地址生成的；两边都没有才用 IP。
+        _new_host="$NEW_DOMAIN"
+        [ -n "${_new_host:-}" ] || _new_host="$(get_ip)"
+        kv "面板地址" "$_new_scheme://$_new_host:$NEW_PORT"
         kv "用户名" "$NEW_USER"
         kv "密码"   "$NEW_PASS"
         echo ""
@@ -1081,11 +1097,7 @@ do_start() {
     title "启动 NatPunch"
     acquire_lock; start; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
-        PORT=$(get_web_port)
-        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
-        else SCHEME="http"; HOST="$(get_ip)"; fi
-        echo ""; kv "面板地址" "$SCHEME://$HOST:$PORT"; echo ""
+        echo ""; kv "面板地址" "$(panel_url)"; echo ""
     fi
 }
 do_stop() {
@@ -1094,11 +1106,7 @@ do_stop() {
 do_restart() {
     title "重启 NatPunch"; acquire_lock; restart; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
-        PORT=$(get_web_port)
-        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
-        else SCHEME="http"; HOST="$(get_ip)"; fi
-        echo ""; kv "面板地址" "$SCHEME://$HOST:$PORT"; echo ""
+        echo ""; kv "面板地址" "$(panel_url)"; echo ""
     fi
 }
 do_status() { title "运行状态"; status; echo ""; }
@@ -1128,15 +1136,12 @@ do_passwd() {
     info "已写入配置，正在重启服务 ..."
     restart; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
-        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
-        else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         printf '%b\n' "${C_GREEN}${C_BOLD}  [OK] 修改完成${C_RESET}"
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
-        kv "端口" "$IN_PORT"; kv "用户名" "$IN_USER"; kv "密码" "$IN_PASS"; kv "面板" "$SCHEME://$HOST:$IN_PORT"
+        kv "端口" "$IN_PORT"; kv "用户名" "$IN_USER"; kv "密码" "$IN_PASS"; kv "面板" "$(panel_url)"
         echo ""
         # 改密同样会写一份 $CONF.bak.*（见上面那行 cp）。原先只在升级成功时清理，
         # 于是反复改密码会一直堆，得等到下次升级才被顺带带走。
@@ -1162,16 +1167,12 @@ do_upgrade() {
     esac
     acquire_lock; upgrade "$IN_VER"; RC=$?; release_lock
     if [ $RC -eq 0 ]; then
-        PORT=$(get_web_port)
-        if grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null; then
-            SCHEME="https"; HOST=$(get_kv web_domain 2>/dev/null); [ -n "${HOST:-}" ] || HOST="$(get_ip)"
-        else SCHEME="http"; HOST="$(get_ip)"; fi
         echo ""
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         printf '%b\n' "${C_GREEN}${C_BOLD}  [OK] 升级完成${C_RESET}"
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
-        kv "目标版本" "${IN_VER:-最新版}"; kv "面板地址" "$SCHEME://$HOST:$PORT"
+        kv "目标版本" "${IN_VER:-最新版}"; kv "面板地址" "$(panel_url)"
         echo ""
     fi
 }
