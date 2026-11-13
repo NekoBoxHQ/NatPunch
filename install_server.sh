@@ -298,6 +298,11 @@ prompt_credentials() {
     [ -n "${IN_PORT:-}" ] || IN_PORT="8080"
     case "$IN_PORT" in *[!0-9]*) die "Web 端口必须是纯数字" ;; esac
     [ "$IN_PORT" -ge 1 ] && [ "$IN_PORT" -le 65535 ] || die "Web 端口范围必须是 1-65535"
+    # 面板自身是否用 TLS：面板要挂到雷池/其它反代后面（TLS 由外层终止）就选 N。
+    # 选 N 时只写 web_open_ssl=false，不影响后面隧道/桥接使用域名证书。
+    printf "  面板是否使用 TLS (y/N): "; read IN_PANEL_SSL
+    NEW_PANEL_SSL="false"
+    case "${IN_PANEL_SSL:-}" in y|Y|yes|YES) NEW_PANEL_SSL="true" ;; esac
     printf "  客户端 HTTP 端口 [默认 8024]: "; read IN_BRIDGE
     [ -n "${IN_BRIDGE:-}" ] || IN_BRIDGE="8024"
     case "$IN_BRIDGE" in *[!0-9]*) die "客户端 HTTP 端口必须是纯数字" ;; esac
@@ -306,19 +311,20 @@ prompt_credentials() {
     [ -n "${IN_TLS_PORT:-}" ] || IN_TLS_PORT="8025"
     case "$IN_TLS_PORT" in *[!0-9]*) die "客户端 HTTPS 端口必须是纯数字" ;; esac
     [ "$IN_TLS_PORT" -ge 1 ] && [ "$IN_TLS_PORT" -le 65535 ] || die "客户端 HTTPS 端口范围必须是 1-65535"
-    printf "  启用 HTTPS/TLS (y/N): "; read IN_HTTPS
+    # 这一段问的是「客户端 TLS + 隧道证书」：8025 桥接用的是自签证书，
+    # 隧道端口（Https=true 的任务）用的才是这里的域名证书，与面板是否 HTTPS 无关。
+    printf "  启用客户端 TLS（隧道需域名证书）(y/N): "; read IN_HTTPS
     NEW_HTTPS="false"; NEW_CERT=""; NEW_KEY=""; NEW_DOMAIN=""
-    case "${IN_HTTPS:-}" in
-        y|Y|yes|YES)
-            NEW_HTTPS="true"
-            printf "  域名: "; read NEW_DOMAIN
-            [ -n "${NEW_DOMAIN:-}" ] || NEW_DOMAIN="$(get_ip)"
-            printf "  pem [默认 /opt/natpunch/conf/server.pem]: "; read IN_CERT
-            [ -n "${IN_CERT:-}" ] && NEW_CERT="$IN_CERT" || NEW_CERT="/opt/natpunch/conf/server.pem"
-            printf "  key [默认 /opt/natpunch/conf/server.key]: "; read IN_KEY
-            [ -n "${IN_KEY:-}" ] && NEW_KEY="$IN_KEY" || NEW_KEY="/opt/natpunch/conf/server.key"
-            ;;
-    esac
+    case "${IN_HTTPS:-}" in y|Y|yes|YES) NEW_HTTPS="true" ;; esac
+    # 面板 HTTPS 与隧道共用同一张证书，任一开启都要问域名/pem/key
+    if [ "$NEW_PANEL_SSL" = "true" ] || [ "$NEW_HTTPS" = "true" ]; then
+        printf "  域名: "; read NEW_DOMAIN
+        [ -n "${NEW_DOMAIN:-}" ] || NEW_DOMAIN="$(get_ip)"
+        printf "  pem [默认 /opt/natpunch/conf/server.pem]: "; read IN_CERT
+        [ -n "${IN_CERT:-}" ] && NEW_CERT="$IN_CERT" || NEW_CERT="/opt/natpunch/conf/server.pem"
+        printf "  key [默认 /opt/natpunch/conf/server.key]: "; read IN_KEY
+        [ -n "${IN_KEY:-}" ] && NEW_KEY="$IN_KEY" || NEW_KEY="/opt/natpunch/conf/server.key"
+    fi
     printf "  用户名 [默认 admin]: "; read IN_USER
     [ -n "${IN_USER:-}" ] || IN_USER="admin"
     # 密码强制输入：空输入不允许落 123（F1-9）
@@ -340,22 +346,32 @@ apply_credentials() {
     set_kv allow_user_change_username true
     info "面板端口: $NEW_PORT"
     info "客户端 TCP 端口: $NEW_BRIDGE (明文)"
+    # 面板自身 HTTPS 与客户端 TLS/隧道证书是两件事，必须分开写：
+    #   web_open_ssl  -> 只决定面板本身是否用证书（挂雷池反代时给 false）
+    #   tls_enable    -> 只决定 8025 桥接是否开 TLS
+    #   web_cert_file -> 面板 HTTPS 与隧道端口（Https=true 的任务）共用的域名证书
+    set_kv web_open_ssl "$NEW_PANEL_SSL"
     if [ "$NEW_HTTPS" = "true" ]; then
         set_kv tls_enable "true"
         set_kv tls_bridge_port "$NEW_TLS_PORT"
-        set_kv web_open_ssl "true"
-        set_kv web_cert_file "$NEW_CERT"
-        set_kv web_key_file "$NEW_KEY"
-        set_kv web_domain "$NEW_DOMAIN"
-        info "已启用 HTTPS/TLS: $NEW_DOMAIN"
-        info "pem: $NEW_CERT"
-        info "key: $NEW_KEY"
         info "客户端 TLS 端口: $NEW_TLS_PORT"
     else
         set_kv tls_enable "false"
         set_kv tls_bridge_port "0"
-        set_kv web_open_ssl "false"
-        info "未启用 HTTPS/TLS"
+        info "客户端 TLS 已关闭"
+    fi
+    if [ -n "$NEW_CERT" ]; then
+        set_kv web_cert_file "$NEW_CERT"
+        set_kv web_key_file "$NEW_KEY"
+        set_kv web_domain "$NEW_DOMAIN"
+        info "证书域名: $NEW_DOMAIN"
+        info "pem: $NEW_CERT"
+        info "key: $NEW_KEY"
+    fi
+    if [ "$NEW_PANEL_SSL" = "true" ]; then
+        info "面板: HTTPS（自带证书）"
+    else
+        info "面板: HTTP（TLS 由外层反代终止）"
     fi
     info "面板账号: $NEW_USER"
 }
@@ -1051,7 +1067,7 @@ do_install() {
         printf '%b\n' "${C_GREEN}${C_BOLD}  [OK] 安装完成${C_RESET}"
         printf '%b\n' "${C_GREEN}${LINE}${C_RESET}"
         echo ""
-        if [ "$NEW_HTTPS" = "true" ]; then
+        if [ "$NEW_PANEL_SSL" = "true" ]; then
             kv "面板地址" "https://$NEW_DOMAIN:$NEW_PORT"
         else
             kv "面板地址" "http://$(get_ip):$NEW_PORT"
