@@ -324,10 +324,10 @@ MINISIGN_PUBKEY="${MINISIGN_PUBKEY:-RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0
 # 必须内嵌于本脚本：若改用「同渠道下载的 SHA256SUMS」去校验校验器，在镜像被控时
 # 攻击者可同时替换 包 / SHA256SUMS / 校验器 三者，构成循环信任，等于没有校验（复评⚠️1）。
 # 留空 = 不启用内置校验器（仅告警跳过，SHA256 仍强制校验）；填入 = 锚定后才执行。
-MSC_SHA256_amd64="8b7a222065bed26a3c5f60acd4bdbad8d560f5427535f0ffe8645303fbf6a0da"
-MSC_SHA256_arm64="fa7db8a8284452e1796afc4bf6b9e9f51f77aa3ef3519dce0c944ef29d411bb7"
-MSC_SHA256_arm="b362e503ef0a738e3ea4b8d58469e8c2b1d2d695c53337aa3964d69b7125693b"
-MSC_SHA256_mipsle="f68bc7ce7db0a51cb92ee6eb8b46314be63e5eb7f26ac4d59cfcee78342422e8"
+MSC_SHA256_amd64="2ca78ffa3bb53ab7cd28a513ef62b5f5c0b0b6d94b39e38c48d5e251caff4201"
+MSC_SHA256_arm64="ced9587bab599201bff202e55cb2d959e5a84b5b585f25208c81d6feb6d01b40"
+MSC_SHA256_arm="1274b0e9b23772fb0bf7684f6b315cf256ec60c308073f0d40d26c6d28b65d69"
+MSC_SHA256_mipsle="c333e2fb1f962818b9e7edce8febfa84838c459a7089d6bfd4e5e9f300b89ef3"
 
 sig_ok=0
 if [ -n "${MINISIGN_PUBKEY:-}" ]; then

@@ -11,6 +11,12 @@
   `io.LimitReader` 截断，`json.Unmarshal` 失败后接口返回 `bad request`，前端表现为「加了没保存」。
   上限改为 1MB，正常使用规模下不会再触发。
 
+### 构建
+
+- **Go 工具链 1.26.10 → 1.26.11**（修 `net/http` 的 GO-2026-6859，否则 govulncheck 直接失败）。
+  工具链变更会改变 `minisign-check` 产物哈希，四个架构的 `MSC_SHA256_*` 信任锚已在
+  `install.sh` / `install_server.sh` / `uninstall_client.sh` 中同步更新。
+
 ## v26.10.82
 
 ### 修复

@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Vet
         run: go vet ./...
@@ -132,7 +132,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Build
         env:
@@ -198,7 +198,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Build minisign-check
         env:
