@@ -2,6 +2,18 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v2026.11.02
+
+### 修复
+
+- **安装/升级脚本在 OpenWrt（busybox）上下载失败。** `install.sh` / `uninstall_client.sh` /
+  `install_server.sh` 里的 wget 调用带了 GNU 专有的 `--timeout` / `--tries`；busybox 的 wget
+  不认这两个参数，会直接失败但看起来像"下载了空内容"，于是版本号读不到、自建源的 `dl` 根目录
+  被误当成版本目录（去下 `.../dl/linux_amd64_client.tar.gz` 而 404）。
+  现在统一为：优先 `uclient-fetch`（OpenWrt 原生），其次 `curl`，最后 `wget -T/-t`。
+- **回归测试**：`test/upgrade_logic_test.sh` 增加下载器参数可移植性检查——三个脚本都不许出现
+  GNU 专有的 wget 参数，且必须带 `uclient-fetch` 分支。
+
 ## v2026.11.01
 
 ### 修复

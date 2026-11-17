@@ -377,14 +377,18 @@ apply_credentials() {
 }
 # ================= 下载 =================
 choose_downloader() {
-    if command -v wget >/dev/null 2>&1; then DL_TYPE="wget"
+    # 优先 uclient-fetch（OpenWrt/busybox 原生），其次 curl，最后 wget。
+    # busybox 的 wget 不认 GNU 的 --timeout / --tries，只认 -T / -t。
+    if command -v uclient-fetch >/dev/null 2>&1; then DL_TYPE="uclient"
     elif command -v curl >/dev/null 2>&1; then DL_TYPE="curl"
-    else die "缺少 wget/curl"; fi
+    elif command -v wget >/dev/null 2>&1; then DL_TYPE="wget"
+    else die "缺少 uclient-fetch/curl/wget"; fi
 }
 dl() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
-        wget) wget -q --timeout=30 --tries=2 -O "$2" "$1" ;;
+        uclient) uclient-fetch -q -O "$2" "$1" ;;
+        wget) wget -q -T 30 -t 2 -O "$2" "$1" ;;
         curl) curl -fsSL --max-time 60 --retry 2 -o "$2" "$1" ;;
     esac
 }
@@ -483,7 +487,8 @@ verify_package() {
 fetch() {
     [ -n "${DL_TYPE:-}" ] || choose_downloader
     case "$DL_TYPE" in
-        wget) wget -q --timeout=10 -O - "$1" 2>/dev/null ;;
+        uclient) uclient-fetch -qO- "$1" 2>/dev/null ;;
+        wget) wget -q -O - -T 10 "$1" 2>/dev/null ;;
         curl) curl -fsSL --max-time 10 "$1" 2>/dev/null ;;
     esac
 }
@@ -775,10 +780,12 @@ publish_selfhost() {
     fi
 
     if [ ! -f "$PUB_SH" ]; then
-        if command -v curl >/dev/null 2>&1; then
+        if command -v uclient-fetch >/dev/null 2>&1; then
+            uclient-fetch -q -O "$PUB_SH" "$RAW_SCRIPTS/scripts/selfhost-publish.sh" 2>/dev/null || PUB_SH=""
+        elif command -v curl >/dev/null 2>&1; then
             curl -fsSL --max-time 60 -o "$PUB_SH" "$RAW_SCRIPTS/scripts/selfhost-publish.sh" 2>/dev/null || PUB_SH=""
         elif command -v wget >/dev/null 2>&1; then
-            wget -q --timeout=30 -O "$PUB_SH" "$RAW_SCRIPTS/scripts/selfhost-publish.sh" 2>/dev/null || PUB_SH=""
+            wget -q -T 30 -O "$PUB_SH" "$RAW_SCRIPTS/scripts/selfhost-publish.sh" 2>/dev/null || PUB_SH=""
         fi
     fi
     if [ -n "${PUB_SH:-}" ] && [ -s "$PUB_SH" ]; then
@@ -1019,10 +1026,12 @@ uninstall() {
 get_ip() {
     IP=""
     for u in "https://api.ipify.org" "https://ifconfig.me/ip" "https://ipinfo.io/ip"; do
-        if command -v wget >/dev/null 2>&1; then
-            IP=$(wget -qO- --timeout=3 "$u" 2>/dev/null | head -n1)
+        if command -v uclient-fetch >/dev/null 2>&1; then
+            IP=$(uclient-fetch -qO- "$u" 2>/dev/null | head -n1)
         elif command -v curl >/dev/null 2>&1; then
             IP=$(curl -fsSL --max-time 3 "$u" 2>/dev/null | head -n1)
+        elif command -v wget >/dev/null 2>&1; then
+            IP=$(wget -q -O - -T 3 "$u" 2>/dev/null | head -n1)
         fi
         [ -n "${IP:-}" ] && break
     done

@@ -166,17 +166,25 @@ case "$ARCH" in
 esac
 echo "    $ARCH -> $PKG"
 # ---------- 下载工具探测 ----------
+# ---------- 下载工具探测 ----------
+# 优先 uclient-fetch（OpenWrt/busybox 原生），其次 curl，最后 wget。
+# busybox 的 wget 不认 GNU 的 --timeout / --tries，只认 -T / -t；
+# 用错参数时它会直接失败，表现为「下载内容为空」而不是报错。
+HAS_UCLIENT=0
 HAS_WGET=0
 HAS_CURL=0
+command -v uclient-fetch >/dev/null 2>&1 && HAS_UCLIENT=1
 command -v wget >/dev/null 2>&1 && HAS_WGET=1
 command -v curl >/dev/null 2>&1 && HAS_CURL=1
-[ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 wget 或 curl"
+[ "$HAS_UCLIENT" -eq 1 ] || [ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 uclient-fetch / wget / curl 之一"
 fetch() {
-    # fetch <url> <out>（带超时与重试，避免网络挂起阻塞安装）
-    if [ "$HAS_WGET" -eq 1 ]; then
-        wget -q --timeout=30 --tries=2 -O "$2" "$1"
-    else
+    # fetch <url> <out>：加超时与重试，避免网络被墙时整个安装卡住
+    if [ "$HAS_UCLIENT" -eq 1 ]; then
+        uclient-fetch -q -O "$2" "$1" 2>/dev/null
+    elif [ "$HAS_CURL" -eq 1 ]; then
         curl -fsSL --max-time 60 --retry 2 -o "$2" "$1"
+    else
+        wget -q -T 30 -t 2 -O "$2" "$1"
     fi
 }
 # pick_highest_version：从 GitHub releases 的 JSON 里挑版本号最高的 tag。
@@ -236,11 +244,14 @@ MIRROR=""
 if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
 
 # 取一个 URL 的正文（失败输出空）。抽成函数是为了让测试能替换掉它。
+# 取一个 URL 的正文（失败输出空）。抽成函数是为了让测试能替换掉它。
 nx_fetch_stdout() {
-    if [ "${HAS_WGET:-1}" -eq 1 ]; then
-        wget -qO- --timeout=10 "$1" 2>/dev/null
-    else
+    if [ "${HAS_UCLIENT:-0}" -eq 1 ]; then
+        uclient-fetch -qO- "$1" 2>/dev/null
+    elif [ "${HAS_CURL:-0}" -eq 1 ]; then
         curl -fsSL --max-time 10 "$1" 2>/dev/null
+    else
+        wget -q -O - -T 10 "$1" 2>/dev/null
     fi
 }
 
@@ -276,11 +287,7 @@ if [ -n "${NATPUNCH_BASE_URL:-}" ]; then
     nx_resolve_base_url
     echo "    使用指定发布目录：$BASE_URL"
 else
-    if [ "$HAS_WGET" -eq 1 ]; then
-        VER_LIST="$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
-    else
-        VER_LIST="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
-    fi
+    VER_LIST="$(nx_fetch_stdout "https://api.github.com/repos/$REPO/releases?per_page=20")"
     VER="$(printf '%s\n' "$VER_LIST" | pick_highest_version)"
     echo "    版本选取：${VER:-回退 latest}"
 fi

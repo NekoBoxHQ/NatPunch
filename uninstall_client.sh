@@ -57,16 +57,22 @@ tcmd() {
     fi
 }
 # ---------- 下载工具 ----------
-HAS_WGET=0; HAS_CURL=0
+# ---------- 下载工具 ----------
+# 优先 uclient-fetch（OpenWrt/busybox 原生），其次 curl，最后 wget。
+# busybox 的 wget 不认 GNU 的 --timeout / --tries，只认 -T / -t。
+HAS_UCLIENT=0; HAS_WGET=0; HAS_CURL=0
+command -v uclient-fetch >/dev/null 2>&1 && HAS_UCLIENT=1
 command -v wget >/dev/null 2>&1 && HAS_WGET=1
 command -v curl >/dev/null 2>&1 && HAS_CURL=1
-[ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 wget 或 curl"
+[ "$HAS_UCLIENT" -eq 1 ] || [ "$HAS_WGET" -eq 1 ] || [ "$HAS_CURL" -eq 1 ] || die "需要 uclient-fetch / wget / curl 之一"
 fetch_to() {
     # fetch_to <url> <out>
-    if [ "$HAS_WGET" -eq 1 ]; then
-        wget -q --timeout=15 --tries=2 -O "$2" "$1" 2>/dev/null || return 1
-    else
+    if [ "$HAS_UCLIENT" -eq 1 ]; then
+        uclient-fetch -q -O "$2" "$1" 2>/dev/null || return 1
+    elif [ "$HAS_CURL" -eq 1 ]; then
         curl -fsSL --max-time 30 --retry 2 -o "$2" "$1" || return 1
+    else
+        wget -q -T 15 -t 2 -O "$2" "$1" 2>/dev/null || return 1
     fi
     [ -s "$2" ] || return 1
     return 0
@@ -302,11 +308,14 @@ do_update() {
     if [ -n "${NATPUNCH_MIRROR:-}" ]; then MIRROR="${NATPUNCH_MIRROR%/}/"; fi
 
     # 取一个 URL 的正文（失败输出空）。抽成函数是为了让测试能替换掉它。
+    # 取一个 URL 的正文（失败输出空）。抽成函数是为了让测试能替换掉它。
     nx_fetch_stdout() {
-        if [ "${HAS_WGET:-1}" -eq 1 ]; then
-            wget -qO- --timeout=10 "$1" 2>/dev/null
-        else
+        if [ "${HAS_UCLIENT:-0}" -eq 1 ]; then
+            uclient-fetch -qO- "$1" 2>/dev/null
+        elif [ "${HAS_CURL:-0}" -eq 1 ]; then
             curl -fsSL --max-time 10 "$1" 2>/dev/null
+        else
+            wget -q -O - -T 10 "$1" 2>/dev/null
         fi
     }
 
@@ -339,13 +348,7 @@ do_update() {
         [ "$VER" = "本地目录" ] || log "面板源当前版本: $VER"
     else
     if [ -z "${NATPUNCH_VERSION:-}" ]; then
-    if [ "$HAS_WGET" -eq 1 ]; then
-        VER_LIST="$(wget -qO- --timeout=10 \
-            "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
-    else
-        VER_LIST="$(curl -fsSL --max-time 10 \
-            "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null)"
-    fi
+    VER_LIST="$(nx_fetch_stdout "https://api.github.com/repos/$REPO/releases?per_page=20")"
     fi
     VER="${NATPUNCH_VERSION:-$(printf '%s\n' "$VER_LIST" | pick_highest_version)}"
     # 备路：api.github.com 对匿名请求有每小时配额（60 次/IP），路由器出口 IP 常常是
@@ -353,13 +356,7 @@ do_update() {
     # releases.atom 是普通 HTTPS 页面、不吃 API 配额，把 <title>vX.Y.Z</title> 转成
     # tag_name 形式后可以复用同一套"版本号最高"比较（不是 /releases/latest 的"发布最新"）。
     if [ -z "$VER" ] && [ -z "${NATPUNCH_VERSION:-}" ]; then
-        if [ "$HAS_WGET" -eq 1 ]; then
-            VER_LIST="$(wget -qO- --timeout=10 \
-                "https://github.com/$REPO/releases.atom" 2>/dev/null)"
-        else
-            VER_LIST="$(curl -fsSL --max-time 10 \
-                "https://github.com/$REPO/releases.atom" 2>/dev/null)"
-        fi
+        VER_LIST="$(nx_fetch_stdout "https://github.com/$REPO/releases.atom")"
         VER="$(printf '%s\n' "$VER_LIST" | tags_from_atom | pick_highest_version)"
         [ -n "$VER" ] && log "目标版本（atom 备路）: $VER"
     fi

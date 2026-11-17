@@ -533,6 +533,23 @@ else
 fi
 
 echo
+# —— 下载器参数可移植性 ——
+# busybox 的 wget 不认 GNU 的 --timeout/--tries（iStoreOS/OpenWrt 上会失败但看起来正常），
+# 三个脚本都必须优先 uclient-fetch，且 wget 只用 -T/-t。
+for f in "$INSTALL" "$SRC" "$SERVER_SRC"; do
+    if grep -qE '^[^#]*wget[^|]*--(timeout|tries)' "$f"; then
+        bad "$f 仍在使用 GNU 专有的 wget 参数（--timeout/--tries）"
+    else
+        ok "$f 的 wget 只用可移植参数（-T/-t）"
+    fi
+    if grep -q 'uclient-fetch' "$f"; then
+        ok "$f 支持 uclient-fetch（OpenWrt 原生）"
+    else
+        bad "$f 没有 uclient-fetch 分支"
+    fi
+done
+
+
 if [ "$FAIL" -eq 1 ]; then
     echo "自检失败"
     exit 1
