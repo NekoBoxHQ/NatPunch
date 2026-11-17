@@ -106,7 +106,7 @@ func (s *TerminalController) SaveCmds() {
 	}
 	var q file.QuickCmds
 	// 限 64KB：原来是无上限 io.ReadAll，认证用户随手就能灌爆内存
-	b, err := io.ReadAll(io.LimitReader(s.Ctx.Request.Body, 64<<10))
+	b, err := io.ReadAll(io.LimitReader(s.Ctx.Request.Body, 1<<20))
 	if err != nil || len(b) == 0 {
 		s.Data["json"] = map[string]interface{}{"code": 0, "msg": "empty body"}
 		s.ServeJSON()
