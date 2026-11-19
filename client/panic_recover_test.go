@@ -2,6 +2,7 @@ package client
 
 import (
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -43,5 +44,24 @@ func TestRecoverChanPanicNoopWithoutPanic(t *testing.T) {
 	}()
 	if c.closed.Load() {
 		t.Fatal("没有 panic 不该关闭流")
+	}
+}
+
+// onceClose：多路径并发调用只真正执行一次（面板终端的主流程与 io.Copy goroutine）。
+func TestOnceCloseRunsOnceUnderConcurrency(t *testing.T) {
+	var n int32
+	f := onceClose(func() { atomic.AddInt32(&n, 1) })
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f()
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&n); got != 1 {
+		t.Fatalf("onceClose 应只执行 1 次，实际 %d 次", got)
 	}
 }

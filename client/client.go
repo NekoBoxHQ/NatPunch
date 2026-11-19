@@ -225,7 +225,7 @@ func (s *TRPClient) newChan() {
 // recoverChanPanic 兜住单条 mux 流处理中的 panic。
 //
 // 一条流（比如面板终端）出问题不该把整个客户端进程带走 —— 之前没有 recover，
-// 任意 goroutine panic 都会让同机所有隧道一起断，现场只留下 "进程消失"，没有栈。
+// 任意 goroutine panic 都会让 5 条隧道一起断，且现场只留下 "进程消失"，没有栈。
 // 这里记录完整栈到客户端日志，只关闭这条流，让其余隧道继续工作。
 func recoverChanPanic(src net.Conn, where string) {
 	r := recover()
@@ -244,6 +244,21 @@ func recoverChanPanic(src net.Conn, where string) {
 func (s *TRPClient) safeHandleChan(src net.Conn) {
 	defer recoverChanPanic(src, "handleChan")
 	s.handleChan(src)
+}
+
+// onceClose 返回一个可被多条 goroutine/路径重复调用、但只真正执行一次的函数。
+//
+// 面板终端分支里，主流程与 io.Copy 的 goroutine 都会 Close 同一个被 snappy/加密
+// 包装过的 srcConn；这类包装的 Close 不是并发安全的，重复调用可能踩到已关闭的 writer。
+func onceClose(fns ...func()) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			for _, f := range fns {
+				f()
+			}
+		})
+	}
 }
 
 func (s *TRPClient) handleChan(src net.Conn) {
@@ -344,18 +359,21 @@ func (s *TRPClient) handleChan(src net.Conn) {
 			defer shellPtyMap.Delete(lk.ShellID)
 		}
 		srcConn := conn.GetConn(src, lk.Crypt, lk.Compress, nil, false)
+		// 关闭走 onceClose：主流程与 io.Copy goroutine 会并发到达这里，
+		// 而 srcConn 可能是 snappy/加密包装，其 Close 不是并发安全的。
+		closeAll := onceClose(
+			func() { _ = srcConn.Close() },
+			func() { _ = f.Close() },
+			func() { _ = cmd.Process.Kill() },
+		)
 		// 完整双向桥接：系统自带 banner/motd（ASCII logo、系统版本、profile 输出）正常显示，
 		// 与电脑 SSH 登录一致。TERM=xterm-256color 已注入，banner 的 ANSI 颜色/控制序列正常渲染。
 		go func() {
-			io.Copy(srcConn, f)
-			srcConn.Close()
-			f.Close()
-			cmd.Process.Kill()
+			_, _ = io.Copy(srcConn, f)
+			closeAll()
 		}()
-		io.Copy(f, srcConn)
-		f.Close()
-		srcConn.Close()
-		cmd.Process.Kill()
+		_, _ = io.Copy(f, srcConn)
+		closeAll()
 		return
 	}
 	//connect to target if conn type is tcp or udp
