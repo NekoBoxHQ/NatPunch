@@ -543,7 +543,15 @@ func (s *Bridge) ping() {
 	for {
 		select {
 		case <-ticker.C:
-			arr := make([]int, 0)
+			// staleClient 记录一条待清理的客户端；identity=true 表示删除前必须校验
+			// 「快照里的 tunnel 仍是当前持有的那个」—— 见隧道关闭分支。
+			type staleClient struct {
+				id       int
+				client   *Client
+				tunnel   *natpunch_mux.Mux
+				identity bool
+			}
+			arr := make([]staleClient, 0)
 			s.Client.Range(func(key, value interface{}) bool {
 				v := value.(*Client)
 				v.mu.Lock()
@@ -560,23 +568,41 @@ func (s *Bridge) ping() {
 				if tunnel == nil || signal == nil {
 					v.mu.Unlock()
 					if v.retryTime.Add(1) >= 3 {
-						arr = append(arr, key.(int))
+						arr = append(arr, staleClient{id: key.(int), client: v})
 					}
 					return true
 				}
 				isClose := tunnel.IsClose()
 				v.mu.Unlock()
 				if isClose {
-					arr = append(arr, key.(int))
+					arr = append(arr, staleClient{id: key.(int), client: v, tunnel: tunnel, identity: true})
 				}
 				return true
 			})
-			for _, v := range arr {
-				logs.Info("the client %d closed", v)
-				s.DelClient(v)
+			for _, it := range arr {
+				// 快照与删除之间客户端可能已经重连（MAIN 先到，CHAN 后到），
+				// 此时按旧快照删会把刚建立的连接踢掉，用户看到"偶发掉两次"。
+				if it.identity && !it.client.tunnelStillCurrent(it.tunnel) {
+					continue
+				}
+				logs.Info("the client %d closed", it.id)
+				s.DelClient(it.id)
 			}
 		}
 	}
+}
+
+// tunnelStillCurrent 判断 ping 巡检时快照的 mux 是否仍是该客户端当前的 tunnel。
+//
+// ping 是"先快照、后删"，中间有窗口；只要当前 tunnel 已经不是快照那个，
+// 就说明这条记录已经被新连接替换，不能再按快照删除。
+func (c *Client) tunnelStillCurrent(snap *natpunch_mux.Mux) bool {
+	if c == nil || snap == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tunnel == snap
 }
 
 // get config and add task from client config
