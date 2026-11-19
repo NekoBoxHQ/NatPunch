@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -217,8 +218,32 @@ func (s *TRPClient) newChan() {
 			s.Close()
 			break
 		}
-		go s.handleChan(src)
+		go s.safeHandleChan(src)
 	}
+}
+
+// recoverChanPanic 兜住单条 mux 流处理中的 panic。
+//
+// 一条流（比如面板终端）出问题不该把整个客户端进程带走 —— 之前没有 recover，
+// 任意 goroutine panic 都会让同机所有隧道一起断，现场只留下 "进程消失"，没有栈。
+// 这里记录完整栈到客户端日志，只关闭这条流，让其余隧道继续工作。
+func recoverChanPanic(src net.Conn, where string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	buf := make([]byte, 64<<10)
+	n := runtime.Stack(buf, false)
+	logs.Error("panic in %s: %v\n%s", where, r, buf[:n])
+	if src != nil {
+		_ = src.Close()
+	}
+}
+
+// safeHandleChan 是 handleChan 的 panic 隔离外壳。
+func (s *TRPClient) safeHandleChan(src net.Conn) {
+	defer recoverChanPanic(src, "handleChan")
+	s.handleChan(src)
 }
 
 func (s *TRPClient) handleChan(src net.Conn) {
