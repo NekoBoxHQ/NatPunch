@@ -13,6 +13,16 @@
 - **端口复用的唯一监听入口不再因一次临时错误永久消失。** `lib/pmux` 的 accept 循环原来遇错
   直接 `return`，端口复用模式下这是 web/桥接共用的唯一入口，一次 `EMFILE` 就会让面板与桥接
   全部拒绝连接、只能重启。现在与 `lib/conn` 共用同一套退避与终止判定。
+- **发送 link 失败时不再泄漏 mux 流。** `bridge.SendLinkInfo` 在写 link 失败时只 `return`，
+  没关闭刚建立的 mux 流：客户端已 Accept 到这条流、正阻塞在读 link，要等整个 mux 关闭才释放，
+  每次失败漏一条流加一个协程。现在失败即关闭该流。
+- **ping 清理客户端前校验快照身份，避免误杀刚重连的连接。** ping 巡检是「先快照、后删」，
+  而客户端重连是 MAIN 先到、CHAN 后到；旧实现只比快照里的 tunnel，会在「新 MAIN 已上、
+  新 CHAN 未到」的间隙放行删除，把刚建立的 MAIN 关掉（表现为偶发连续掉两次）。
+  现在 tunnel 与 signal 两者都要与快照一致才删。
+- **TLS 桥接下 MAIN 的 keepalive 真正生效。** 旧实现对 `*net.TCPConn` 直接断言，TLS 桥接时
+  `c.Conn` 是 `*tls.Conn`，断言失败导致信号通道的 keepalive 从未设置，半开连接只能等内核
+  默认探测周期（7200s 起）才回收。现在先直接断言、再经 `tls.Conn.NetConn()` 取底层 TCP 连接。
 
 ### 行为变更
 
