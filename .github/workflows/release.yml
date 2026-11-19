@@ -327,6 +327,10 @@ jobs:
             ### 校验
             - 发布物附 `SHA256SUMS`（强制校验）与 `SHA256SUMS.minisig`（minisign 签名，目标机无签名工具时自动使用随包发布的静态校验器）
 
+            ### 升级前请留意
+            - 完整变更见 [CHANGELOG](https://github.com/NekoBoxHQ/NatPunch/blob/master/CHANGELOG.md)
+            - 若本次发布含**行为变更**（例如配置缺省值调整），CHANGELOG 里会单列「行为变更」小节
+
       - name: Ensure all release assets uploaded
         env:
           GH_TOKEN: ${{ github.token }}
