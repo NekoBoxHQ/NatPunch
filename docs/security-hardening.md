@@ -61,6 +61,8 @@ UDP 工作池内置上限（单源 16、4096 源、TTL 5 分钟、满即丢包�
    - 系统 minisign 工具（存在即强制校验、失败即终止）；
    - 内置静态校验器 `minisign-check`（Go 版，静态交叉编译 4 架构随 Release 发布；目标机无 minisign 时脚本自动下载匹配架构的校验器校验，**工具可得但校验失败同样终止**）；
    - 两者均不可得才打印警告跳过（SHA256 仍强制，不阻塞安装）。
+   手工使用时注意：公钥文件必须是 **两行**——第一行以 `untrusted comment:` 开头，第二行才是 base64 公钥；
+   只写单行 base64 会被判 `Invalid encoded public key`（`minisign-check <pubkey> <minisig> <file>`）。
 3. **内置校验器的信任边界**：`minisign-check` 与发布物同源（同一 Release 资产），由脚本与包同步下载——它防的是**传输层/镜像篡改**（与 SHA256 同等强度），不防"发布方 GitHub 账户被攻破后整体替换"场景；该场景需系统 minisign（独立安装渠道）才可完全抵御。公钥轮换/发布链自建场景仅需更新脚本内公钥。
 
 > 两个校验的信任边界不同：SHA256 防"链路层篡改"；签名防"发布方密钥泄露"。公钥内置在 `install.sh` / `install_server.sh`（`RWSD+MAfp/ZTI1gapgfvPeC1nkjQ3p52KovZQfxPjSO0f7DQX4FNe660`），自建发布链可用环境变量覆盖。解包使用标准库 tar+gzip，拒绝 `..`/绝对路径/符号链接逃逸。
