@@ -2,6 +2,22 @@
 
 本项目为 GPLv3 许可的内网穿透项目，派生关系与上游差异见 NOTICE。
 
+## v2026.11.04
+
+### 修复
+
+- **单条流的 panic 不再带走整个客户端进程。** 客户端过去对每条 mux 流的处理 goroutine 没有
+  `recover`：任意一条流（例如面板终端）panic 都会让进程退出，同机所有隧道一起断，
+  现场只留下「进程消失」而没有栈。现在 `handleChan` 外层兜住 panic，记录完整栈到客户端日志、
+  只关闭这条流；`main` 的 vkey 重连循环也加了同样的隔离，panic 后走 5 秒重连而不是退出。
+- **面板终端的关闭路径改为幂等。** 主流程与 `io.Copy` goroutine 会并发对同一个
+  `srcConn` 调 `Close()`，而该连接在 `Compress/Crypt` 生效时是 snappy / 加密包装，
+  `Close` 不是并发安全的。现在两条路径共用 `onceClose`，只真正关闭一次。
+- **配置模式（`--conf_path`）下 `auto_reconnection` 缺省改为 `true`。** 旧实现缺键即 `false`，
+  而配置模式的进程由 `main` 的 `select{}` 常驻：首次掉线后 `StartFromFile` 直接 return，
+  既不重连也不会被 supervisor 拉起，表现为「面板显示离线、设备再也不回来」，只能人工重启。
+  显式写 `auto_reconnection=false` 仍然生效。配置参考已同步说明。
+
 ## v2026.11.03
 
 ### 修复
