@@ -564,13 +564,15 @@ func (s *Bridge) ping() {
 	for {
 		select {
 		case <-ticker.C:
-			// staleClient 记录一条待清理的客户端；identity=true 表示删除前必须校验
-			// 「快照里的 tunnel 仍是当前持有的那个」—— 见隧道关闭分支。
+			// staleClient 记录一条待清理的客户端。删除前必须校验「快照里的 tunnel 与
+			// signal 仍是当前持有的那两个」—— 只比 tunnel 不够：客户端重连时 MAIN
+			// 先到、CHAN 后到，中间那一秒 tunnel 还是旧的（已关闭），只比 tunnel 会
+			// 放行删除，把刚建立的 MAIN 关掉，用户看到"偶发掉两次"。
 			type staleClient struct {
-				id       int
-				client   *Client
-				tunnel   *natpunch_mux.Mux
-				identity bool
+				id     int
+				client *Client
+				tunnel *natpunch_mux.Mux
+				signal *conn.Conn
 			}
 			arr := make([]staleClient, 0)
 			s.Client.Range(func(key, value interface{}) bool {
@@ -587,23 +589,24 @@ func (s *Bridge) ping() {
 					return true
 				}
 				if tunnel == nil || signal == nil {
-					v.mu.Unlock()
+					// 半连接分支同样带快照：重连时 MAIN 到达会把 retryTime 清零、
+					// signal 换成新的，按旧快照删依旧是误杀。
 					if v.retryTime.Add(1) >= 3 {
-						arr = append(arr, staleClient{id: key.(int), client: v})
+						arr = append(arr, staleClient{id: key.(int), client: v, tunnel: tunnel, signal: signal})
 					}
+					v.mu.Unlock()
 					return true
 				}
 				isClose := tunnel.IsClose()
 				v.mu.Unlock()
 				if isClose {
-					arr = append(arr, staleClient{id: key.(int), client: v, tunnel: tunnel, identity: true})
+					arr = append(arr, staleClient{id: key.(int), client: v, tunnel: tunnel, signal: signal})
 				}
 				return true
 			})
 			for _, it := range arr {
-				// 快照与删除之间客户端可能已经重连（MAIN 先到，CHAN 后到），
-				// 此时按旧快照删会把刚建立的连接踢掉，用户看到"偶发掉两次"。
-				if it.identity && !it.client.tunnelStillCurrent(it.tunnel) {
+				// 快照与删除之间客户端可能已经重连，此时按旧快照删会踢掉新连接。
+				if !it.client.connStillCurrent(it.tunnel, it.signal) {
 					continue
 				}
 				logs.Info("the client %d closed", it.id)
@@ -613,17 +616,21 @@ func (s *Bridge) ping() {
 	}
 }
 
-// tunnelStillCurrent 判断 ping 巡检时快照的 mux 是否仍是该客户端当前的 tunnel。
+// connStillCurrent 判断 ping 巡检时快照的 tunnel 与 signal 是否仍是该客户端当前持有的。
 //
-// ping 是"先快照、后删"，中间有窗口；只要当前 tunnel 已经不是快照那个，
-// 就说明这条记录已经被新连接替换，不能再按快照删除。
-func (c *Client) tunnelStillCurrent(snap *natpunch_mux.Mux) bool {
-	if c == nil || snap == nil {
+// ping 是"先快照、后删"，中间有窗口。两项都要比：
+//   - 只比 tunnel 时，客户端重连的 MAIN 已经换上、CHAN 还没到的那个间隙会被放行，
+//     于是刚建立的 MAIN 被关掉；
+//   - 只比 signal 时，CHAN 重连而 MAIN 尚未更新同样会放行。
+//
+// 任一项不等都说明记录已经被新连接替换，不能再按快照删除。
+func (c *Client) connStillCurrent(snapTunnel *natpunch_mux.Mux, snapSignal *conn.Conn) bool {
+	if c == nil {
 		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.tunnel == snap
+	return c.tunnel == snapTunnel && c.signal == snapSignal
 }
 
 // get config and add task from client config
