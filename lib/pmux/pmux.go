@@ -84,20 +84,42 @@ func (pMux *PortMux) Start() error {
 	pMux.wg.Add(1)
 	go func() {
 		defer pMux.wg.Done()
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				logs.Warn(err)
-				return
-			}
+		acceptLoop(ln, func(c net.Conn) {
 			pMux.wg.Add(1)
-			go func(c net.Conn) {
+			go func() {
 				defer pMux.wg.Done()
 				pMux.process(c)
-			}(conn)
-		}
+			}()
+		}, acceptLoopSleep)
 	}()
 	return nil
+}
+
+// acceptLoopSleep 是 accept 退避用的 sleep，测试可替换成桩以断言退避而不真的等待。
+var acceptLoopSleep = time.Sleep
+
+// acceptLoop 接受端口复用连接并交给 handle。
+//
+// 只有 listener 被关闭才返回；其余错误（EMFILE/ENFILE、临时网络错误）按
+// common.AcceptBackoff 退避后继续 —— 与 lib/conn 的 accept 循环同一套策略。
+// 端口复用模式下这是**唯一**的监听入口，一次临时错误就让整个入口永久消失，
+// 进程还活着但面板与桥接全部拒绝连接，只能重启。
+func acceptLoop(ln net.Listener, handle func(net.Conn), sleep func(time.Duration)) {
+	failures := 0
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			if common.IsPermanentAcceptErr(err) {
+				return
+			}
+			failures++
+			logs.Warn("pmux accept error (连续第 %d 次): %v", failures, err)
+			sleep(common.AcceptBackoff(failures))
+			continue
+		}
+		failures = 0
+		handle(c)
+	}
 }
 
 func (pMux *PortMux) process(conn net.Conn) {
