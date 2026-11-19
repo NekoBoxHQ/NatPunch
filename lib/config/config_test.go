@@ -56,10 +56,13 @@ conn_type=tcp
 vkey=123`
 	// 期望值须与 dealCommon 的构造方式一致（含 Client 实例化）；
 	// 比较用 DeepEqual：CommonConfig 含 Client 指针字段，结构体 == 会按指针地址比较（恒不等）
+	// 注意 AutoReconnection 的缺省值是 true（v2026.11.04 起），这里必须显式对齐，
+	// 否则会随缺省值变更而误报失败。
 	f := new(CommonConfig)
 	f.Server = "127.0.0.1:8284"
 	f.Tp = "tcp"
 	f.VKey = "123"
+	f.AutoReconnection = true
 	f.Client = file.NewClient("", true, true)
 	f.Client.Cnf = new(file.Config)
 	if c := dealCommon(s); !reflect.DeepEqual(*c, *f) {
