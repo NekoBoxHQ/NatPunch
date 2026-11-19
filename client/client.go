@@ -159,11 +159,15 @@ retry:
 	s.logInfo("Successful connection with server %s", s.svrAddr)
 	//monitor the connection
 	// 这三个是常驻 goroutine：它们 panic 同样会带走整个进程，一并走 SafeGo。
-	// 它们没有"单条流"可关，src 传 nil（recoverChanPanic 允许 nil）。
-	SafeGo("ping", nil, s.ping)
+	// ping / newChan 崩了必须主动 Close 客户端、走外层 5 秒重连：
+	//   - newChan 死 = mux.Accept 循环没了，新连接永远建不起来，但 mux 心跳还活着，
+	//     服务端与客户端都认为链路健康 —— 不关就是"长期半死"，直到人工重启；
+	//   - ping 死 = 失联检测没了，半开连接同样永远不会被判死。
+	// healthCheck 崩了不影响数据面，传 nil 只记栈。
+	SafeGo("ping", closerFunc(s.Close), s.ping)
 	s.signal.Store(c)
 	//start a channel connection
-	SafeGo("newChan", nil, s.newChan)
+	SafeGo("newChan", closerFunc(s.Close), s.newChan)
 	//start health check if the it's open
 	if s.cnf != nil && len(s.cnf.Healths) > 0 {
 		SafeGo("healthCheck", nil, func() { heathCheck(s.cnf.Healths, c) })
