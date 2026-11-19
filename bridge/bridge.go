@@ -506,7 +506,7 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 		if target, err = tunnel.NewConn(); err != nil {
 			return
 		}
-		if _, err = conn.NewConn(target).SendInfo(link, ""); err != nil {
+		if err = sendLinkInfo(target, link); err != nil {
 			logs.Info("new connect error ,the target %s refuse to connect", link.Host)
 			return
 		}
@@ -514,6 +514,19 @@ func (s *Bridge) SendLinkInfo(clientId int, link *conn.Link, t *file.Tunnel) (ta
 		err = errors.New(fmt.Sprintf("the client %d is not connect", clientId))
 	}
 	return
+}
+
+// sendLinkInfo 把 link 通过一条新的 mux 流发给客户端；失败时必须关闭这条流。
+//
+// 原实现在 SendInfo 失败时直接 return，target 既不 Close 也不通知对端：
+// 客户端已经 Accept 到这条流、正阻塞在 GetLinkInfo 读，要等整个 mux 关闭才释放。
+// 每次失败都会漏一条流 + 一个协程，长期会把 mux 的 connMap 撑大。
+func sendLinkInfo(target net.Conn, link *conn.Link) error {
+	if _, err := conn.NewConn(target).SendInfo(link, ""); err != nil {
+		_ = target.Close()
+		return err
+	}
+	return nil
 }
 
 // SendShellResize 向客户端下发 shell 终端尺寸（带外控制消息，经 mux 独立流发送，与终端数据零混流）。
