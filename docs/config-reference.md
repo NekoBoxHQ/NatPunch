@@ -157,7 +157,7 @@
 | `tls_enable` | 是否启用 TLS 桥接 |
 | `tls_fingerprint` | 期望的服务端桥接证书 SHA-256 指纹（hex）。空 = 沿用旧行为并打印告警；非空 = 严格比对，不匹配即握手失败 |
 | `tls_strict` | `true` 时强制要求 `tls_fingerprint` 非空，否则拒绝启动 |
-| `auto_reconnection` | 断线自动重连 |
+| `auto_reconnection` | 断线自动重连。**缺省 `true`**（v2026.11.04 起；此前缺省为 `false`）。配置模式下客户端进程常驻，若显式写成 `false`，首次掉线后不会重连、也不会被守护进程拉起，只能人工重启 |
 | `proxy_url` | 客户端出口代理（可选） |
 | `disconnect_timeout` | 断连判定超时 |
 

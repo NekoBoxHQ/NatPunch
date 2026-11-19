@@ -86,7 +86,13 @@ func getTitleContent(s string) string {
 }
 
 func dealCommon(s string) *CommonConfig {
-	c := &CommonConfig{}
+	// 默认值必须是“自动重连”。
+	//
+	// 配置模式下（--conf_path）客户端由 main.go 的 select{} 常驻，进程不会退出：
+	// 一旦 AutoReconnection 为 false，首次掉线后 control.go 的 StartFromFile 直接
+	// return，客户端既不重连也不会被 supervisor 拉起 —— 表现为“面板显示离线、
+	// 设备再也不会自己回来”，只能人工重启。缺键即按 true 处理（旧实现缺省 false）。
+	c := &CommonConfig{AutoReconnection: true}
 	c.Client = file.NewClient("", true, true)
 	c.Client.Cnf = new(file.Config)
 	for _, v := range splitStr(s) {
