@@ -54,6 +54,29 @@ type Mux struct {
 	newConnQueue       connQueue
 }
 
+// pingTick 是 mux 心跳的发送间隔。判定阈值由 pingThreshold 换算成「多少个 tick」。
+const pingTick = 5 * time.Second
+
+// pingThreshold 把「秒」换算成「连续多少个心跳 tick 没回包就判死」。
+//
+// 语义变更（v2026.11.03）：disconnect_timeout 过去被直接当作 tick 次数使用，
+// 配 60 实际是 60 × 5s ≈ 300s 才判死；现在按秒解释，配 60 就是 60 秒。
+// 未配置（<=0）按 60 秒处理，TCP 与 KCP 用同一套换算（旧实现里 kcp 默认 20 次
+// 的隐式分支已删除，避免"同一配置两种含义"）。
+func pingThreshold(seconds int, connType string) uint32 {
+	// connType 目前不参与换算（TCP/KCP 同一套语义），保留参数是为了将来需要
+	// 按传输层单独调阈值时不必改所有调用点。
+	_ = connType
+	if seconds <= 0 {
+		seconds = 60
+	}
+	ticks := (seconds + int(pingTick/time.Second) - 1) / int(pingTick/time.Second) // ceil
+	if ticks < 3 {
+		ticks = 3
+	}
+	return uint32(ticks)
+}
+
 func NewMux(c net.Conn, connType string, pingCheckThreshold int) *Mux {
 	//c.(*net.TCPConn).SetReadBuffer(0)
 	//c.(*net.TCPConn).SetWriteBuffer(0)
@@ -61,16 +84,7 @@ func NewMux(c net.Conn, connType string, pingCheckThreshold int) *Mux {
 	if err != nil {
 		log.Println(err)
 	}
-	var checkThreshold uint32
-	if pingCheckThreshold <= 0 {
-		if connType == "kcp" {
-			checkThreshold = 20
-		} else {
-			checkThreshold = 60
-		}
-	} else {
-		checkThreshold = uint32(pingCheckThreshold)
-	}
+	checkThreshold := pingThreshold(pingCheckThreshold, connType)
 	m := &Mux{
 		conn:               c,
 		connMap:            NewConnMap(),
@@ -199,7 +213,7 @@ func (s *Mux) ping() {
 		now, _ := time.Now().UTC().MarshalText()
 		s.sendInfo(muxPingFlag, muxPing, now)
 		// send the ping flag and Get the latency first
-		ticker := time.NewTicker(time.Second * 5)
+		ticker := time.NewTicker(pingTick)
 		defer ticker.Stop()
 		for {
 			if s.isClose.Load() {
@@ -208,7 +222,11 @@ func (s *Mux) ping() {
 			select {
 			case <-ticker.C:
 			}
-			if atomic.LoadUint32(&s.pingCheckTime) > s.pingCheckThreshold {
+			// 先自增再判定：第 N 个 tick 没回包时计数正好等于 N，
+			// 于是 pingThreshold(60)=12 精确等于 60 秒（旧实现先发后加，
+			// 配 60 实际要 60×5s 以上才判死）。
+			atomic.AddUint32(&s.pingCheckTime, 1)
+			if atomic.LoadUint32(&s.pingCheckTime) >= s.pingCheckThreshold {
 				log.Println("mux: ping time out, checktime", s.pingCheckTime, "threshold", s.pingCheckThreshold)
 				_ = s.Close()
 				// more than limit times not receive the ping return package,
@@ -217,7 +235,6 @@ func (s *Mux) ping() {
 			}
 			now, _ = time.Now().UTC().MarshalText()
 			s.sendInfo(muxPingFlag, muxPing, now)
-			atomic.AddUint32(&s.pingCheckTime, 1)
 		}
 		return
 	}()

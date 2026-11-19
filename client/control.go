@@ -253,7 +253,7 @@ re:
 //
 // 10 秒的取舍：跨运营商 / 3G 这类高 RTT 链路上握手通常 1~3 秒，10 秒够用；真连不上
 // 时又能较快回到重试。KeepAlive 显式写出来（Go 默认也是 15s）是为了让**半开**的连接
-// 能被内核探测出来 —— 否则要等 mux 的 60 秒 disconnect_timeout 才判定断路。
+// 能被内核探测出来 —— 否则要等 mux 的心跳判定断路（disconnect_timeout 按秒解释，默认 60 秒）。
 const connectTimeout = 10 * time.Second
 
 var bridgeDialer = &net.Dialer{Timeout: connectTimeout, KeepAlive: 15 * time.Second}
