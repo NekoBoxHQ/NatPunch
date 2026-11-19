@@ -158,13 +158,15 @@ retry:
 	backoff = 5 * time.Second
 	s.logInfo("Successful connection with server %s", s.svrAddr)
 	//monitor the connection
-	go s.ping()
+	// 这三个是常驻 goroutine：它们 panic 同样会带走整个进程，一并走 SafeGo。
+	// 它们没有"单条流"可关，src 传 nil（recoverChanPanic 允许 nil）。
+	SafeGo("ping", nil, s.ping)
 	s.signal.Store(c)
 	//start a channel connection
-	go s.newChan()
+	SafeGo("newChan", nil, s.newChan)
 	//start health check if the it's open
 	if s.cnf != nil && len(s.cnf.Healths) > 0 {
-		go heathCheck(s.cnf.Healths, c)
+		SafeGo("healthCheck", nil, func() { heathCheck(s.cnf.Healths, c) })
 	}
 	s.nowStatus.Store(1)
 	//msg connection, eg udp
@@ -245,6 +247,14 @@ func recoverChanPanic(src io.Closer, where string) {
 	}
 }
 
+// closerFunc 把"关闭动作"适配成 io.Closer，让 panic 路径与正常路径走同一个门。
+type closerFunc func()
+
+func (f closerFunc) Close() error {
+	f()
+	return nil
+}
+
 // SafeGo 启动一个受 panic 保护的 goroutine。
 //
 // recover 只对**它所在的 goroutine** 生效：顶层 handleChan 兜住了，它内部再起的
@@ -300,7 +310,7 @@ func (s *TRPClient) handleChan(src net.Conn) {
 				func() { _ = srcConn.Close() },
 				func() { _ = targetConn.Close() },
 			)
-			SafeGo("http copy", srcConn, func() {
+			SafeGo("http copy", closerFunc(closeAll), func() {
 				common.CopyBuffer(srcConn, targetConn)
 				closeAll()
 			})
@@ -390,7 +400,7 @@ func (s *TRPClient) handleChan(src net.Conn) {
 		// 完整双向桥接：系统自带 banner/motd（ASCII logo、系统版本、profile 输出）正常显示，
 		// 与电脑 SSH 登录一致。TERM=xterm-256color 已注入，banner 的 ANSI 颜色/控制序列正常渲染。
 		// 这层 goroutine 是往 snappy/加密包装里写数据的落点，必须同样受 panic 保护。
-		SafeGo("shell copy", srcConn, func() {
+		SafeGo("shell copy", closerFunc(closeAll), func() {
 			_, _ = io.Copy(srcConn, f)
 			closeAll()
 		})

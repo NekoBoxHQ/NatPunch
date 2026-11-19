@@ -89,3 +89,43 @@ func TestOnceCloseRunsOnceUnderConcurrency(t *testing.T) {
 		t.Fatalf("onceClose 应只执行 1 次，实际 %d 次", got)
 	}
 }
+
+// panic 路径必须走同一个 closeAll，而不是直接 Close 原始 srcConn。
+func TestSafeGoPanicUsesProvidedCloser(t *testing.T) {
+	var closes int32
+	cl := closerFunc(func() { atomic.AddInt32(&closes, 1) })
+	done := make(chan struct{})
+	SafeGo("panics", cl, func() {
+		close(done)
+		panic("boom")
+	})
+	<-done
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&closes) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := atomic.LoadInt32(&closes); got != 1 {
+		t.Fatalf("panic 路径应调用一次 closer，实际 %d 次", got)
+	}
+}
+
+// panic 与正常路径共用 onceClose 时，最终只关一次。
+func TestOnceCloseSharedBetweenPanicAndNormalPath(t *testing.T) {
+	var n int32
+	closeAll := onceClose(func() { atomic.AddInt32(&n, 1) })
+
+	done := make(chan struct{})
+	SafeGo("panics", closerFunc(closeAll), func() {
+		close(done)
+		panic("boom")
+	})
+	<-done
+	closeAll() // 主流程同时到达
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&n) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := atomic.LoadInt32(&n); got != 1 {
+		t.Fatalf("panic 与正常路径共用 onceClose 时应只关 1 次，实际 %d 次", got)
+	}
+}
