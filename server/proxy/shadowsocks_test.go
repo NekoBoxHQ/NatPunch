@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,44 @@ func waitPort(t *testing.T, port int) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// freeUDPPort 借一个空闲的 UDP 端口号。
+//
+// 必须用 UDP 探测：SS 服务端在 task.Port 上绑的是 UDP（以及同号的 TCP），
+// 用 TCP 探测只能说明 TCP 空闲 —— CI 上就撞过 "TCP 探到的端口，UDP 已被同进程的
+// fakeNatpunchUDPClient 占掉"，直接 bind: address already in use。
+// 即便如此仍是 TOCTOU，调用方必须配合 startShadowsocksWithRetry 重试。
+func freeUDPPort(t *testing.T) int {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("探测空闲 UDP 端口失败: %v", err)
+	}
+	port := pc.LocalAddr().(*net.UDPAddr).Port
+	_ = pc.Close()
+	return port
+}
+
+// startShadowsocksWithRetry 启动 SS 服务端；端口被抢（TOCTOU）时换端口重试，最多 5 次。
+// 返回服务端与实际使用的端口。mkTask 用拿到的端口构造 task。
+func startShadowsocksWithRetry(t *testing.T, bridge NetBridge, mkTask func(port int) *file.Tunnel) (*ShadowsocksModeServer, int) {
+	t.Helper()
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		port := freeUDPPort(t)
+		srv := NewShadowsocksModeServer(bridge, mkTask(port))
+		if err := srv.Start(); err == nil {
+			return srv, port
+		} else {
+			lastErr = err
+			if !strings.Contains(err.Error(), "address already in use") {
+				t.Fatalf("SS 服务端起不来: %v", err)
+			}
+		}
+	}
+	t.Fatalf("5 次重试仍拿不到可用端口: %v", lastErr)
+	return nil, 0
 }
 
 // 面板上「密码留空 → 自动生成密钥」这条路不能出错：生成的密钥必须**正好**是这个
@@ -203,13 +242,6 @@ func runShadowsocksUDPRoundTrip(t *testing.T, replySrc *common.Addr) {
 		}
 	}()
 
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	probe.Close()
-
 	confPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(confPath, "conf"), 0755); err != nil {
 		t.Fatal(err)
@@ -226,18 +258,16 @@ func runShadowsocksUDPRoundTrip(t *testing.T, replySrc *common.Addr) {
 	psk := crypt.NewShadowsocksPSK()
 	client := file.NewClient("test", true, true)
 	client.Id = 1
-	task := &file.Tunnel{
-		Id: 1, Port: port, ServerIp: "127.0.0.1", Mode: "shadowsocks",
-		Password: psk, Client: client, Target: &file.Target{}, Flow: &file.Flow{},
-	}
 
 	serverSide, clientSide := net.Pipe()
 	go fakeNatpunchUDPClient(clientSide, echoPC.LocalAddr().String(), replySrc)
 
-	srv := NewShadowsocksModeServer(&tunnelTestBridge{target: serverSide}, task)
-	if err := srv.Start(); err != nil {
-		t.Fatalf("SS 服务端起不来: %v", err)
-	}
+	srv, port := startShadowsocksWithRetry(t, &tunnelTestBridge{target: serverSide}, func(port int) *file.Tunnel {
+		return &file.Tunnel{
+			Id: 1, Port: port, ServerIp: "127.0.0.1", Mode: "shadowsocks",
+			Password: psk, Client: client, Target: &file.Target{}, Flow: &file.Flow{},
+		}
+	})
 	defer srv.Close()
 	waitPort(t, port)
 
@@ -317,13 +347,6 @@ func TestShadowsocksEndToEndTCP(t *testing.T) {
 	}()
 
 	// 借一个空闲端口号给 SS 监听（先占后退，够用）
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	probe.Close()
-
 	// DealClient 会读全局设置/黑名单，走一遍 DB 初始化
 	confPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(confPath, "conf"), 0755); err != nil {
@@ -341,25 +364,23 @@ func TestShadowsocksEndToEndTCP(t *testing.T) {
 	psk := crypt.NewShadowsocksPSK()
 	client := file.NewClient("test", true, true)
 	client.Id = 1
-	task := &file.Tunnel{
-		Id:       1,
-		Port:     port,
-		ServerIp: "127.0.0.1",
-		Mode:     "shadowsocks",
-		Password: psk,
-		Client:   client,
-		Target:   &file.Target{},
-		Flow:     &file.Flow{},
-	}
 
 	tunnelSide, err := net.Dial("tcp", echoLn.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewShadowsocksModeServer(&tunnelTestBridge{target: tunnelSide}, task)
-	if err := srv.Start(); err != nil {
-		t.Fatalf("SS 服务端起不来: %v", err)
-	}
+	srv, port := startShadowsocksWithRetry(t, &tunnelTestBridge{target: tunnelSide}, func(port int) *file.Tunnel {
+		return &file.Tunnel{
+			Id:       1,
+			Port:     port,
+			ServerIp: "127.0.0.1",
+			Mode:     "shadowsocks",
+			Password: psk,
+			Client:   client,
+			Target:   &file.Target{},
+			Flow:     &file.Flow{},
+		}
+	})
 	defer srv.Close()
 	// Start 现在是「建好两个监听就返回」，但保险起见探一下端口
 	waitPort(t, port)
@@ -446,13 +467,6 @@ func TestShadowsocksFlowDirection(t *testing.T) {
 		time.Sleep(time.Second)
 	}()
 
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	probe.Close()
-
 	confPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(confPath, "conf"), 0755); err != nil {
 		t.Fatal(err)
@@ -469,19 +483,17 @@ func TestShadowsocksFlowDirection(t *testing.T) {
 	psk := crypt.NewShadowsocksPSK()
 	client := file.NewClient("test", true, true)
 	client.Id = 1
-	task := &file.Tunnel{
-		Id: 1, Port: port, ServerIp: "127.0.0.1", Mode: "shadowsocks",
-		Password: psk, Client: client, Target: &file.Target{}, Flow: &file.Flow{},
-	}
 
 	tunnelSide, err := net.Dial("tcp", targetLn.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewShadowsocksModeServer(&tunnelTestBridge{target: tunnelSide}, task)
-	if err := srv.Start(); err != nil {
-		t.Fatalf("SS 服务端起不来: %v", err)
-	}
+	srv, port := startShadowsocksWithRetry(t, &tunnelTestBridge{target: tunnelSide}, func(port int) *file.Tunnel {
+		return &file.Tunnel{
+			Id: 1, Port: port, ServerIp: "127.0.0.1", Mode: "shadowsocks",
+			Password: psk, Client: client, Target: &file.Target{}, Flow: &file.Flow{},
+		}
+	})
 	defer srv.Close()
 	waitPort(t, port)
 
