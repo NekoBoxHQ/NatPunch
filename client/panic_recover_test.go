@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type probeConn struct {
@@ -17,7 +18,7 @@ func (p *probeConn) Close() error {
 	return nil
 }
 
-// 单条流的 panic 必须被兜住：只关这条流，不能让进程退出。
+// 顶层流的 panic 必须被兜住：只关这条流，不能让进程退出。
 func TestRecoverChanPanicClosesStreamAndSwallows(t *testing.T) {
 	c := &probeConn{}
 	func() {
@@ -44,6 +45,29 @@ func TestRecoverChanPanicNoopWithoutPanic(t *testing.T) {
 	}()
 	if c.closed.Load() {
 		t.Fatal("没有 panic 不该关闭流")
+	}
+}
+
+// SafeGo 里的子 goroutine panic 同样不能带走进程（shell/http 的拷贝 goroutine）。
+func TestSafeGoRecoversPanicInChildGoroutine(t *testing.T) {
+	c := &probeConn{}
+	done := make(chan struct{})
+	SafeGo("child", c, func() {
+		defer close(done)
+		panic("child boom")
+	})
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("SafeGo 的 goroutine 没有执行完")
+	}
+	// recover 在 deferred 函数里执行，close(done) 之后才关流，等一下
+	deadline := time.Now().Add(2 * time.Second)
+	for !c.closed.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !c.closed.Load() {
+		t.Fatal("子 goroutine panic 后必须关闭这条流")
 	}
 }
 

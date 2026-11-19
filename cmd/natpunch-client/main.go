@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -135,18 +134,23 @@ func run() {
 				for {
 					// panic 隔离：单个 vkey 的连接流程炸了，只记栈 + 走 5 秒重连，
 					// 不让整个进程退出（否则同机所有隧道的对端都会看到一次瞬断）。
-					func() {
+					panicked := func() (p bool) {
 						defer func() {
 							if r := recover(); r != nil {
-								buf := make([]byte, 64<<10)
-								n := runtime.Stack(buf, false)
-								logs.Error("panic in client loop: %v\n%s", r, buf[:n])
+								p = true
+								client.LogPanic("client loop", r)
 							}
 						}()
 						logs.Info("start vkey:%s", common.MaskSecret(key))
 						client.NewRPClient(*serverAddr, key, *connType, *proxyUrl, nil, *disconnectTime).Start()
+						return false
 					}()
-					logs.Info("Client closed! It will be reconnected in five seconds")
+					if panicked {
+						// 与「正常断开」分开打，避免排查时把 panic 恢复误读成普通掉线
+						logs.Info("client loop panic recovered, reconnecting in 5s")
+					} else {
+						logs.Info("Client closed! It will be reconnected in five seconds")
+					}
 					time.Sleep(time.Second * 5)
 				}
 			}()

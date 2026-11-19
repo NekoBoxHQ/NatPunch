@@ -222,22 +222,39 @@ func (s *TRPClient) newChan() {
 	}
 }
 
+// LogPanic 记录 panic 值与完整 goroutine 栈。供 defer 里 recover() 之后调用。
+func LogPanic(where string, r interface{}) {
+	buf := make([]byte, 64<<10)
+	n := runtime.Stack(buf, false)
+	logs.Error("panic in %s: %v\n%s", where, r, buf[:n])
+}
+
 // recoverChanPanic 兜住单条 mux 流处理中的 panic。
 //
 // 一条流（比如面板终端）出问题不该把整个客户端进程带走 —— 之前没有 recover，
 // 任意 goroutine panic 都会让 5 条隧道一起断，且现场只留下 "进程消失"，没有栈。
 // 这里记录完整栈到客户端日志，只关闭这条流，让其余隧道继续工作。
-func recoverChanPanic(src net.Conn, where string) {
+func recoverChanPanic(src io.Closer, where string) {
 	r := recover()
 	if r == nil {
 		return
 	}
-	buf := make([]byte, 64<<10)
-	n := runtime.Stack(buf, false)
-	logs.Error("panic in %s: %v\n%s", where, r, buf[:n])
+	LogPanic(where, r)
 	if src != nil {
 		_ = src.Close()
 	}
+}
+
+// SafeGo 启动一个受 panic 保护的 goroutine。
+//
+// recover 只对**它所在的 goroutine** 生效：顶层 handleChan 兜住了，它内部再起的
+// 子 goroutine（shell 的 io.Copy、http 的 CopyBuffer）仍然会把整个进程带走。
+// 这两处写的正是 snappy/加密包装，是最容易出问题的落点，必须走 SafeGo。
+func SafeGo(where string, src io.Closer, fn func()) {
+	go func() {
+		defer recoverChanPanic(src, where)
+		fn()
+	}()
 }
 
 // safeHandleChan 是 handleChan 的 panic 隔离外壳。
@@ -277,16 +294,20 @@ func (s *TRPClient) handleChan(src net.Conn) {
 			src.Close()
 		} else {
 			srcConn := conn.GetConn(src, lk.Crypt, lk.Compress, nil, false)
-			go func() {
+			// 与 shell 分支同理：拷贝 goroutine 与主循环会并发关闭同一对连接，
+			// 而 srcConn 可能是 snappy/加密包装，Close 不是并发安全的。
+			closeAll := onceClose(
+				func() { _ = srcConn.Close() },
+				func() { _ = targetConn.Close() },
+			)
+			SafeGo("http copy", srcConn, func() {
 				common.CopyBuffer(srcConn, targetConn)
-				srcConn.Close()
-				targetConn.Close()
-			}()
+				closeAll()
+			})
 			br := bufio.NewReader(srcConn)
 			for {
 				if r, err := http.ReadRequest(br); err != nil {
-					srcConn.Close()
-					targetConn.Close()
+					closeAll()
 					break
 				} else {
 					remoteAddr := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
@@ -368,10 +389,11 @@ func (s *TRPClient) handleChan(src net.Conn) {
 		)
 		// 完整双向桥接：系统自带 banner/motd（ASCII logo、系统版本、profile 输出）正常显示，
 		// 与电脑 SSH 登录一致。TERM=xterm-256color 已注入，banner 的 ANSI 颜色/控制序列正常渲染。
-		go func() {
+		// 这层 goroutine 是往 snappy/加密包装里写数据的落点，必须同样受 panic 保护。
+		SafeGo("shell copy", srcConn, func() {
 			_, _ = io.Copy(srcConn, f)
 			closeAll()
-		}()
+		})
 		_, _ = io.Copy(f, srcConn)
 		closeAll()
 		return
