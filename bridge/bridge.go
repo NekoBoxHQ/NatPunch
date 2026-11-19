@@ -58,6 +58,28 @@ func (c *Client) GetVersion() string {
 	return c.Version
 }
 
+// tcpConnOf 尽量从底层连接取出 *net.TCPConn。
+//
+// TLS 桥接时 c.Conn 是 *tls.Conn，直接断言成 *net.TCPConn 会失败 —— 旧实现就是
+// 这么写的，导致 MAIN 信号通道上的 keepalive 根本没设上，半开连接只能等内核默认
+// 的探测周期（7200s 起）才回收。这里先试直接断言，再试 tls.Conn.NetConn()。
+func tcpConnOf(c net.Conn) (*net.TCPConn, bool) {
+	if tcp, ok := c.(*net.TCPConn); ok {
+		return tcp, true
+	}
+	type netConner interface {
+		NetConn() net.Conn
+	}
+	if nc, ok := c.(netConner); ok {
+		if inner := nc.NetConn(); inner != nil {
+			if tcp, ok := inner.(*net.TCPConn); ok {
+				return tcp, true
+			}
+		}
+	}
+	return nil, false
+}
+
 type Bridge struct {
 	TunnelPort     int //通信隧道端口
 	Client         sync.Map
@@ -408,8 +430,7 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 			c.Close()
 			return
 		}
-		tcpConn, ok := c.Conn.(*net.TCPConn)
-		if ok {
+		if tcpConn, ok := tcpConnOf(c.Conn); ok {
 			// add tcp keep alive option for signal connection
 			_ = tcpConn.SetKeepAlive(true)
 			_ = tcpConn.SetKeepAlivePeriod(5 * time.Second)
