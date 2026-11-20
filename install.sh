@@ -859,8 +859,24 @@ if [ "$OK" -eq 1 ]; then
         systemctl is-enabled --quiet natpunch-client 2>/dev/null && AUTOSTART=1
     fi
     if [ "$AUTOSTART" -eq 1 ]; then
-        echo "==> 安装成功 ✓ ${VER_OUT:-${VER:-最新版}}（已注册开机自启）"
-        exit 0
+        # 前台路径过去只看「进程活着 + 自启已注册」，而这两条在两种情况下都会假 OK：
+        #   - 崩溃循环（is-active / pgrep 照样是活的，见本文件 svc_steady 的注释）；
+        #   - 指纹写错：客户端每 5 秒重试一次，进程稳稳活着，但永远握不上手。
+        # 脱离脚本那条路径已经用 svc_connected（6 次采样 ≥4 次 ESTAB）收口，
+        # 这里复用同一个判据，避免"装好了"和"能连上"两件事被混为一谈。
+        if svc_connected; then
+            echo "==> 安装成功 ✓ ${VER_OUT:-${VER:-最新版}}（已注册开机自启，已连上服务端）"
+            exit 0
+        fi
+        echo "==> 已安装并启动，但【没有连上服务端】✗" >&2
+        echo "==> 进程在跑，却没有到桥接端口的 ESTABLISHED 连接。常见原因：" >&2
+        echo "      - -tls_fingerprint 与服务端桥接证书不匹配（握手失败会被客户端立刻关掉）" >&2
+        echo "      - vkey 不正确，或服务端已删除该 vkey" >&2
+        echo "      - 服务端桥接端口不可达（防火墙 / 端口未放行）" >&2
+        echo "    排查：" >&2
+        echo "      ss -tn 2>/dev/null | grep ESTAB | grep natpunch" >&2
+        echo "      logread 2>/dev/null | grep natpunch-client | tail -n 20" >&2
+        exit 4
     fi
     echo "==> 客户端已启动，但【开机自启未注册】✗" >&2
     echo "==> 现在能正常用，重启设备后不会自动拉起。请手动补上：" >&2
