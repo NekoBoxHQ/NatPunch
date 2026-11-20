@@ -1045,16 +1045,36 @@ get_web_port() {
     [ -n "${P:-}" ] && echo "$P" && return 0
     echo "8080"
 }
-# 面板访问地址：协议看 web_open_ssl；主机优先用 web_domain。
-# 客户端安装命令是按这个地址生成的，所以只要面板或客户端 TLS 任一配了域名就必须给域名，
-# 两边都没配才退回本机 IP。
+# 面板访问地址：协议看 web_open_ssl；主机只在**面板自身走 HTTPS** 时用域名。
+#
+# 明文面板（web_open_ssl=false，TLS 由外层反代终止）的域名通常解析到反代，
+# 直连 http://域名:端口 反而连不上 —— 这种场景给公网 IP:端口 才是可点的。
 panel_url() {
     _pu_port="$(get_web_port)"
     _pu_scheme="http"
     grep -q "^web_open_ssl=true" "$CONF" 2>/dev/null && _pu_scheme="https"
-    _pu_host="$(get_kv web_domain 2>/dev/null)"
-    [ -n "${_pu_host:-}" ] || _pu_host="$(get_ip)"
+    if [ "$_pu_scheme" = "https" ]; then
+        _pu_host="$(get_kv web_domain 2>/dev/null)"
+        [ -n "${_pu_host:-}" ] || _pu_host="$(get_ip)"
+    else
+        _pu_host="$(get_ip)"
+    fi
     printf '%s://%s:%s' "$_pu_scheme" "$_pu_host" "$_pu_port"
+}
+# 客户端连接地址：tls_enable=true 时用域名 + TLS 桥接端口（客户端需 -tls_enable=true），
+# 否则用公网 IP + 明文桥接端口。纯展示用，方便从面板/终端复制。
+client_url() {
+    _cu_tls="$(get_kv tls_enable 2>/dev/null)"
+    _cu_tls_port="$(get_kv tls_bridge_port 2>/dev/null)"
+    _cu_bridge="$(get_kv bridge_port 2>/dev/null)"
+    _cu_domain="$(get_kv web_domain 2>/dev/null)"
+    case "${_cu_bridge:-}" in ''|*[!0-9]*) _cu_bridge=8024 ;; esac
+    if [ "$_cu_tls" = "true" ] && [ -n "${_cu_tls_port:-}" ] && [ "$_cu_tls_port" != "0" ]; then
+        _cu_host="${_cu_domain:-$(get_ip)}"
+        printf 'https://%s:%s' "$_cu_host" "$_cu_tls_port"
+    else
+        printf 'http://%s:%s' "$(get_ip)" "$_cu_bridge"
+    fi
 }
 # ================= 菜单 =================
 show_menu() {
@@ -1092,13 +1112,21 @@ do_install() {
         else
             _new_scheme="http"
         fi
-        # 主机跟着「有没有配域名」走：面板/客户端 TLS 任一填了域名就用域名，
-        # 因为客户端的安装命令是拿这个地址生成的；两边都没有才用 IP。
-        _new_host="$NEW_DOMAIN"
-        [ -n "${_new_host:-}" ] || _new_host="$(get_ip)"
+        # 面板地址：只有面板自身 HTTPS 才用域名；明文面板给公网 IP（域名多半指向外层反代）
+        if [ "$NEW_PANEL_SSL" = "true" ]; then
+            _new_host="${NEW_DOMAIN:-$(get_ip)}"
+        else
+            _new_host="$(get_ip)"
+        fi
         kv "面板地址" "$_new_scheme://$_new_host:$NEW_PORT"
         kv "用户名" "$NEW_USER"
         kv "密码"   "$NEW_PASS"
+        # 客户端连接地址：TLS 开着才配域名（客户端用 -tls_enable=true 连 TLS 端口）
+        if [ "$NEW_HTTPS" = "true" ]; then
+            kv "客户端连接" "https://${NEW_DOMAIN:-$(get_ip)}:$NEW_TLS_PORT"
+        else
+            kv "客户端连接" "http://$(get_ip):$NEW_BRIDGE"
+        fi
         echo ""
     fi
 }
@@ -1118,7 +1146,16 @@ do_restart() {
         echo ""; kv "面板地址" "$(panel_url)"; echo ""
     fi
 }
-do_status() { title "运行状态"; status; echo ""; }
+do_status() {
+    title "运行状态"; status
+    # 顺手把两个连接地址打出来：面板（看 web_open_ssl 决定域名还是 IP）与客户端（看 tls_enable）
+    if [ -f "$CONF" ]; then
+        echo ""
+        kv "面板地址" "$(panel_url)"
+        kv "客户端连接" "$(client_url)"
+    fi
+    echo ""
+}
 do_passwd() {
     if [ ! -f "$CONF" ]; then die "NatPunch 未安装，找不到配置文件 $CONF"; fi
     title "NatPunch 配置"

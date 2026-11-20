@@ -171,6 +171,24 @@ echo "== 6. 备份清理（漏一类就无限累积；清错则毁掉可回滚�
 # 清理函数漏掉哪一类，哪一类就永远堆着（conf.bak.* 目录就是这么堆起来的）；
 # 而清错东西的后果更重 —— conf.bak.* 是升级唯一的 vkey 回滚点。
 SERVER_SRC="install_server.sh"
+# —— 安装摘要里的地址口径 ——
+# 面板是明文 HTTP（TLS 由外层反代终止）时，域名通常解析到反代，贴 http://域名:端口 点不开；
+# 这种场景必须回退到公网 IP。只有面板自身 HTTPS 才该用域名。
+if awk '/^panel_url\(\)/,/^}/' "$SERVER_SRC" | grep -q '_pu_host="$(get_ip)"'; then
+    ok "panel_url：明文面板回退公网 IP（域名指向反代时也能点开）"
+else
+    bad "panel_url：明文面板仍在用域名 —— 域名指向反代时点不开"
+fi
+if awk '/^client_url\(\)/,/^}/' "$SERVER_SRC" | grep -q 'https://%s:%s'; then
+    ok "client_url：TLS 桥接时输出 https://域名:端口"
+else
+    bad "client_url 没有 TLS 分支 —— 装了 TLS 也不知道客户端该连哪"
+fi
+if grep -q 'kv "客户端连接"' "$SERVER_SRC"; then
+    ok "安装摘要 / 状态输出带「客户端连接」地址"
+else
+    bad "安装摘要没有客户端连接地址 —— 看完不知道客户端连哪"
+fi
 cb="$(extract_fn clean_backups "$SERVER_SRC")"
 co="$(extract_fn cleanup_old_backups "$SERVER_SRC")"
 if [ -z "$cb" ]; then
